@@ -1,14 +1,16 @@
-import 'package:alhambra_workspace/alhambra_workspace.dart';
 import 'package:flutter/material.dart';
 import 'workspace_header.dart';
 import 'workspace_navigation.dart';
+import 'ui_workspace_status.dart';
 
-/// Complete workspace view container with header, extensible navigation tabs,
-/// and child body view.
+/// Generic workspace presentation shell.
+///
+/// The identifier is opaque so this widget does not depend on a particular
+/// workspace domain model or repository package.
 class WorkspaceShell extends StatelessWidget {
-  final WorkspaceId workspaceId;
+  final String workspaceId;
   final String title;
-  final WorkspaceStatus status;
+  final UiWorkspaceStatus status;
   final int version;
   final String? subtitle;
   final List<Widget>? headerActions;

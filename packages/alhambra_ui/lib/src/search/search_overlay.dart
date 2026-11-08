@@ -1,28 +1,28 @@
-import 'package:alhambra_services/alhambra_services.dart';
 import 'package:flutter/material.dart';
 import '../theme/spacing.dart';
 import 'search_field.dart';
 import 'search_results.dart';
+import 'ui_search_result.dart';
 
-/// Modal dialog / overlay for platform-wide search.
+/// Modal dialog / overlay for application-provided search.
 class SearchOverlay extends StatefulWidget {
-  final SearchService searchService;
-  final ValueChanged<SearchResult>? onResultSelected;
-  final SearchScope? scope;
+  final UiSearchHandler onSearch;
+  final ValueChanged<UiSearchResult>? onResultSelected;
+  final String? scopeId;
 
   const SearchOverlay({
     super.key,
-    required this.searchService,
+    required this.onSearch,
     this.onResultSelected,
-    this.scope,
+    this.scopeId,
   });
 
-  static Future<SearchResult?> show(
+  static Future<UiSearchResult?> show(
     BuildContext context, {
-    required SearchService searchService,
-    SearchScope? scope,
+    required UiSearchHandler onSearch,
+    String? scopeId,
   }) {
-    return showDialog<SearchResult>(
+    return showDialog<UiSearchResult>(
       context: context,
       builder: (context) => Dialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
@@ -30,8 +30,8 @@ class SearchOverlay extends StatefulWidget {
           width: 600,
           height: 480,
           child: SearchOverlay(
-            searchService: searchService,
-            scope: scope,
+            onSearch: onSearch,
+            scopeId: scopeId,
             onResultSelected: (result) => Navigator.of(context).pop(result),
           ),
         ),
@@ -44,30 +44,40 @@ class SearchOverlay extends StatefulWidget {
 }
 
 class _SearchOverlayState extends State<SearchOverlay> {
-  List<SearchResult> _results = [];
+  List<UiSearchResult> _results = [];
   bool _isLoading = false;
+  String? _errorMessage;
+  int _requestGeneration = 0;
 
   Future<void> _performSearch(String query) async {
+    final generation = ++_requestGeneration;
     if (query.trim().isEmpty) {
       setState(() {
         _results = [];
         _isLoading = false;
+        _errorMessage = null;
       });
       return;
     }
 
-    setState(() => _isLoading = true);
-    final response = await widget.searchService.search(
-      SearchQuery(
-        text: query,
-        scope: widget.scope,
-      ),
-    );
-
-    if (mounted) {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      final results = await widget.onSearch(query, scopeId: widget.scopeId);
+      if (!mounted || generation != _requestGeneration) return;
       setState(() {
-        _results = response.results;
+        _results = results;
         _isLoading = false;
+        _errorMessage = null;
+      });
+    } catch (_) {
+      if (!mounted || generation != _requestGeneration) return;
+      setState(() {
+        _results = [];
+        _isLoading = false;
+        _errorMessage = 'Please try again in a moment.';
       });
     }
   }
@@ -87,6 +97,7 @@ class _SearchOverlayState extends State<SearchOverlay> {
             child: SearchResultsView(
               results: _results,
               isLoading: _isLoading,
+              errorMessage: _errorMessage,
               onResultSelected: widget.onResultSelected,
             ),
           ),

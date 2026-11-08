@@ -1,24 +1,34 @@
-import 'package:alhambra_services/alhambra_services.dart';
 import 'package:flutter/material.dart';
 import '../states/empty_state.dart';
+import '../states/error_state.dart';
+import 'ui_search_result.dart';
 
-/// Renders a list of generic [SearchResult]s.
+/// Renders a list of application-provided [UiSearchResult] values.
 class SearchResultsView extends StatelessWidget {
-  final List<SearchResult> results;
-  final ValueChanged<SearchResult>? onResultSelected;
+  final List<UiSearchResult> results;
+  final ValueChanged<UiSearchResult>? onResultSelected;
   final bool isLoading;
+  final String? errorMessage;
 
   const SearchResultsView({
     super.key,
     required this.results,
     this.onResultSelected,
     this.isLoading = false,
+    this.errorMessage,
   });
 
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
       return const Center(child: CircularProgressIndicator());
+    }
+
+    if (errorMessage != null) {
+      return ErrorState(
+        title: 'Search unavailable',
+        message: errorMessage,
+      );
     }
 
     if (results.isEmpty) {

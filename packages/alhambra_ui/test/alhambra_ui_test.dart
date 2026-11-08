@@ -1,6 +1,4 @@
-import 'package:alhambra_services/alhambra_services.dart';
 import 'package:alhambra_ui/alhambra_ui.dart';
-import 'package:alhambra_workspace/alhambra_workspace.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -332,7 +330,7 @@ void main() {
           home: Scaffold(
             body: WorkspaceHeader(
               title: 'Fiscal Policy Outlook',
-              status: WorkspaceStatus.review,
+              status: UiWorkspaceStatus.review,
               version: 3,
             ),
           ),
@@ -379,9 +377,9 @@ void main() {
         const MaterialApp(
           home: Scaffold(
             body: WorkspaceShell(
-              workspaceId: WorkspaceId('ws-test'),
+              workspaceId: 'ws-test',
               title: 'Regional Economic Model',
-              status: WorkspaceStatus.published,
+              status: UiWorkspaceStatus.published,
               version: 1,
               navigationItems: [
                 WorkspaceNavigationItem(id: 'data', label: 'Data Sources'),
@@ -532,9 +530,61 @@ void main() {
       expect(tapped, isTrue);
     });
 
+
+    testWidgets('SearchOverlay delegates to the host search callback', (tester) async {
+      var receivedQuery = '';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SearchOverlay(
+              onSearch: (query, {scopeId}) async {
+                receivedQuery = query;
+                return const [
+                  UiSearchResult(
+                    resourceId: 'doc-1',
+                    resourceType: 'document',
+                    title: 'Quarterly Report',
+                  ),
+                ];
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(find.byType(TextField), 'quarterly');
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(receivedQuery, 'quarterly');
+      expect(find.text('Quarterly Report'), findsOneWidget);
+    });
+
+    testWidgets('SearchOverlay displays a distinct error state', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SearchOverlay(
+              onSearch: (query, {scopeId}) async {
+                throw StateError('backend unavailable');
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(find.byType(TextField), 'quarterly');
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Search unavailable'), findsOneWidget);
+      expect(find.text('Please try again in a moment.'), findsOneWidget);
+      expect(find.text('No results found'), findsNothing);
+    });
+
     testWidgets('SearchResultsView displays search matches', (tester) async {
       const results = [
-        SearchResult(
+        UiSearchResult(
           resourceType: 'workspace',
           resourceId: 'ws-1',
           title: 'Macroeconomic Survey',
