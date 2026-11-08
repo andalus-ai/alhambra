@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 
@@ -59,4 +60,34 @@ void main() {
     expect(updated.capabilities, {'ui.shell', 'ui.navigation'});
     expect(updated.layoutHints, {'adaptive'});
   });
+  test('layout metadata exposes profile compatibility and preference score', () {
+    const profile = ApplicationProfile(
+      applicationId: 'com.example.dashboard',
+      capabilities: {'ui.shell', 'ui.navigation', 'data.visualization'},
+      layoutHints: {'dashboard', 'dense-grid'},
+    );
+    const metadata = LayoutPluginMetadata(
+      id: 'com.example.layout.analytics',
+      name: 'Analytics',
+      description: 'Data dashboard layout',
+      icon: Icons.dashboard,
+      profileRequirements: LayoutProfileRequirements(
+        requiredCapabilities: {'ui.shell', 'data.visualization'},
+        preferredHints: {'dashboard', 'dense-grid'},
+      ),
+    );
+
+    expect(metadata.isCompatibleWith(profile), isTrue);
+    expect(metadata.preferenceScore(profile), 2);
+    expect(
+      metadata.isCompatibleWith(
+        const ApplicationProfile(
+          applicationId: 'com.example.mobile',
+          capabilities: {'ui.shell', 'ui.navigation'},
+        ),
+      ),
+      isFalse,
+    );
+  });
+
 }
