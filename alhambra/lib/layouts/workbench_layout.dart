@@ -15,7 +15,7 @@ import '../widgets/workbench/slots/side_pane_slot.dart';
 /// workbench model.
 ///
 /// Best for: complex desktop workspaces, admin consoles, and multi-panel tools.
-class WorkbenchLayout extends LayoutPlugin {
+class WorkbenchLayout extends LayoutPlugin implements ProfileAwareLayoutPlugin {
   static const String id = 'alhambra.layout.workbench';
 
   const WorkbenchLayout();
@@ -102,6 +102,19 @@ class WorkbenchLayout extends LayoutPlugin {
       ScreenClass.small => _SmallWorkbench(slots: slots),
     };
   }
+  @override
+  Widget buildForProfile(
+    BuildContext context, {
+    required ScreenClass screenClass,
+    required ApplicationProfile applicationProfile,
+    required LayoutSlotConfig slots,
+  }) =>
+      build(
+        context,
+        screenClass: screenClass,
+        appKind: AppKind.custom,
+        slots: slots,
+      );
 }
 
 /// Drawer-based workbench for small screens.
