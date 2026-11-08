@@ -7,14 +7,14 @@ import '../widgets/workbench/slots/main_pane_slot.dart';
 import '../widgets/workbench/slots/secondary_pane_slot.dart';
 import '../widgets/workbench/slots/side_pane_slot.dart';
 
-/// Full IDE-style workbench layout.
+/// General-purpose multi-pane workspace layout.
 ///
 /// Renders a four-column shell on **large** screens, a three-column shell on
 /// **medium** screens (secondary panel hidden), and a single-column + drawer
 /// approach on **small** screens — matching the classic VS Code / JetBrains
 /// workbench model.
 ///
-/// Best for: IDE apps, code editors, coding-agent desktops.
+/// Best for: complex desktop workspaces, admin consoles, and multi-panel tools.
 class WorkbenchLayout extends LayoutPlugin {
   static const String id = 'alhambra.layout.workbench';
 
@@ -23,13 +23,13 @@ class WorkbenchLayout extends LayoutPlugin {
   @override
   LayoutPluginMetadata get metadata => const LayoutPluginMetadata(
         id: id,
-        name: 'Workbench',
+        name: 'Workspace Workbench',
         description:
-            'Classic multi-pane IDE shell: activity bar, sidebar, editor '
-            'area, bottom panel, secondary panel.',
+            'General-purpose multi-pane shell with navigation, primary content, '
+            'and optional auxiliary panels.',
         icon: Icons.developer_mode,
-        tags: ['ide', 'desktop', 'workbench'],
-        suitableFor: {AppKind.ide, AppKind.desktop, AppKind.codingAgent},
+        tags: ['workspace', 'desktop', 'multi-pane'],
+        suitableFor: {AppKind.custom},
         profileRequirements: LayoutProfileRequirements(
           requiredCapabilities: {'ui.shell', 'ui.navigation', 'ui.multi-pane'},
           preferredHints: {'workbench', 'multi-pane'},
