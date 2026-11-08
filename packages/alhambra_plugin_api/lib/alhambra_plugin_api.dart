@@ -75,6 +75,7 @@ export 'plugin_api/ui_contributions/ui_contribution_contracts.dart';
 export 'plugin_api/transaction/transaction_contracts.dart';
 export 'plugin_api/layout/declarative_layout_contracts.dart';
 export 'plugin_api/layout/layout_plugin_contracts.dart';
+export 'plugin_api/layout/application_profile.dart';
 
 // UI State Projection, Packaging, Discovery & Service Graph (UI 19-22)
 export 'plugin_api/projection/projection_contracts.dart';
