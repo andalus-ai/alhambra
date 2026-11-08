@@ -34,6 +34,10 @@ class DashboardLayout extends LayoutPlugin {
         icon: Icons.dashboard_outlined,
         tags: ['dashboard', 'analytics', 'admin', 'data'],
         suitableFor: {AppKind.dashboard, AppKind.desktop},
+        profileRequirements: LayoutProfileRequirements(
+          requiredCapabilities: {'ui.shell', 'ui.navigation', 'data.visualization'},
+          preferredHints: {'dashboard', 'dense-grid'},
+        ),
       );
 
   @override
