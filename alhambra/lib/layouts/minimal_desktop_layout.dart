@@ -12,7 +12,7 @@ import '../theme/app_colors.dart';
 /// max width (adjusted per tier).
 ///
 /// Best for: preferences windows, about screens, wizard-style flows.
-class MinimalDesktopLayout extends LayoutPlugin {
+class MinimalDesktopLayout extends LayoutPlugin implements ProfileAwareLayoutPlugin {
   static const String id = 'alhambra.layout.minimal_desktop';
 
   const MinimalDesktopLayout();
@@ -61,4 +61,17 @@ class MinimalDesktopLayout extends LayoutPlugin {
       ),
     );
   }
+  @override
+  Widget buildForProfile(
+    BuildContext context, {
+    required ScreenClass screenClass,
+    required ApplicationProfile applicationProfile,
+    required LayoutSlotConfig slots,
+  }) =>
+      build(
+        context,
+        screenClass: screenClass,
+        appKind: AppKind.custom,
+        slots: slots,
+      );
 }
