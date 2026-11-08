@@ -13,12 +13,6 @@ dependencies:
   meta: ^1.11.0
   alhambra_core:
     path: ../alhambra_core
-  alhambra_identity:
-    path: ../alhambra_identity
-  alhambra_workspace:
-    path: ../alhambra_workspace
-  alhambra_services:
-    path: ../alhambra_services
 
 dev_dependencies:
   flutter_test:
