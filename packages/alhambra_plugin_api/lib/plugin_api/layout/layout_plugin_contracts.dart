@@ -35,7 +35,6 @@ enum ScreenClass {
 /// [LayoutPlugin] implementations receive this as a hint so that a single
 /// plugin can adjust its behaviour (e.g. hiding a terminal pane in a
 /// dashboard app).
-@Deprecated('Use ApplicationProfile and LayoutProfileRequirements.')
 enum AppKind {
   /// Classic multi-pane IDE / code-editor shell.
   ide,
@@ -191,7 +190,9 @@ abstract class LayoutPlugin {
   /// Metadata exposed in the layout registry / picker.
   LayoutPluginMetadata get metadata;
 
-  /// Builds the root widget for the given [screenClass] and [appKind].
+  /// Legacy build entry point for layouts that still use [AppKind].
+  ///
+  /// New layouts should implement [ProfileAwareLayoutPlugin] instead.
   ///
   /// * [screenClass] — the current viewport tier (small/medium/large).
   /// * [appKind] — the semantic application category provided by the host app.
