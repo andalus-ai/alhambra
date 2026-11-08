@@ -23,14 +23,13 @@ final layoutPluginRegistryProvider = Provider<LayoutPluginRegistry>((ref) {
     ..register(const MobileLayout())
     ..register(const DashboardLayout())
     ..register(const MinimalDesktopLayout());
-  registry.activate(MobileLayout.id);
   return registry;
 });
 
 final activeLayoutPluginProvider = Provider<LayoutPlugin>((ref) {
   final profile = ref.watch(applicationProfileProvider);
   final registry = ref.watch(layoutPluginRegistryProvider);
-  final active = registry.active;
+  final active = registry.explicitlyActive;
 
   // Preserve an explicitly selected layout when it supports the host profile.
   if (active != null && active.metadata.isCompatibleWith(profile)) {
@@ -40,10 +39,7 @@ final activeLayoutPluginProvider = Provider<LayoutPlugin>((ref) {
   // Otherwise choose the highest-ranked compatible compiled contribution.
   final compatible = registry.all
       .where((layout) => layout.metadata.isCompatibleWith(profile))
-      .toList()
-    ..sort((a, b) => b.metadata
-        .preferenceScore(profile)
-        .compareTo(a.metadata.preferenceScore(profile)));
+      .toList();
 
   if (compatible.isEmpty) {
     throw StateError(
@@ -52,7 +48,18 @@ final activeLayoutPluginProvider = Provider<LayoutPlugin>((ref) {
       'capabilities are provided by the application.',
     );
   }
-  return compatible.first;
+
+  // Preserve registration order for ties so automatic selection is stable.
+  var selected = compatible.first;
+  var selectedScore = selected.metadata.preferenceScore(profile);
+  for (final candidate in compatible.skip(1)) {
+    final score = candidate.metadata.preferenceScore(profile);
+    if (score > selectedScore) {
+      selected = candidate;
+      selectedScore = score;
+    }
+  }
+  return selected;
 });
 
 /// Legacy closed-category hint retained for existing layout implementations.
