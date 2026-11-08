@@ -1,6 +1,4 @@
-import 'package:alhambra_services/alhambra_services.dart';
 import 'package:alhambra_ui/alhambra_ui.dart';
-import 'package:alhambra_workspace/alhambra_workspace.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -530,6 +528,58 @@ void main() {
       expect(find.text('4'), findsOneWidget);
       await tester.tap(find.byType(NotificationBell));
       expect(tapped, isTrue);
+    });
+
+
+    testWidgets('SearchOverlay delegates to the host search callback', (tester) async {
+      var receivedQuery = '';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SearchOverlay(
+              onSearch: (query, {scopeId}) async {
+                receivedQuery = query;
+                return const [
+                  UiSearchResult(
+                    resourceId: 'doc-1',
+                    resourceType: 'document',
+                    title: 'Quarterly Report',
+                  ),
+                ];
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(find.byType(TextField), 'quarterly');
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(receivedQuery, 'quarterly');
+      expect(find.text('Quarterly Report'), findsOneWidget);
+    });
+
+    testWidgets('SearchOverlay displays a distinct error state', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SearchOverlay(
+              onSearch: (query, {scopeId}) async {
+                throw StateError('backend unavailable');
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(find.byType(TextField), 'quarterly');
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Search unavailable'), findsOneWidget);
+      expect(find.text('Please try again in a moment.'), findsOneWidget);
+      expect(find.text('No results found'), findsNothing);
     });
 
     testWidgets('SearchResultsView displays search matches', (tester) async {
