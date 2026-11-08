@@ -242,7 +242,18 @@ class LayoutPluginRegistry {
   Iterable<LayoutPluginMetadata> get allMetadata =>
       _plugins.values.map((p) => p.metadata);
 
+  /// The explicitly selected layout, or `null` when selection is automatic.
+  ///
+  /// Prefer this property when a host needs to distinguish a user's explicit
+  /// choice from the registry's legacy first-registered fallback.
+  LayoutPlugin? get explicitlyActive =>
+      _activeId != null ? _plugins[_activeId] : null;
+
   /// The currently active layout plugin.
+  ///
+  /// Retains the legacy first-registered fallback when no explicit selection
+  /// exists. New hosts should use [explicitlyActive] and perform profile-aware
+  /// selection when this returns `null`.
   LayoutPlugin? get active =>
       _activeId != null ? _plugins[_activeId] : _plugins.values.firstOrNull;
 
