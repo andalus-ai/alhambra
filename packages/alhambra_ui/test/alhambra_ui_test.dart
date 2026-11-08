@@ -332,7 +332,7 @@ void main() {
           home: Scaffold(
             body: WorkspaceHeader(
               title: 'Fiscal Policy Outlook',
-              status: WorkspaceStatus.review,
+              status: UiWorkspaceStatus.review,
               version: 3,
             ),
           ),
@@ -379,9 +379,9 @@ void main() {
         const MaterialApp(
           home: Scaffold(
             body: WorkspaceShell(
-              workspaceId: WorkspaceId('ws-test'),
+              workspaceId: 'ws-test',
               title: 'Regional Economic Model',
-              status: WorkspaceStatus.published,
+              status: UiWorkspaceStatus.published,
               version: 1,
               navigationItems: [
                 WorkspaceNavigationItem(id: 'data', label: 'Data Sources'),
@@ -534,7 +534,7 @@ void main() {
 
     testWidgets('SearchResultsView displays search matches', (tester) async {
       const results = [
-        SearchResult(
+        UiSearchResult(
           resourceType: 'workspace',
           resourceId: 'ws-1',
           title: 'Macroeconomic Survey',
