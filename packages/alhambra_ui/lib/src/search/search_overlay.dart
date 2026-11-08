@@ -46,6 +46,7 @@ class SearchOverlay extends StatefulWidget {
 class _SearchOverlayState extends State<SearchOverlay> {
   List<UiSearchResult> _results = [];
   bool _isLoading = false;
+  String? _errorMessage;
   int _requestGeneration = 0;
 
   Future<void> _performSearch(String query) async {
@@ -54,17 +55,23 @@ class _SearchOverlayState extends State<SearchOverlay> {
       setState(() {
         _results = [];
         _isLoading = false;
+        _errorMessage = 'Please try again in a moment.';
+        _errorMessage = null;
       });
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     try {
       final results = await widget.onSearch(query, scopeId: widget.scopeId);
       if (!mounted || generation != _requestGeneration) return;
       setState(() {
         _results = results;
         _isLoading = false;
+        _errorMessage = null;
       });
     } catch (_) {
       if (!mounted || generation != _requestGeneration) return;
@@ -90,6 +97,7 @@ class _SearchOverlayState extends State<SearchOverlay> {
             child: SearchResultsView(
               results: _results,
               isLoading: _isLoading,
+              errorMessage: _errorMessage,
               onResultSelected: widget.onResultSelected,
             ),
           ),
