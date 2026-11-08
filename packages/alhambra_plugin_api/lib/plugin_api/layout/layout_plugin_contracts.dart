@@ -35,6 +35,7 @@ enum ScreenClass {
 /// [LayoutPlugin] implementations receive this as a hint so that a single
 /// plugin can adjust its behaviour (e.g. hiding a terminal pane in a
 /// dashboard app).
+@Deprecated('Use ApplicationProfile and LayoutProfileRequirements.')
 enum AppKind {
   /// Classic multi-pane IDE / code-editor shell.
   ide,
@@ -201,7 +202,11 @@ abstract class LayoutPlugin {
     required ScreenClass screenClass,
     required AppKind appKind,
     required LayoutSlotConfig slots,
-  });
+  }) {
+    throw UnsupportedError(
+      'A layout must implement build or ProfileAwareLayoutPlugin.buildForProfile.',
+    );
+  }
 
   /// Called when the plugin is registered. May be overridden for one-time
   /// initialization (e.g. registering commands).
@@ -209,6 +214,20 @@ abstract class LayoutPlugin {
 
   /// Called when the plugin is unregistered / disposed.
   void onUnregistered() {}
+}
+
+/// Optional open-profile build contract for new layout implementations.
+///
+/// Legacy [LayoutPlugin] implementations may continue overriding [LayoutPlugin.build].
+/// New layouts can implement this interface and receive the full host profile
+/// without depending on the closed [AppKind] taxonomy.
+abstract interface class ProfileAwareLayoutPlugin {
+  Widget buildForProfile(
+    BuildContext context, {
+    required ScreenClass screenClass,
+    required ApplicationProfile applicationProfile,
+    required LayoutSlotConfig slots,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
