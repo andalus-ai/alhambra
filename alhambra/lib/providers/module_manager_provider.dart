@@ -23,6 +23,7 @@ final pluginManagerProvider = Provider<PluginManager>((ref) {
   BuiltInPluginLoader(
     pluginManager: manager,
     platformPlugins: AlhambraCommunityPluginBundle.createPlatformPlugins(),
+    domainPluginPacks: ref.watch(injectedDomainPluginPacksProvider),
     onPluginError: (plugin, error, stackTrace) {
       developer.log(
         'Failed to activate plugin ${plugin.metadata.id}',
@@ -33,6 +34,14 @@ final pluginManagerProvider = Provider<PluginManager>((ref) {
     },
   ).loadAll();
   return manager;
+});
+
+/// Optional domain contributions supplied by an embedding application.
+///
+/// These are distinct from edition-gated Pro plugins. Community adopters may
+/// override this provider to compose Wayang, Cifr, or another product pack.
+final injectedDomainPluginPacksProvider = Provider<List<AlhambraPlugin>>((ref) {
+  return const [];
 });
 
 final injectedProPluginsProvider = Provider<List<AlhambraPlugin>>((ref) {
