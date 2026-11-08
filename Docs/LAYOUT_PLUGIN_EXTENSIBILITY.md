@@ -35,10 +35,12 @@ const LayoutProfileRequirements(
 
 A layout is compatible only when all required capabilities are present.
 Preferred hints are advisory and may rank compatible layouts; they are not
-security or authorization checks. The layout host preserves the explicitly
-active layout while it remains compatible. If it becomes incompatible, the
-host selects the highest-scoring compatible registered layout and reports a
-clear configuration error when no compatible layout exists.
+security or authorization checks. The layout host preserves an explicitly selected layout while it remains
+compatible. When no explicit selection exists, it automatically chooses the
+highest-scoring compatible layout. If an explicit selection becomes
+incompatible, the host falls back to the highest-scoring compatible layout
+and reports a clear configuration error when no compatible layout exists.
+Registration order is the deterministic tie-breaker for equal preference scores.
 
 ## Registration and tree shaking
 
