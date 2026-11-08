@@ -35,12 +35,16 @@ const LayoutProfileRequirements(
 
 A layout is compatible only when all required capabilities are present.
 Preferred hints are advisory and may rank compatible layouts; they are not
-security or authorization checks.
+security or authorization checks. The layout host preserves the explicitly
+active layout while it remains compatible. If it becomes incompatible, the
+host selects the highest-scoring compatible registered layout and reports a
+clear configuration error when no compatible layout exists.
 
 ## Registration and tree shaking
 
 The default host registers only broadly reusable layouts: mobile/adaptive
-navigation, dashboard composition, and minimal content. Workbench and
+navigation, dashboard composition, and minimal content. Each built-in layout
+declares its required capabilities and preferred hints. Workbench and
 product-specific layouts are opt-in. An adopter imports and registers only
 the layout bundle it needs:
 
