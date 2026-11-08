@@ -51,8 +51,8 @@ final class WorkspaceContext {
 /// Matches the P3 workspace state machine:
 /// DRAFT → REVIEW → APPROVED → PUBLISHED → SUPERSEDED → ARCHIVED
 ///
-/// Named [WorkspaceLifecycleStatus] to avoid conflict with
-/// `alhambra_workspace`'s `WorkspaceStatus` enum.
+/// Named [WorkspaceLifecycleStatus] to avoid conflicts with lifecycle enums
+/// owned by individual application domains.
 abstract final class WorkspaceLifecycleStatus {
   static const String draft = 'DRAFT';
   static const String review = 'REVIEW';
