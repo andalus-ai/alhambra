@@ -28,11 +28,31 @@ final layoutPluginRegistryProvider = Provider<LayoutPluginRegistry>((ref) {
 });
 
 final activeLayoutPluginProvider = Provider<LayoutPlugin>((ref) {
-  final active = ref.watch(layoutPluginRegistryProvider).active;
-  if (active == null) {
-    throw StateError('No layout plugin is registered. Register at least one layout before building LayoutPluginHost.');
+  final profile = ref.watch(applicationProfileProvider);
+  final registry = ref.watch(layoutPluginRegistryProvider);
+  final active = registry.active;
+
+  // Preserve an explicitly selected layout when it supports the host profile.
+  if (active != null && active.metadata.isCompatibleWith(profile)) {
+    return active;
   }
-  return active;
+
+  // Otherwise choose the highest-ranked compatible compiled contribution.
+  final compatible = registry.all
+      .where((layout) => layout.metadata.isCompatibleWith(profile))
+      .toList()
+    ..sort((a, b) => b.metadata
+        .preferenceScore(profile)
+        .compareTo(a.metadata.preferenceScore(profile)));
+
+  if (compatible.isEmpty) {
+    throw StateError(
+      'No registered layout is compatible with application '
+      '${profile.applicationId}. Register a layout whose required '
+      'capabilities are provided by the application.',
+    );
+  }
+  return compatible.first;
 });
 
 /// Legacy closed-category hint retained for existing layout implementations.
@@ -51,9 +71,8 @@ class LayoutPluginHost extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final plugin = ref.watch(activeLayoutPluginProvider);
-    // Establish the open profile as part of the host contract; subsequent
-    // layout API revisions will pass it directly to layout implementations.
-    ref.watch(applicationProfileProvider);
+    // Layout selection is capability-aware; legacy AppKind remains only
+    // because LayoutPlugin.build has not completed its migration yet.
     final appKind = ref.watch(appKindProvider);
     final slotConfig = ref.watch(layoutSlotConfigProvider);
 

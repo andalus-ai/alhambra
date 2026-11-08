@@ -30,6 +30,10 @@ class WorkbenchLayout extends LayoutPlugin {
         icon: Icons.developer_mode,
         tags: ['ide', 'desktop', 'workbench'],
         suitableFor: {AppKind.ide, AppKind.desktop, AppKind.codingAgent},
+        profileRequirements: LayoutProfileRequirements(
+          requiredCapabilities: {'ui.shell', 'ui.navigation', 'ui.multi-pane'},
+          preferredHints: {'workbench', 'multi-pane'},
+        ),
       );
 
   @override

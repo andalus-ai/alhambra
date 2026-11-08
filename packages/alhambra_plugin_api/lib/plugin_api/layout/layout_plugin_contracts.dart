@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'application_profile.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Screen classification
@@ -77,8 +78,20 @@ class LayoutPluginMetadata {
   /// Optional tags for filtering, e.g. `['ide', 'desktop']`.
   final List<String> tags;
 
-  /// The [AppKind]s this layout is optimised for.
+  /// Legacy application categories. Prefer [profileRequirements].
+  @Deprecated('Use profileRequirements for new layout integrations.')
   final Set<AppKind> suitableFor;
+
+  /// Open capability requirements and preference hints for host applications.
+  final LayoutProfileRequirements profileRequirements;
+
+  /// Whether this layout can run in the supplied host application profile.
+  bool isCompatibleWith(ApplicationProfile profile) =>
+      profileRequirements.isCompatibleWith(profile);
+
+  /// Preference score used to rank compatible layouts for a host profile.
+  int preferenceScore(ApplicationProfile profile) =>
+      profileRequirements.preferenceScore(profile);
 
   const LayoutPluginMetadata({
     required this.id,
@@ -87,6 +100,7 @@ class LayoutPluginMetadata {
     required this.icon,
     this.tags = const [],
     this.suitableFor = const {AppKind.custom},
+    this.profileRequirements = const LayoutProfileRequirements(),
   });
 }
 

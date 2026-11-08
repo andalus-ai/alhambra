@@ -27,6 +27,10 @@ class MinimalDesktopLayout extends LayoutPlugin {
         icon: Icons.view_stream_outlined,
         tags: ['desktop', 'minimal', 'utility'],
         suitableFor: {AppKind.desktop},
+        profileRequirements: LayoutProfileRequirements(
+          requiredCapabilities: {'ui.shell'},
+          preferredHints: {'minimal', 'single-column'},
+        ),
       );
 
   @override
