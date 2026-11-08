@@ -10,7 +10,7 @@ import '../../plugins/settings/settings_plugin.dart';
 /// The default composition chosen by the standalone Alhambra Community app.
 ///
 /// Other applications should construct their own plugin list and pass it to
-/// [BuiltInPluginLoader]. Keeping this composition in the app layer means the
+/// the generic plugin loader. Keeping this composition in the app layer means the
 /// generic loader does not pull these implementations into every adopter.
 abstract final class AlhambraCommunityPluginBundle {
   static List<AlhambraPlugin> createPlatformPlugins() => [
