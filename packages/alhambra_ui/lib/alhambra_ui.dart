@@ -48,6 +48,7 @@ export 'src/workspace/workspace_header.dart';
 export 'src/workspace/workspace_navigation.dart';
 export 'src/workspace/workspace_shell.dart';
 export 'src/workspace/workspace_context.dart';
+export 'src/workspace/ui_workspace_status.dart';
 
 // P13: View State (4-dimension model)
 export 'src/view_state/view_state.dart';
@@ -73,6 +74,7 @@ export 'src/feedback/progress.dart';
 // Search
 export 'src/search/search_field.dart';
 export 'src/search/search_results.dart';
+export 'src/search/ui_search_result.dart';
 export 'src/search/search_overlay.dart';
 
 // Components
