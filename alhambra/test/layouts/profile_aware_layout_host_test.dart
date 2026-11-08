@@ -28,6 +28,54 @@ void main() {
 
     expect(find.text('com.example.wayang'), findsOneWidget);
   });
+
+  testWidgets('LayoutPluginHost retains the legacy AppKind build adapter', (tester) async {
+    final registry = LayoutPluginRegistry()
+      ..register(const _LegacyLayout());
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          applicationProfileProvider.overrideWith(
+            (ref) => const ApplicationProfile(
+              applicationId: 'com.example.legacy',
+              capabilities: {'ui.shell'},
+            ),
+          ),
+          layoutPluginRegistryProvider.overrideWith((ref) => registry),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(body: LayoutPluginHost()),
+        ),
+      ),
+    );
+
+    expect(find.text(AppKind.custom.name), findsOneWidget);
+  });
+
+}
+
+final class _LegacyLayout extends LayoutPlugin {
+  const _LegacyLayout();
+
+  @override
+  LayoutPluginMetadata get metadata => const LayoutPluginMetadata(
+        id: 'test.legacy',
+        name: 'Legacy test layout',
+        description: 'Test legacy AppKind adapter.',
+        icon: Icons.dashboard,
+        profileRequirements: LayoutProfileRequirements(
+          requiredCapabilities: {'ui.shell'},
+        ),
+      );
+
+  @override
+  Widget build(
+    BuildContext context, {
+    required ScreenClass screenClass,
+    required AppKind appKind,
+    required LayoutSlotConfig slots,
+  }) => Text(appKind.name);
 }
 
 final class _ProfileAwareLayout extends LayoutPlugin
