@@ -71,8 +71,8 @@ class LayoutPluginHost extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final plugin = ref.watch(activeLayoutPluginProvider);
-    // Layout selection is capability-aware; legacy AppKind remains only
-    // because LayoutPlugin.build has not completed its migration yet.
+    final applicationProfile = ref.watch(applicationProfileProvider);
+    // Retained only for legacy LayoutPlugin implementations.
     final appKind = ref.watch(appKindProvider);
     final slotConfig = ref.watch(layoutSlotConfigProvider);
 
@@ -81,12 +81,19 @@ class LayoutPluginHost extends ConsumerWidget {
         final screenClass = PlatformBreakpoints.classFor(constraints.maxWidth);
         return PlatformScreenClass(
           screenClass: screenClass,
-          child: plugin.build(
-            context,
-            screenClass: screenClass,
-            appKind: appKind,
-            slots: slotConfig,
-          ),
+          child: plugin is ProfileAwareLayoutPlugin
+              ? plugin.buildForProfile(
+                  context,
+                  screenClass: screenClass,
+                  applicationProfile: applicationProfile,
+                  slots: slotConfig,
+                )
+              : plugin.build(
+                  context,
+                  screenClass: screenClass,
+                  appKind: appKind,
+                  slots: slotConfig,
+                ),
         );
       },
     );
