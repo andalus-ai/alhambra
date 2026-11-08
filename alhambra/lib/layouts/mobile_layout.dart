@@ -37,6 +37,10 @@ class MobileLayout extends LayoutPlugin {
         icon: Icons.phone_android_outlined,
         tags: ['mobile', 'app', 'bottom-nav', 'pwa'],
         suitableFor: {AppKind.mobile},
+        profileRequirements: LayoutProfileRequirements(
+          requiredCapabilities: {'ui.shell', 'ui.navigation'},
+          preferredHints: {'mobile-first', 'bottom-navigation'},
+        ),
       );
 
   @override
