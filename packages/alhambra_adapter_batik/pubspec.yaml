@@ -1,0 +1,30 @@
+name: alhambra_adapter_batik
+description: >
+  Alhambra adapter for Batik — bridges Alhambra's A2UI (UiSurface / UiNode)
+  with Batik's AgentUIResponse / UINode schema and ActionDispatcher.
+
+  Responsibilities:
+    • A2UiToBatikConverter  — UiSurface → AgentUIResponse (for Batik renderer)
+    • BatikToA2UiConverter  — AgentUIResponse → UiSurface (Batik → Alhambra)
+    • AlhambraActionHandler — Batik ActionHandler routing to UiAction callbacks
+    • BatikSurfaceView      — Flutter widget wiring Batik renderer + Alhambra guard
+
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  alhambra_ui:
+    path: ../alhambra_ui
+  batik:
+    path: ../../../../../Tools/Batik/batik_plugin
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^3.0.0

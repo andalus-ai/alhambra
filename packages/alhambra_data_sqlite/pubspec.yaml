@@ -1,0 +1,19 @@
+name: alhambra_data_sqlite
+description: >
+  SQLite (sqlite3) implementation of alhambra_data Database, OfflineQueue,
+  LocalStore and LocalRecordStore contracts. Pure Dart — works on macOS,
+  Linux, Windows, and server environments without Flutter.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  alhambra_data:
+    path: ../alhambra_data
+  sqlite3: ^2.4.0
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^3.0.0

@@ -1,0 +1,24 @@
+name: alhambra_api
+description: Canonical API contracts, DTO envelopes, client abstractions, and resource endpoints for the Alhambra Platform.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  meta: ^1.11.0
+  alhambra_core:
+    path: ../alhambra_core
+  alhambra_identity:
+    path: ../alhambra_identity
+  alhambra_workspace:
+    path: ../alhambra_workspace
+  alhambra_intelligence:
+    path: ../alhambra_intelligence
+  alhambra_network:
+    path: ../alhambra_network
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^3.0.0

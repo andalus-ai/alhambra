@@ -1,0 +1,20 @@
+name: alhambra_data_secure
+description: flutter_secure_storage implementation of alhambra_data SecureStore contract.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  alhambra_data:
+    path: ../alhambra_data
+  flutter_secure_storage: ^9.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^3.0.0

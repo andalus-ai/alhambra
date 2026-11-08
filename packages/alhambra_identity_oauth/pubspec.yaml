@@ -1,0 +1,22 @@
+name: alhambra_identity_oauth
+description: >
+  OAuth2 / token-based AuthTokenProvider implementation for alhambra_network.
+  Stores access + refresh tokens in alhambra_data's SecureStore, handles
+  automatic refresh on expiry, and broadcasts auth-state changes.
+  Pure Dart — no Flutter dependency.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  alhambra_network:
+    path: ../alhambra_network
+  alhambra_data:
+    path: ../alhambra_data
+  meta: ^1.11.0
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^3.0.0

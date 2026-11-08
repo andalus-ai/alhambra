@@ -1,0 +1,812 @@
+{
+  "_note1": "KEEP THIS FILE! Check it into a version control system (VCS) like git.",
+  "_note2": "ObjectBox manages crucial IDs for your object model. See docs for details.",
+  "_note3": "If you have VCS merge conflicts, you must resolve them according to ObjectBox docs.",
+  "entities": [
+    {
+      "id": "1:5573946081352630543",
+      "lastPropertyId": "15:1918111963115919794",
+      "name": "AttachmentEntity",
+      "properties": [
+        {
+          "id": "1:2142391013719653998",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:2058606423127348384",
+          "name": "attachmentId",
+          "type": 9
+        },
+        {
+          "id": "3:5584044600224390142",
+          "name": "name",
+          "type": 9
+        },
+        {
+          "id": "4:7199938502797832932",
+          "name": "typeIndex",
+          "type": 6
+        },
+        {
+          "id": "5:670838587410049862",
+          "name": "url",
+          "type": 9
+        },
+        {
+          "id": "6:1940638709340646255",
+          "name": "localPath",
+          "type": 9
+        },
+        {
+          "id": "7:955830314968431433",
+          "name": "size",
+          "type": 6
+        },
+        {
+          "id": "8:2976194752203842835",
+          "name": "mimeType",
+          "type": 9
+        },
+        {
+          "id": "9:3474244345045635411",
+          "name": "statusIndex",
+          "type": 6
+        },
+        {
+          "id": "10:693587594419937203",
+          "name": "thumbnailUrl",
+          "type": 9
+        },
+        {
+          "id": "11:2935214185276506216",
+          "name": "durationMs",
+          "type": 6
+        },
+        {
+          "id": "13:7653448421540285829",
+          "name": "errorMessage",
+          "type": 9
+        },
+        {
+          "id": "14:5484316734818084777",
+          "name": "chatEntryId",
+          "indexId": "1:8788077138858081440",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "15:1918111963115919794",
+          "name": "metadataJson",
+          "type": 9
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "2:1493093981623455397",
+      "lastPropertyId": "34:70484784501424545",
+      "name": "ChatEntryEntity",
+      "properties": [
+        {
+          "id": "1:4286389123483281567",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:2832651591678639824",
+          "name": "entryId",
+          "indexId": "2:1135966263290422378",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "3:7616233879166974219",
+          "name": "sessionId",
+          "indexId": "3:4287026536032861800",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "4:248843019098988281",
+          "name": "typeIndex",
+          "type": 6
+        },
+        {
+          "id": "5:3913838583229996393",
+          "name": "statusIndex",
+          "type": 6
+        },
+        {
+          "id": "6:1472029592206042450",
+          "name": "text",
+          "type": 9
+        },
+        {
+          "id": "7:478490449322308906",
+          "name": "isLoading",
+          "type": 1
+        },
+        {
+          "id": "8:2375448565581045755",
+          "name": "timestamp",
+          "type": 6
+        },
+        {
+          "id": "9:7849280564054928110",
+          "name": "toolCallId",
+          "type": 9
+        },
+        {
+          "id": "10:8922010580953003237",
+          "name": "toolCallKindIndex",
+          "type": 6
+        },
+        {
+          "id": "11:7780293375228248911",
+          "name": "toolCallSummary",
+          "type": 9
+        },
+        {
+          "id": "12:4742911524765677529",
+          "name": "toolCallDetailInput",
+          "type": 9
+        },
+        {
+          "id": "13:4907098599780249032",
+          "name": "toolCallDetailOutput",
+          "type": 9
+        },
+        {
+          "id": "14:4551902840404611298",
+          "name": "toolCallStatusIndex",
+          "type": 6
+        },
+        {
+          "id": "15:7489851968311076088",
+          "name": "toolCallRiskIndex",
+          "type": 6
+        },
+        {
+          "id": "16:4501517056133483305",
+          "name": "toolCallDurationMs",
+          "type": 6
+        },
+        {
+          "id": "17:3820424860841094499",
+          "name": "toolCallErrorMessage",
+          "type": 9
+        },
+        {
+          "id": "18:5682457607113828188",
+          "name": "toolCallSubtasks",
+          "type": 9
+        },
+        {
+          "id": "19:6853110052476904205",
+          "name": "toolCallResult",
+          "type": 9
+        },
+        {
+          "id": "20:2608413494134208848",
+          "name": "toolCallProgress",
+          "type": 6
+        },
+        {
+          "id": "21:479272169526585704",
+          "name": "toolCallIsBlocking",
+          "type": 1
+        },
+        {
+          "id": "22:3661690310945753650",
+          "name": "approvalId",
+          "type": 9
+        },
+        {
+          "id": "23:3206893966287594523",
+          "name": "approvalCommand",
+          "type": 9
+        },
+        {
+          "id": "24:5173002554658731773",
+          "name": "approvalReason",
+          "type": 9
+        },
+        {
+          "id": "25:4306250595899902222",
+          "name": "approvalRiskIndex",
+          "type": 6
+        },
+        {
+          "id": "26:7196989502615780429",
+          "name": "approvalStatusIndex",
+          "type": 6
+        },
+        {
+          "id": "27:4520851077646469505",
+          "name": "planTitle",
+          "type": 9
+        },
+        {
+          "id": "28:7100582352519355086",
+          "name": "planSteps",
+          "type": 9
+        },
+        {
+          "id": "29:4523917552770330717",
+          "name": "errorMessage",
+          "type": 9
+        },
+        {
+          "id": "30:3041908783912700582",
+          "name": "retryCount",
+          "type": 6
+        },
+        {
+          "id": "32:5719065742443392762",
+          "name": "jobId",
+          "type": 9
+        },
+        {
+          "id": "33:4818371522724465600",
+          "name": "queuePosition",
+          "type": 6
+        },
+        {
+          "id": "34:70484784501424545",
+          "name": "metadataJson",
+          "type": 9
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "3:2605325599257901454",
+      "lastPropertyId": "24:7592808395141473348",
+      "name": "MetricsEntry",
+      "properties": [
+        {
+          "id": "1:6616396295516769311",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:2738531864964570429",
+          "name": "timestamp",
+          "type": 10
+        },
+        {
+          "id": "3:3449951963121992678",
+          "name": "sessionId",
+          "type": 9
+        },
+        {
+          "id": "4:4446991241544926416",
+          "name": "modelName",
+          "type": 9
+        },
+        {
+          "id": "5:22268224129323844",
+          "name": "backend",
+          "type": 9
+        },
+        {
+          "id": "6:1431011589589293135",
+          "name": "device",
+          "type": 9
+        },
+        {
+          "id": "7:8693045492800897844",
+          "name": "generationSpeedTps",
+          "type": 8
+        },
+        {
+          "id": "8:1448609668338073450",
+          "name": "totalTokens",
+          "type": 6
+        },
+        {
+          "id": "9:2788745597661616344",
+          "name": "tokenLatencyMs",
+          "type": 8
+        },
+        {
+          "id": "10:3504088205337080363",
+          "name": "openTimeMs",
+          "type": 8
+        },
+        {
+          "id": "11:1884189913859954022",
+          "name": "generateCallMs",
+          "type": 8
+        },
+        {
+          "id": "12:325270653594155158",
+          "name": "nativeLoadMs",
+          "type": 8
+        },
+        {
+          "id": "13:25263498345454072",
+          "name": "nativePromptMs",
+          "type": 8
+        },
+        {
+          "id": "14:329368261307262814",
+          "name": "nativeDecodeMs",
+          "type": 8
+        },
+        {
+          "id": "15:5330215862289332672",
+          "name": "nativeTokenizeMs",
+          "type": 8
+        },
+        {
+          "id": "16:9155012270787743977",
+          "name": "cacheMode",
+          "type": 9
+        },
+        {
+          "id": "17:8877316707592846220",
+          "name": "sessionType",
+          "type": 9
+        },
+        {
+          "id": "18:3064104607310034284",
+          "name": "promptTokens",
+          "type": 6
+        },
+        {
+          "id": "19:1952835495083200420",
+          "name": "sampledTokens",
+          "type": 6
+        },
+        {
+          "id": "20:3522121381916519866",
+          "name": "decodedTokens",
+          "type": 6
+        },
+        {
+          "id": "21:6197119910560467597",
+          "name": "gpuLayers",
+          "type": 6
+        },
+        {
+          "id": "22:3796579410574050948",
+          "name": "threads",
+          "type": 6
+        },
+        {
+          "id": "23:8817663876929472190",
+          "name": "contextSize",
+          "type": 6
+        },
+        {
+          "id": "24:7592808395141473348",
+          "name": "outputBytes",
+          "type": 6
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "4:7560878492137478190",
+      "lastPropertyId": "20:6520579992285216565",
+      "name": "SessionEntity",
+      "properties": [
+        {
+          "id": "1:3849484806908630678",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:4845133993591775464",
+          "name": "sessionId",
+          "indexId": "4:2545134704468929306",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "3:8303308733287250207",
+          "name": "projectId",
+          "indexId": "5:6642064833448594494",
+          "type": 9,
+          "flags": 2048
+        },
+        {
+          "id": "4:3139262740095179930",
+          "name": "title",
+          "type": 9
+        },
+        {
+          "id": "5:1630650629069679431",
+          "name": "description",
+          "type": 9
+        },
+        {
+          "id": "6:3861662717598404079",
+          "name": "statusIndex",
+          "type": 6
+        },
+        {
+          "id": "7:295765188277322906",
+          "name": "modeIndex",
+          "type": 6
+        },
+        {
+          "id": "8:2050074893507280110",
+          "name": "createdAt",
+          "type": 6
+        },
+        {
+          "id": "9:3971923138629871013",
+          "name": "updatedAt",
+          "type": 6
+        },
+        {
+          "id": "10:718589136061964499",
+          "name": "lastActiveAt",
+          "type": 6
+        },
+        {
+          "id": "11:637998894282075792",
+          "name": "forkOf",
+          "type": 9
+        },
+        {
+          "id": "12:41302777680669759",
+          "name": "isPinned",
+          "type": 1
+        },
+        {
+          "id": "13:1592352521021667767",
+          "name": "fileChanges",
+          "type": 6
+        },
+        {
+          "id": "14:1669393894583617362",
+          "name": "messageCount",
+          "type": 6
+        },
+        {
+          "id": "15:4245898909312370068",
+          "name": "pendingCount",
+          "type": 6
+        },
+        {
+          "id": "16:80018069498990566",
+          "name": "queueSize",
+          "type": 6
+        },
+        {
+          "id": "17:2079909009110137992",
+          "name": "totalDurationMs",
+          "type": 6
+        },
+        {
+          "id": "19:984920186111113177",
+          "name": "isSelected",
+          "type": 1
+        },
+        {
+          "id": "20:6520579992285216565",
+          "name": "metadataJson",
+          "type": 9
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "5:8868744722431710510",
+      "lastPropertyId": "57:8494574281485153073",
+      "name": "AppSettingsEntity",
+      "properties": [
+        {
+          "id": "1:299728365164209185",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:6353095835600336546",
+          "name": "themeMode",
+          "type": 9
+        },
+        {
+          "id": "3:1641334788834800919",
+          "name": "conversationWidth",
+          "type": 9
+        },
+        {
+          "id": "4:8214836146383611541",
+          "name": "lightThemePreset",
+          "type": 9
+        },
+        {
+          "id": "5:518773090202131732",
+          "name": "darkThemePreset",
+          "type": 9
+        },
+        {
+          "id": "6:3241794467458126438",
+          "name": "verboseAgentChat",
+          "type": 1
+        },
+        {
+          "id": "7:8162379269882426957",
+          "name": "fontSize",
+          "type": 8
+        },
+        {
+          "id": "8:871646315694225599",
+          "name": "aiProvider",
+          "type": 9
+        },
+        {
+          "id": "9:2770507019837852632",
+          "name": "apiKey",
+          "type": 9
+        },
+        {
+          "id": "10:4352624397636653505",
+          "name": "andalusProBaseUrl",
+          "type": 9
+        },
+        {
+          "id": "11:563522607242927064",
+          "name": "andalusProGrpcUrl",
+          "type": 9
+        },
+        {
+          "id": "12:7473354874397866967",
+          "name": "openAiBaseUrl",
+          "type": 9
+        },
+        {
+          "id": "13:780914765253908371",
+          "name": "anthropicBaseUrl",
+          "type": 9
+        },
+        {
+          "id": "14:3328084206896992854",
+          "name": "geminiBaseUrl",
+          "type": 9
+        },
+        {
+          "id": "15:7288131012564577574",
+          "name": "defaultModel",
+          "type": 9
+        },
+        {
+          "id": "16:4141880167725786459",
+          "name": "systemPrompt",
+          "type": 9
+        },
+        {
+          "id": "17:3285439588090609560",
+          "name": "streamingEnabled",
+          "type": 1
+        },
+        {
+          "id": "18:986852214421245941",
+          "name": "maxTokens",
+          "type": 6
+        },
+        {
+          "id": "19:5053408832033070701",
+          "name": "temperature",
+          "type": 8
+        },
+        {
+          "id": "20:3733998665973305501",
+          "name": "autoSelectModel",
+          "type": 1
+        },
+        {
+          "id": "21:6598486261142635550",
+          "name": "localLlmBackend",
+          "type": 9
+        },
+        {
+          "id": "22:5312025577778294432",
+          "name": "localModelPath",
+          "type": 9
+        },
+        {
+          "id": "23:3375632477091512314",
+          "name": "localModelName",
+          "type": 9
+        },
+        {
+          "id": "24:5397894569959071302",
+          "name": "localContextSize",
+          "type": 6
+        },
+        {
+          "id": "25:1014682205785513034",
+          "name": "localGpuLayers",
+          "type": 6
+        },
+        {
+          "id": "26:7114164956853085487",
+          "name": "localThreads",
+          "type": 6
+        },
+        {
+          "id": "27:1628401126213519997",
+          "name": "ollamaBaseUrl",
+          "type": 9
+        },
+        {
+          "id": "28:210247612992990626",
+          "name": "localEnableGpu",
+          "type": 1
+        },
+        {
+          "id": "29:2426216639510758435",
+          "name": "securityPreset",
+          "type": 9
+        },
+        {
+          "id": "30:4706281611766633164",
+          "name": "outsideFolderFileAccess",
+          "type": 9
+        },
+        {
+          "id": "31:7298122384808385598",
+          "name": "terminalExecutionPolicy",
+          "type": 9
+        },
+        {
+          "id": "32:2935218802409421118",
+          "name": "sandboxMode",
+          "type": 1
+        },
+        {
+          "id": "33:4826376580177796155",
+          "name": "artifactReviewPolicy",
+          "type": 9
+        },
+        {
+          "id": "34:8435738630411132940",
+          "name": "fileAccessRulesJson",
+          "type": 9
+        },
+        {
+          "id": "35:6887083750419932490",
+          "name": "networkAccessRulesJson",
+          "type": 9
+        },
+        {
+          "id": "36:229656733974733444",
+          "name": "terminalCommandsJson",
+          "type": 9
+        },
+        {
+          "id": "37:6406583238505112658",
+          "name": "mcpToolsJson",
+          "type": 9
+        },
+        {
+          "id": "38:1235268981053033165",
+          "name": "jsExecutionPolicy",
+          "type": 9
+        },
+        {
+          "id": "39:381633466382072883",
+          "name": "browserViewportWidth",
+          "type": 6
+        },
+        {
+          "id": "40:2858739689948788326",
+          "name": "browserViewportHeight",
+          "type": 6
+        },
+        {
+          "id": "41:4635848044497301128",
+          "name": "downloadPath",
+          "type": 9
+        },
+        {
+          "id": "42:6844823629058798437",
+          "name": "screenshotEnabled",
+          "type": 1
+        },
+        {
+          "id": "43:1135112457909628389",
+          "name": "actuationRulesJson",
+          "type": 9
+        },
+        {
+          "id": "44:747819556716361109",
+          "name": "desktopNotifications",
+          "type": 1
+        },
+        {
+          "id": "45:5709477528600172118",
+          "name": "soundEffects",
+          "type": 1
+        },
+        {
+          "id": "46:5771841977776657648",
+          "name": "taskCompletionAlert",
+          "type": 1
+        },
+        {
+          "id": "47:2983025948075141588",
+          "name": "errorAlert",
+          "type": 1
+        },
+        {
+          "id": "48:7636065934444348633",
+          "name": "telemetryEnabled",
+          "type": 1
+        },
+        {
+          "id": "49:5647799243812371698",
+          "name": "crashReporting",
+          "type": 1
+        },
+        {
+          "id": "50:7673470810470495341",
+          "name": "analyticsEnabled",
+          "type": 1
+        },
+        {
+          "id": "51:4405195077352248803",
+          "name": "logLevel",
+          "type": 9
+        },
+        {
+          "id": "52:7131259725117798809",
+          "name": "autoSave",
+          "type": 1
+        },
+        {
+          "id": "53:5488953187597573261",
+          "name": "autoSaveIntervalSeconds",
+          "type": 6
+        },
+        {
+          "id": "54:1437590500309166855",
+          "name": "experimentalFeatures",
+          "type": 1
+        },
+        {
+          "id": "55:7161763820338441839",
+          "name": "proxyUrl",
+          "type": 9
+        },
+        {
+          "id": "56:5380475311591830342",
+          "name": "noProxyHosts",
+          "type": 9
+        },
+        {
+          "id": "57:8494574281485153073",
+          "name": "sslVerification",
+          "type": 1
+        }
+      ],
+      "relations": []
+    }
+  ],
+  "lastEntityId": "5:8868744722431710510",
+  "lastIndexId": "5:6642064833448594494",
+  "lastRelationId": "0:0",
+  "lastSequenceId": "0:0",
+  "modelVersion": 5,
+  "modelVersionParserMinimum": 5,
+  "retiredEntityUids": [],
+  "retiredIndexUids": [],
+  "retiredPropertyUids": [
+    5398353600855530041,
+    2049668289599877013,
+    9202612113156994144
+  ],
+  "retiredRelationUids": [],
+  "version": 1
+}

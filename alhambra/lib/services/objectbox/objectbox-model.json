@@ -1,0 +1,147 @@
+{
+  "_note1": "KEEP THIS FILE! Check it into a version control system (VCS) like git.",
+  "_note2": "ObjectBox manages crucial IDs for your object model. See docs for details.",
+  "_note3": "If you have VCS merge conflicts, you must resolve them according to ObjectBox docs.",
+  "entities": [
+    {
+      "id": "1:6911543895941031967",
+      "lastPropertyId": "24:1187870541759896412",
+      "name": "MetricsEntry",
+      "properties": [
+        {
+          "id": "1:2073790404415898688",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:1734238038430997450",
+          "name": "timestamp",
+          "type": 10
+        },
+        {
+          "id": "3:732723522538598084",
+          "name": "sessionId",
+          "type": 9
+        },
+        {
+          "id": "4:6222632261398388343",
+          "name": "modelName",
+          "type": 9
+        },
+        {
+          "id": "5:3081277994244686746",
+          "name": "backend",
+          "type": 9
+        },
+        {
+          "id": "6:4523847644442080684",
+          "name": "device",
+          "type": 9
+        },
+        {
+          "id": "7:4963960029363127774",
+          "name": "generationSpeedTps",
+          "type": 8
+        },
+        {
+          "id": "8:8030200634254588203",
+          "name": "totalTokens",
+          "type": 6
+        },
+        {
+          "id": "9:3201175227380285074",
+          "name": "tokenLatencyMs",
+          "type": 8
+        },
+        {
+          "id": "10:7999196817230130898",
+          "name": "openTimeMs",
+          "type": 8
+        },
+        {
+          "id": "11:6551274717052231806",
+          "name": "generateCallMs",
+          "type": 8
+        },
+        {
+          "id": "12:3213684561124062386",
+          "name": "nativeLoadMs",
+          "type": 8
+        },
+        {
+          "id": "13:1038257988342621511",
+          "name": "nativePromptMs",
+          "type": 8
+        },
+        {
+          "id": "14:1142332170892499913",
+          "name": "nativeDecodeMs",
+          "type": 8
+        },
+        {
+          "id": "15:5156414283844468182",
+          "name": "nativeTokenizeMs",
+          "type": 8
+        },
+        {
+          "id": "16:85169530755487223",
+          "name": "cacheMode",
+          "type": 9
+        },
+        {
+          "id": "17:2780825767481340543",
+          "name": "sessionType",
+          "type": 9
+        },
+        {
+          "id": "18:6438558923271011491",
+          "name": "promptTokens",
+          "type": 6
+        },
+        {
+          "id": "19:4529518965545030838",
+          "name": "sampledTokens",
+          "type": 6
+        },
+        {
+          "id": "20:6386880778051831430",
+          "name": "decodedTokens",
+          "type": 6
+        },
+        {
+          "id": "21:7943086330052401974",
+          "name": "gpuLayers",
+          "type": 6
+        },
+        {
+          "id": "22:3687230067309510835",
+          "name": "threads",
+          "type": 6
+        },
+        {
+          "id": "23:2419839315426804672",
+          "name": "contextSize",
+          "type": 6
+        },
+        {
+          "id": "24:1187870541759896412",
+          "name": "outputBytes",
+          "type": 6
+        }
+      ],
+      "relations": []
+    }
+  ],
+  "lastEntityId": "1:6911543895941031967",
+  "lastIndexId": "0:0",
+  "lastRelationId": "0:0",
+  "lastSequenceId": "0:0",
+  "modelVersion": 5,
+  "modelVersionParserMinimum": 5,
+  "retiredEntityUids": [],
+  "retiredIndexUids": [],
+  "retiredPropertyUids": [],
+  "retiredRelationUids": [],
+  "version": 1
+}

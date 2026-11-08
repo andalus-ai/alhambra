@@ -1,0 +1,23 @@
+name: alhambra_sdk
+description: "Alhambra Plugin SDK - Public interface and decoupled contracts for plugin development."
+version: 0.0.1
+homepage:
+publish_to: none # Remove this line if you wish to publish to pub.dev
+
+environment:
+  sdk: ^3.13.1
+  flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  alhambra_plugin_runtime:
+    path: ../alhambra_plugin_runtime
+  alhambra_plugin_api:
+    path: ../alhambra_plugin_api
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:

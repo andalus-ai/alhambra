@@ -1,0 +1,23 @@
+name: alhambra_data_file_local
+description: >
+  Local filesystem implementation of the alhambra_data FileStore contract.
+  Uses path_provider to locate the app documents directory and dart:io for
+  file operations.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  alhambra_data:
+    path: ../alhambra_data
+  path_provider: ^2.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^3.0.0

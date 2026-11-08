@@ -1,0 +1,22 @@
+name: alhambra_network_connectivity
+description: >
+  connectivity_plus implementation of alhambra_data ConnectivityMonitor contract.
+  Bridges real device network state into Alhambra's platform-neutral connectivity abstraction.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  alhambra_data:
+    path: ../alhambra_data
+  connectivity_plus: ^6.1.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^3.0.0
