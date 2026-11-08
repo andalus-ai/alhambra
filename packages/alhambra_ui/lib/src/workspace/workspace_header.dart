@@ -1,12 +1,12 @@
-import 'package:alhambra_workspace/alhambra_workspace.dart';
 import 'package:flutter/material.dart';
 import '../theme/color_scheme.dart';
 import '../theme/spacing.dart';
+import 'ui_workspace_status.dart';
 
-/// Renders workspace header with title, lifecycle status chip, version, and action bar.
+/// Renders workspace title, presentation lifecycle status, version, and actions.
 class WorkspaceHeader extends StatelessWidget {
   final String title;
-  final WorkspaceStatus status;
+  final UiWorkspaceStatus status;
   final int version;
   final String? subtitle;
   final List<Widget>? actions;
@@ -20,21 +20,20 @@ class WorkspaceHeader extends StatelessWidget {
     this.actions,
   });
 
-  Color _statusColor(WorkspaceStatus status) {
+  Color _statusColor(UiWorkspaceStatus status) {
     return switch (status) {
-      WorkspaceStatus.draft => AlhambraColors.draft,
-      WorkspaceStatus.review => AlhambraColors.review,
-      WorkspaceStatus.approved => AlhambraColors.approved,
-      WorkspaceStatus.published => AlhambraColors.published,
-      WorkspaceStatus.superseded => AlhambraColors.superseded,
-      WorkspaceStatus.archived => AlhambraColors.archived,
+      UiWorkspaceStatus.draft => AlhambraColors.draft,
+      UiWorkspaceStatus.review => AlhambraColors.review,
+      UiWorkspaceStatus.approved => AlhambraColors.approved,
+      UiWorkspaceStatus.published => AlhambraColors.published,
+      UiWorkspaceStatus.superseded => AlhambraColors.superseded,
+      UiWorkspaceStatus.archived => AlhambraColors.archived,
     };
   }
 
   @override
   Widget build(BuildContext context) {
     final statusColor = _statusColor(status);
-
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AlhambraSpacing.lg,
@@ -43,9 +42,7 @@ class WorkspaceHeader extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         border: Border(
-          bottom: BorderSide(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
+          bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
         ),
       ),
       child: Row(
