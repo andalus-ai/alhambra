@@ -55,7 +55,6 @@ class _SearchOverlayState extends State<SearchOverlay> {
       setState(() {
         _results = [];
         _isLoading = false;
-        _errorMessage = 'Please try again in a moment.';
         _errorMessage = null;
       });
       return;
@@ -78,6 +77,7 @@ class _SearchOverlayState extends State<SearchOverlay> {
       setState(() {
         _results = [];
         _isLoading = false;
+        _errorMessage = 'Please try again in a moment.';
       });
     }
   }
