@@ -16,6 +16,7 @@ abstract interface class CompositionRuntime {
 class DefaultCompositionRuntime implements CompositionRuntime {
   final CompositionGraph _liveGraph = CompositionGraph();
   final void Function(String ownerId)? onOwnerDeactivated;
+  final Map<String, CompositionLifecycle> _ownerLifecycles = {};
 
   DefaultCompositionRuntime({this.onOwnerDeactivated});
 
@@ -30,6 +31,11 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     return DefaultCompositionTransaction(
       liveGraph: _liveGraph,
       onCommit: (plan) {
+        if (lifecycle != null) {
+          for (final node in plan.activationOrder) {
+            _ownerLifecycles.putIfAbsent(node.ownerId, () => lifecycle);
+          }
+        }
         if (onCommit != null) {
           onCommit(plan);
         }
@@ -118,17 +124,37 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         .reversed
         .toList();
 
+    final lifecycleNodes = <String, List<CompositionNode>>{};
+    for (final id in removalOrder) {
+      final node = nodes[id]!;
+      lifecycleNodes.putIfAbsent(node.ownerId, () => []).add(node);
+    }
+
     try {
+      // Remove graph entries first so deactivation hooks observe the new
+      // graph. Nodes are supplied in consumer-before-provider order.
       for (final id in removalOrder) {
         _liveGraph.remove(id);
       }
 
-      // Cascading may deactivate contributions from more than one owner.
-      // Notify each affected owner once, in deterministic order.
       for (final affectedOwner in affectedOwners) {
+        final lifecycle = _ownerLifecycles[affectedOwner];
+        final ownedNodes = lifecycleNodes[affectedOwner];
+        if (lifecycle != null && ownedNodes != null) {
+          lifecycle.deactivate(ownedNodes);
+        }
         onOwnerDeactivated?.call(affectedOwner);
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
+      for (final entry in lifecycleNodes.entries) {
+        final lifecycle = _ownerLifecycles[entry.key];
+        if (lifecycle == null) continue;
+        try {
+          lifecycle.compensate(entry.value, error, stackTrace);
+        } catch (_) {
+          // Preserve the original deactivation error.
+        }
+      }
       // Keep the graph atomic if a lifecycle callback fails. Callback side
       // effects outside this graph are the callback implementer's
       // responsibility and cannot be compensated by this runtime.
