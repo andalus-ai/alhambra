@@ -85,6 +85,7 @@ export 'src/composition/composition_graph.dart';
 export 'src/composition/composition_plan.dart';
 export 'src/composition/composition_transaction.dart';
 export 'src/composition/composition_runtime.dart';
+export 'src/composition/composition_lifecycle.dart';
 
 // State Scope & Service Boundaries
 export 'src/runtime_scope/scoped_service_registry.dart';
