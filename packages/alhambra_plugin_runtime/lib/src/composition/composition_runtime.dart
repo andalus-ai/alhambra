@@ -32,13 +32,13 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     transaction = DefaultCompositionTransaction(
       liveGraph: _liveGraph,
       onCommit: (plan) {
+        if (onCommit != null) {
+          onCommit(plan);
+        }
         if (lifecycle != null) {
           for (final node in transaction.stagedNodes) {
             _ownerLifecycles.putIfAbsent(node.ownerId, () => lifecycle);
           }
-        }
-        if (onCommit != null) {
-          onCommit(plan);
         }
       },
       lifecycle: lifecycle,
