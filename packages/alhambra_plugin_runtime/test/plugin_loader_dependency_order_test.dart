@@ -35,10 +35,10 @@ void main() {
 
       expect(
         result.map((plugin) => plugin.manifest.id).toList(),
-        ['commands', 'core', 'editor', 'theme'],
+        ['core', 'commands', 'editor', 'theme'],
       );
-      expect(result[0], same(commands));
-      expect(result[1], same(core));
+      expect(result[0], same(core));
+      expect(result[1], same(commands));
       expect(result[2], same(editor));
       expect(result[3], same(theme));
     });
