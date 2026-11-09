@@ -33,6 +33,7 @@ export 'src/reactivity/signals_engine.dart';
 export 'src/plugins/plugin_manager.dart';
 export 'src/plugins/plugin_loader.dart';
 export 'src/plugins/extension_manifest.dart';
+export 'src/plugins/plugin_dependency_resolver.dart';
 export 'src/plugins/runtime_plugin_context.dart';
 export 'src/plugins/plugin_startup_pipeline.dart';
 
