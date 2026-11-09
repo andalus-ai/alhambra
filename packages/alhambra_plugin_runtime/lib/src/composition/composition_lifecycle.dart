@@ -115,6 +115,7 @@ class CompositionLifecycleCoordinator {
 
     for (final node in plan.activationOrder) {
       if (stateOf(node.id) == CompositionNodeState.active) continue;
+      _states[node.id] = CompositionNodeState.validated;
       _states[node.id] = CompositionNodeState.staged;
 
       Object? lastError;
