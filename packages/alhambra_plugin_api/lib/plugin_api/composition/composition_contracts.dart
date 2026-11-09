@@ -204,3 +204,16 @@ enum CompositionConflictPolicy {
   replace,
   compose,
 }
+
+
+/// Lifecycle hooks for composing plugin contributions.
+///
+/// Implementations should keep external side effects reversible until
+/// [activate] succeeds. [compensate] is invoked when preparation or activation
+/// fails; it should be idempotent and best-effort.
+abstract interface class CompositionLifecycle {
+  void prepare(List<CompositionNode> orderedNodes);
+  void activate(List<CompositionNode> orderedNodes);
+  void deactivate(List<CompositionNode> reverseOrderedNodes);
+  void compensate(List<CompositionNode> orderedNodes, Object error, StackTrace stackTrace);
+}

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'extension_manifest.dart';
+import 'plugin_dependency_resolver.dart';
 
 /// A discovered plugin.
 ///
@@ -16,7 +17,10 @@ class DiscoveredPlugin {
   const DiscoveredPlugin({required this.manifest, required this.directory});
 }
 
-/// The plugin loader is responsible for loading plugins from the file system.
+/// The plugin loader is responsible for discovering plugin manifests.
+///
+/// Discovery does not execute plugin code. Hosts remain responsible for
+/// validating trust and constructing the compiled plugin instances they ship.
 class PluginLoader {
   /// Returns the plugin directories.
   ///
@@ -35,6 +39,10 @@ class PluginLoader {
     ];
   }
 
+  /// Discovers manifests without imposing dependency ordering.
+  ///
+  /// This preserves the historical behavior for callers that need the raw
+  /// discovery result. Use [scanPluginsInDependencyOrder] for startup.
   static Future<List<DiscoveredPlugin>> scanPlugins() async {
     final discovered = <DiscoveredPlugin>[];
 
@@ -63,5 +71,39 @@ class PluginLoader {
     }
 
     return discovered;
+  }
+
+  /// Discovers plugins and returns them in dependency-first startup order.
+  ///
+  /// Required dependencies are validated before a caller can begin
+  /// activation. Missing dependencies, duplicate IDs, and cycles are
+  /// reported by [PluginDependencyResolver] and are never silently skipped.
+  static Future<List<DiscoveredPlugin>>
+      scanPluginsInDependencyOrder() async {
+    return resolveDependencyOrder(await scanPlugins());
+  }
+
+  /// Resolves an already-discovered collection into startup order.
+  ///
+  /// The original [DiscoveredPlugin] objects and their directories are
+  /// retained. The returned list is immutable.
+  static List<DiscoveredPlugin> resolveDependencyOrder(
+    Iterable<DiscoveredPlugin> discovered, {
+    PluginDependencyResolver resolver = const PluginDependencyResolver(),
+  }) {
+    final plugins = discovered.toList(growable: false);
+    final byManifest = Map<ExtensionManifest, DiscoveredPlugin>.identity();
+
+    for (final plugin in plugins) {
+      byManifest[plugin.manifest] = plugin;
+    }
+
+    final plan = resolver.resolve(
+      plugins.map((plugin) => plugin.manifest).toList(growable: false),
+    );
+
+    return List<DiscoveredPlugin>.unmodifiable(
+      plan.map((manifest) => byManifest[manifest]!),
+    );
   }
 }
