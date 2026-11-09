@@ -34,6 +34,7 @@ class PluginDependencyResolver {
     }
 
     for (final manifest in manifests) {
+      final pluginId = manifest.id.trim();
       for (final dependency in manifest.dependencies) {
         final dependencyId = dependency.trim();
         if (dependencyId.isEmpty || !byId.containsKey(dependencyId)) {
@@ -44,7 +45,7 @@ class PluginDependencyResolver {
             dependencyId: dependency,
           );
         }
-        if (dependencyId == manifest.id) {
+        if (dependencyId == pluginId) {
           throw PluginDependencyResolutionException(
             code: PluginDependencyErrorCode.cycle,
             message: 'Plugin "${manifest.id}" cannot depend on itself.',
@@ -83,8 +84,8 @@ class PluginDependencyResolver {
       ordered.add(byId[id]!);
     }
 
-    for (final manifest in manifests) {
-      visit(manifest.id);
+    for (final id in byId.keys) {
+      visit(id);
     }
     return List<ExtensionManifest>.unmodifiable(ordered);
   }
