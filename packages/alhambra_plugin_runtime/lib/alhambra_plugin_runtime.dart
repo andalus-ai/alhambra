@@ -36,6 +36,7 @@ export 'src/plugins/extension_manifest.dart';
 export 'src/plugins/plugin_dependency_resolver.dart';
 export 'src/plugins/runtime_plugin_context.dart';
 export 'src/plugins/plugin_startup_pipeline.dart';
+export 'src/plugins/plugin_shutdown_coordinator.dart';
 
 // Workbench & Layout
 export 'src/workbench/contribution_validator.dart';
