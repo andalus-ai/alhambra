@@ -100,7 +100,12 @@ class DefaultCompositionRuntime implements CompositionRuntime {
 
     // Compute the full set before mutating the live graph. Removing consumers
     // before providers keeps the operation's observable order predictable.
-    final removalOrder = removalIds.toList()..sort();
+    final removalOrder = _liveGraph
+        .topologicalSort()
+        .map((node) => node.id)
+        .where(removalIds.contains)
+        .toList()
+        .reversed;
     for (final id in removalOrder) {
       _liveGraph.remove(id);
     }
