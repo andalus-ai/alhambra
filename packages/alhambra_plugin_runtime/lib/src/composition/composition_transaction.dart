@@ -86,9 +86,9 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     // Preparation runs before publication so validation/setup failures cannot
     // expose partially activated contributions.
     try {
-      lifecycle?.prepare(plan);
+      lifecycle?.prepare(plan.activationOrder);
     } catch (error, stackTrace) {
-      _compensateAfterFailure(plan, error, stackTrace);
+      _compensateAfterFailure(plan.activationOrder, error, stackTrace);
       _rolledBack = true;
       Error.throwWithStackTrace(error, stackTrace);
     }
@@ -97,13 +97,13 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     // implementations can resolve dependencies from the live graph.
     liveGraph.addAll(_stagedGraph.nodes.values);
     try {
-      lifecycle?.activate(plan);
+      lifecycle?.activate(plan.activationOrder);
       onCommit(plan); // Backward-compatible activation hook.
     } catch (error, stackTrace) {
       for (final id in stagedIds) {
         liveGraph.remove(id);
       }
-      _compensateAfterFailure(plan, error, stackTrace);
+      _compensateAfterFailure(plan.activationOrder, error, stackTrace);
       _rolledBack = true;
       Error.throwWithStackTrace(error, stackTrace);
     }
@@ -125,12 +125,12 @@ class DefaultCompositionTransaction implements CompositionTransaction {
   }
 
   void _compensateAfterFailure(
-    CompositionPlan plan,
+    List<CompositionNode> orderedNodes,
     Object error,
     StackTrace stackTrace,
   ) {
     try {
-      lifecycle?.compensate(plan, error, stackTrace);
+      lifecycle?.compensate(plan.activationOrder, error, stackTrace);
     } catch (_) {
       // Preserve the original lifecycle failure. Compensation is best-effort;
       // implementations should report their own compensation failures.
