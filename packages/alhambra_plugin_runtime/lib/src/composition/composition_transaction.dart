@@ -130,7 +130,7 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     StackTrace stackTrace,
   ) {
     try {
-      lifecycle?.compensate(plan.activationOrder, error, stackTrace);
+      lifecycle?.compensate(orderedNodes, error, stackTrace);
     } catch (_) {
       // Preserve the original lifecycle failure. Compensation is best-effort;
       // implementations should report their own compensation failures.
