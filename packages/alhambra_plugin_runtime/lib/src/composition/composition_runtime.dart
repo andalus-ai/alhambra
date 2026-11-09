@@ -8,6 +8,7 @@ abstract interface class CompositionRuntime {
   CompositionGraph get graph;
   CompositionTransaction beginTransaction({
     void Function(CompositionPlan plan)? onCommit,
+    CompositionLifecycle? lifecycle,
   });
   void deactivateOwner(String ownerId, [DeactivationStrategy strategy]);
 }
@@ -24,6 +25,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   @override
   CompositionTransaction beginTransaction({
     void Function(CompositionPlan plan)? onCommit,
+    CompositionLifecycle? lifecycle,
   }) {
     return DefaultCompositionTransaction(
       liveGraph: _liveGraph,
@@ -32,6 +34,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
           onCommit(plan);
         }
       },
+      lifecycle: lifecycle,
     );
   }
 
