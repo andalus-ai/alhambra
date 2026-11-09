@@ -1,3 +1,5 @@
+import 'composition_persistence.dart';
+
 /// A single, deterministic composition snapshot schema migration.
 typedef CompositionSnapshotMigrationCallback =
     List<Map<String, Object?>> Function(List<Map<String, Object?>> nodes);
