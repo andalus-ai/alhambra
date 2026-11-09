@@ -1,61 +1,77 @@
 import 'dart:async';
+
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import '../extensions/extension_runtime.dart';
 import 'runtime_plugin_context.dart';
 
-/// 
+/// Manages the lifecycle of compiled, application-selected plugins.
+///
+/// The manager deliberately does not discover or execute Dart code. Hosts
+/// construct the plugin instances they want to ship and pass them to this
+/// manager.
 class PluginManager {
   final Map<String, AlhambraPlugin> _activePlugins = {};
   final Map<String, RuntimePluginContext> _contexts = {};
   final ExtensionRuntime runtime;
 
-  /// 
   PluginManager({ExtensionRuntime? runtime})
       : runtime = runtime ?? ExtensionRuntime();
 
-  /// 
+  /// Activates [plugin] once and rolls back its contributions on failure.
   Future<void> activate(AlhambraPlugin plugin) async {
-    if (_activePlugins.containsKey(plugin.metadata.id)) {
-      return;
-    }
+    final pluginId = plugin.metadata.id;
+    if (_activePlugins.containsKey(pluginId)) return;
 
     final context = RuntimePluginContext(
-      pluginId: plugin.metadata.id,
+      pluginId: pluginId,
       runtime: runtime,
     );
 
     try {
       await plugin.activate(context);
-      runtime.validator.validateOwner(plugin.metadata.id);
-      _activePlugins[plugin.metadata.id] = plugin;
-      _contexts[plugin.metadata.id] = context;
+      runtime.validator.validateOwner(pluginId);
+      _activePlugins[pluginId] = plugin;
+      _contexts[pluginId] = context;
     } catch (_) {
-      for (final target in runtime.cleanupTargets) {
-        target.unregisterAllForOwner(plugin.metadata.id);
-      }
+      _unregisterContributions(pluginId);
       rethrow;
     }
   }
 
+  /// Deactivates a plugin and always releases host-owned resources.
+  ///
+  /// A plugin's [AlhambraPlugin.deactivate] hook may fail. That error is
+  /// propagated to the caller, but it must not leave the plugin marked active
+  /// or keep its contributions registered. This makes a subsequent activation
+  /// attempt deterministic and prevents stale UI from surviving a failure.
   Future<void> deactivate(String pluginId) async {
     final plugin = _activePlugins[pluginId];
     final context = _contexts[pluginId];
     if (plugin == null || context == null) return;
 
-    // Phase 1: Close workbench views owned by this plugin
-    runtime.workbench.removeViewsOwnedBy(pluginId);
+    try {
+      // Close workbench views before invoking plugin-owned shutdown logic.
+      runtime.workbench.removeViewsOwnedBy(pluginId);
+      await plugin.deactivate(context);
+    } finally {
+      // Cleanup and state removal must happen even when view removal or the
+      // plugin's shutdown hook throws.
+      try {
+        _unregisterContributions(pluginId);
+      } finally {
+        _activePlugins.remove(pluginId);
+        _contexts.remove(pluginId);
+      }
+    }
+  }
 
-    // Phase 2: Plugin deactivation logic
-    await plugin.deactivate(context);
-
-    // Phase 3: Cleanup all contributed items from registries
+  void _unregisterContributions(String pluginId) {
     for (final target in runtime.cleanupTargets) {
       target.unregisterAllForOwner(pluginId);
     }
-
-    _activePlugins.remove(pluginId);
-    _contexts.remove(pluginId);
   }
 
-  List<AlhambraPlugin> get activePlugins => _activePlugins.values.toList();
+  /// A snapshot of the currently active compiled plugins.
+  List<AlhambraPlugin> get activePlugins =>
+      List<AlhambraPlugin>.unmodifiable(_activePlugins.values);
 }
