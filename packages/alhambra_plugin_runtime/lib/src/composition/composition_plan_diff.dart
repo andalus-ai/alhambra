@@ -19,42 +19,6 @@ final class CompositionPlanDiff {
   bool get isEmpty =>
       added.isEmpty && removed.isEmpty && replaced.isEmpty;
 
-  /// Nodes to stop, ordered consumer-first using the old plan.
-  List<CompositionNode> get deactivationOrder => [
-        ...removed,
-        ...replaced.map((node) => node),
-      ];
-
-  /// Nodes to start, ordered provider-first using the new plan.
-  List<CompositionNode> get activationOrder => [
-        ...added,
-        ...replaced.map((node) => node),
-      ];
-
-  CompositionPlanDiff sortedAgainst(
-    CompositionPlan previous,
-    CompositionPlan next,
-  ) {
-    final unchangedIds = unchanged.map((node) => node.id).toSet();
-    final addedIds = added.map((node) => node.id).toSet();
-    final removedIds = removed.map((node) => node.id).toSet();
-    final replacedIds = replaced.map((node) => node.id).toSet();
-    return CompositionPlanDiff(
-      unchanged: next.activationOrder
-          .where((node) => unchangedIds.contains(node.id))
-          .toList(growable: false),
-      added: next.activationOrder
-          .where((node) => addedIds.contains(node.id))
-          .toList(growable: false),
-      removed: previous.activationOrder.reversed
-          .where((node) => removedIds.contains(node.id))
-          .toList(growable: false),
-      replaced: next.activationOrder
-          .where((node) => replacedIds.contains(node.id))
-          .toList(growable: false),
-    );
-  }
-
   static CompositionPlanDiff between(
     CompositionPlan previous,
     CompositionPlan next,
