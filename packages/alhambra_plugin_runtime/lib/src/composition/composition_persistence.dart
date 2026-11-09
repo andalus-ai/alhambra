@@ -219,8 +219,8 @@ class CompositionPersistence {
 
   CompositionPersistence({
     required this.store,
-    this.codec = const _DefaultCodec(),
-  });
+    CompositionSnapshotCodec? codec,
+  }) : codec = codec ?? CompositionSnapshotCodec();
 
   /// Persists [plan] as the next generation.
   ///
@@ -242,10 +242,6 @@ class CompositionPersistence {
   }
 
   Future<void> clear() => store.clear();
-}
-
-class _DefaultCodec extends CompositionSnapshotCodec {
-  const _DefaultCodec();
 }
 
 /// JSON-friendly conversion helpers for durable adapters.
