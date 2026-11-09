@@ -9,6 +9,8 @@ abstract interface class CompositionRuntime {
   CompositionTransaction beginTransaction({
     void Function(CompositionPlan plan)? onCommit,
     CompositionLifecycle? lifecycle,
+    String? correlationId,
+    CompositionLifecycleEventSink? onLifecycleEvent,
   });
   void deactivateOwner(String ownerId, [DeactivationStrategy strategy]);
 }
@@ -17,8 +19,10 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   final CompositionGraph _liveGraph = CompositionGraph();
   final void Function(String ownerId)? onOwnerDeactivated;
   final Map<String, CompositionLifecycle> _ownerLifecycles = {};
+  final CompositionLifecycleEventSink? onLifecycleEvent;
+  int _nextTransactionSequence = 0;
 
-  DefaultCompositionRuntime({this.onOwnerDeactivated});
+  DefaultCompositionRuntime({this.onOwnerDeactivated, this.onLifecycleEvent});
 
   @override
   CompositionGraph get graph => _liveGraph;
@@ -27,6 +31,8 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   CompositionTransaction beginTransaction({
     void Function(CompositionPlan plan)? onCommit,
     CompositionLifecycle? lifecycle,
+    String? correlationId,
+    CompositionLifecycleEventSink? onLifecycleEvent,
   }) {
     late final DefaultCompositionTransaction transaction;
     transaction = DefaultCompositionTransaction(
@@ -42,6 +48,8 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         }
       },
       lifecycle: lifecycle,
+      correlationId: correlationId ?? 'composition-${++_nextTransactionSequence}',
+      onLifecycleEvent: onLifecycleEvent ?? this.onLifecycleEvent,
     );
     return transaction;
   }
