@@ -39,21 +39,19 @@ class DefaultCompositionTransaction implements CompositionTransaction {
   @override
   void stageAll(Iterable<CompositionNode> nodes) {
     _ensureOpen();
-    // Stage into a temporary graph first, so a duplicate doesn't partially stage.
     final candidate = CompositionGraph();
     candidate.addAll(_stagedGraph.nodes.values);
     candidate.addAll(nodes);
-    _stagedGraph
-      ..removeAll(_stagedGraph.nodes.keys.toList())
-      ..addAll(candidate.nodes.values);
+    for (final id in _stagedGraph.nodes.keys.toList()) {
+      _stagedGraph.remove(id);
+    }
+    _stagedGraph.addAll(candidate.nodes.values);
   }
 
   @override
   CompositionResult commit() {
     _ensureOpen();
 
-    // Candidate graph includes the live graph, allowing cross-transaction
-    // dependencies and cycles to be validated as one coherent composition.
     final candidate = CompositionGraph();
     try {
       candidate.addAll(liveGraph.nodes.values);
@@ -76,7 +74,7 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     }
 
     final plan = CompositionPlan.fromGraph(candidate);
-    // All validation happens before mutating live state.
+    // Validation and plan construction precede the first live mutation.
     liveGraph.addAll(_stagedGraph.nodes.values);
     onCommit(plan);
     _committed = true;
