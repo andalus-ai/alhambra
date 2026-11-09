@@ -28,11 +28,12 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     void Function(CompositionPlan plan)? onCommit,
     CompositionLifecycle? lifecycle,
   }) {
-    return DefaultCompositionTransaction(
+    late final DefaultCompositionTransaction transaction;
+    transaction = DefaultCompositionTransaction(
       liveGraph: _liveGraph,
       onCommit: (plan) {
         if (lifecycle != null) {
-          for (final node in plan.activationOrder) {
+          for (final node in transaction.stagedNodes) {
             _ownerLifecycles.putIfAbsent(node.ownerId, () => lifecycle);
           }
         }
@@ -42,6 +43,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
       },
       lifecycle: lifecycle,
     );
+    return transaction;
   }
 
   /// Deactivates every composition node contributed by [ownerId].
@@ -144,6 +146,12 @@ class DefaultCompositionRuntime implements CompositionRuntime {
           lifecycle.deactivate(ownedNodes);
         }
         onOwnerDeactivated?.call(affectedOwner);
+      }
+      for (final affectedOwner in affectedOwners) {
+        final stillRegistered = _liveGraph.nodes.values.any(
+          (node) => node.ownerId == affectedOwner,
+        );
+        if (!stillRegistered) _ownerLifecycles.remove(affectedOwner);
       }
     } catch (error, stackTrace) {
       for (final entry in lifecycleNodes.entries) {
