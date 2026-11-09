@@ -214,5 +214,6 @@ enum CompositionConflictPolicy {
 abstract interface class CompositionLifecycle {
   void prepare(List<CompositionNode> orderedNodes);
   void activate(List<CompositionNode> orderedNodes);
+  void deactivate(List<CompositionNode> reverseOrderedNodes);
   void compensate(List<CompositionNode> orderedNodes, Object error, StackTrace stackTrace);
 }
