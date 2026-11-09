@@ -15,11 +15,16 @@ abstract interface class CompositionTransaction {
 class DefaultCompositionTransaction implements CompositionTransaction {
   final CompositionGraph liveGraph;
   final void Function(CompositionPlan plan) onCommit;
+  final CompositionLifecycle? lifecycle;
   final CompositionGraph _stagedGraph = CompositionGraph();
   bool _committed = false;
   bool _rolledBack = false;
 
-  DefaultCompositionTransaction({required this.liveGraph, required this.onCommit});
+  DefaultCompositionTransaction({
+    required this.liveGraph,
+    required this.onCommit,
+    this.lifecycle,
+  });
 
   @override
   bool get isCommitted => _committed;
@@ -78,18 +83,29 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     final plan = CompositionPlan.fromGraph(candidate);
     final stagedIds = _stagedGraph.nodes.keys.toList(growable: false);
 
-    // addAll itself is atomic. The callback is the activation phase; if it
-    // fails, remove this transaction's published nodes and close the
-    // transaction as rolled back before propagating the original exception.
+    // Preparation runs before publication so validation/setup failures cannot
+    // expose partially activated contributions.
+    try {
+      lifecycle?.prepare(plan);
+    } catch (error, stackTrace) {
+      _compensateAfterFailure(plan, error, stackTrace);
+      _rolledBack = true;
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+
+    // addAll itself is atomic. Activation runs after publication so lifecycle
+    // implementations can resolve dependencies from the live graph.
     liveGraph.addAll(_stagedGraph.nodes.values);
     try {
-      onCommit(plan);
-    } catch (_) {
+      lifecycle?.activate(plan);
+      onCommit(plan); // Backward-compatible activation hook.
+    } catch (error, stackTrace) {
       for (final id in stagedIds) {
         liveGraph.remove(id);
       }
+      _compensateAfterFailure(plan, error, stackTrace);
       _rolledBack = true;
-      rethrow;
+      Error.throwWithStackTrace(error, stackTrace);
     }
 
     _committed = true;
@@ -106,6 +122,19 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     if (_committed) throw StateError('Cannot roll back a committed transaction');
     if (_rolledBack) return;
     _rolledBack = true;
+  }
+
+  void _compensateAfterFailure(
+    CompositionPlan plan,
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    try {
+      lifecycle?.compensate(plan, error, stackTrace);
+    } catch (_) {
+      // Preserve the original lifecycle failure. Compensation is best-effort;
+      // implementations should report their own compensation failures.
+    }
   }
 
   void _ensureOpen() {
