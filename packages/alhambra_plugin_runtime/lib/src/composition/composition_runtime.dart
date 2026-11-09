@@ -100,16 +100,40 @@ class DefaultCompositionRuntime implements CompositionRuntime {
 
     // Compute the full set before mutating the live graph. Removing consumers
     // before providers keeps the operation's observable order predictable.
+    final originalNodes = Map<String, CompositionNode>.from(nodes);
+    final affectedOwners = removalIds
+        .map((id) => nodes[id]!.ownerId)
+        .toSet()
+        .toList()
+      ..sort();
+
     final removalOrder = _liveGraph
         .topologicalSort()
         .map((node) => node.id)
         .where(removalIds.contains)
         .toList()
-        .reversed;
-    for (final id in removalOrder) {
-      _liveGraph.remove(id);
-    }
+        .reversed
+        .toList();
 
-    onOwnerDeactivated?.call(ownerId);
+    try {
+      for (final id in removalOrder) {
+        _liveGraph.remove(id);
+      }
+
+      // Cascading may deactivate contributions from more than one owner.
+      // Notify each affected owner once, in deterministic order.
+      for (final affectedOwner in affectedOwners) {
+        onOwnerDeactivated?.call(affectedOwner);
+      }
+    } catch (_) {
+      // Keep the graph atomic if a lifecycle callback fails. Callback side
+      // effects outside this graph are the callback implementer's
+      // responsibility and cannot be compensated by this runtime.
+      for (final id in _liveGraph.nodes.keys.toList()) {
+        _liveGraph.remove(id);
+      }
+      _liveGraph.addAll(originalNodes.values);
+      rethrow;
+    }
   }
 }
