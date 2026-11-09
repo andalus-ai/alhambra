@@ -17,6 +17,8 @@ class DefaultCompositionTransaction implements CompositionTransaction {
   final CompositionGraph liveGraph;
   final void Function(CompositionPlan plan) onCommit;
   final CompositionLifecycle? lifecycle;
+  final String correlationId;
+  final CompositionLifecycleEventSink? onLifecycleEvent;
   final CompositionGraph _stagedGraph = CompositionGraph();
   bool _committed = false;
   bool _rolledBack = false;
@@ -25,6 +27,8 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     required this.liveGraph,
     required this.onCommit,
     this.lifecycle,
+    required this.correlationId,
+    this.onLifecycleEvent,
   });
 
   @override
@@ -91,7 +95,7 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     // Preparation runs before publication so validation/setup failures cannot
     // expose partially activated contributions.
     try {
-      lifecycle?.prepare(plan.activationOrder);
+      _runLifecycleHook(CompositionLifecycleOperation.prepare, plan.activationOrder, () => lifecycle?.prepare(plan.activationOrder));
     } catch (error, stackTrace) {
       _compensateAfterFailure(plan.activationOrder, error, stackTrace);
       _rolledBack = true;
@@ -102,7 +106,7 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     // implementations can resolve dependencies from the live graph.
     liveGraph.addAll(_stagedGraph.nodes.values);
     try {
-      lifecycle?.activate(plan.activationOrder);
+      _runLifecycleHook(CompositionLifecycleOperation.activate, plan.activationOrder, () => lifecycle?.activate(plan.activationOrder));
       onCommit(plan); // Backward-compatible activation hook.
     } catch (error, stackTrace) {
       for (final id in stagedIds) {
@@ -135,10 +139,70 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     StackTrace stackTrace,
   ) {
     try {
-      lifecycle?.compensate(orderedNodes, error, stackTrace);
+      _runLifecycleHook(CompositionLifecycleOperation.compensate, orderedNodes, () => lifecycle?.compensate(orderedNodes, error, stackTrace));
     } catch (_) {
       // Preserve the original lifecycle failure. Compensation is best-effort;
       // implementations should report their own compensation failures.
+    }
+  }
+
+
+  void _runLifecycleHook(
+    CompositionLifecycleOperation operation,
+    List<CompositionNode> nodes,
+    void Function() callback,
+  ) {
+    final sink = onLifecycleEvent;
+    final nodeIds = nodes.map((node) => node.id).toList(growable: false);
+    final ownerIds = nodes.map((node) => node.ownerId).toSet().toList()..sort();
+    final startedAt = DateTime.now().toUtc();
+    final stopwatch = Stopwatch()..start();
+    _emitLifecycleEvent(sink, CompositionLifecycleEvent(
+      correlationId: correlationId,
+      operation: operation,
+      status: CompositionLifecycleStatus.started,
+      timestamp: startedAt,
+      nodeIds: nodeIds,
+      ownerIds: ownerIds,
+    ));
+    try {
+      callback();
+      stopwatch.stop();
+      _emitLifecycleEvent(sink, CompositionLifecycleEvent(
+        correlationId: correlationId,
+        operation: operation,
+        status: CompositionLifecycleStatus.succeeded,
+        timestamp: DateTime.now().toUtc(),
+        nodeIds: nodeIds,
+        ownerIds: ownerIds,
+        duration: stopwatch.elapsed,
+      ));
+    } catch (error) {
+      stopwatch.stop();
+      _emitLifecycleEvent(sink, CompositionLifecycleEvent(
+        correlationId: correlationId,
+        operation: operation,
+        status: CompositionLifecycleStatus.failed,
+        timestamp: DateTime.now().toUtc(),
+        nodeIds: nodeIds,
+        ownerIds: ownerIds,
+        duration: stopwatch.elapsed,
+        errorType: error.runtimeType.toString(),
+        errorMessage: error.toString(),
+      ));
+      rethrow;
+    }
+  }
+
+  void _emitLifecycleEvent(
+    CompositionLifecycleEventSink? sink,
+    CompositionLifecycleEvent event,
+  ) {
+    if (sink == null) return;
+    try {
+      sink(event);
+    } catch (_) {
+      // Observability must never change composition correctness.
     }
   }
 
