@@ -140,6 +140,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
       lifecycleNodes.putIfAbsent(node.ownerId, () => []).add(node);
     }
 
+    final deactivationCorrelationId = 'composition-deactivation-${++_nextTransactionSequence}';
     try {
       // Remove graph entries first so deactivation hooks observe the new
       // graph. Nodes are supplied in consumer-before-provider order.
@@ -151,7 +152,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         final lifecycle = _ownerLifecycles[affectedOwner];
         final ownedNodes = lifecycleNodes[affectedOwner];
         if (lifecycle != null && ownedNodes != null) {
-          lifecycle.deactivate(ownedNodes);
+          _runLifecycleHook(deactivationCorrelationId, CompositionLifecycleOperation.deactivate, ownedNodes, () => lifecycle.deactivate(ownedNodes));
         }
         onOwnerDeactivated?.call(affectedOwner);
       }
@@ -166,7 +167,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         final lifecycle = _ownerLifecycles[entry.key];
         if (lifecycle == null) continue;
         try {
-          lifecycle.compensate(entry.value, error, stackTrace);
+          _runLifecycleHook(deactivationCorrelationId, CompositionLifecycleOperation.compensate, entry.value, () => lifecycle.compensate(entry.value, error, stackTrace));
         } catch (_) {
           // Preserve the original deactivation error.
         }
@@ -181,4 +182,63 @@ class DefaultCompositionRuntime implements CompositionRuntime {
       rethrow;
     }
   }
+  void _runLifecycleHook(
+    String correlationId,
+    CompositionLifecycleOperation operation,
+    List<CompositionNode> nodes,
+    void Function() callback,
+  ) {
+    final sink = onLifecycleEvent;
+    final nodeIds = nodes.map((node) => node.id).toList(growable: false);
+    final ownerIds = nodes.map((node) => node.ownerId).toSet().toList()..sort();
+    final stopwatch = Stopwatch()..start();
+    _emitLifecycleEvent(sink, CompositionLifecycleEvent(
+      correlationId: correlationId,
+      operation: operation,
+      status: CompositionLifecycleStatus.started,
+      timestamp: DateTime.now().toUtc(),
+      nodeIds: nodeIds,
+      ownerIds: ownerIds,
+    ));
+    try {
+      callback();
+      stopwatch.stop();
+      _emitLifecycleEvent(sink, CompositionLifecycleEvent(
+        correlationId: correlationId,
+        operation: operation,
+        status: CompositionLifecycleStatus.succeeded,
+        timestamp: DateTime.now().toUtc(),
+        nodeIds: nodeIds,
+        ownerIds: ownerIds,
+        duration: stopwatch.elapsed,
+      ));
+    } catch (error) {
+      stopwatch.stop();
+      _emitLifecycleEvent(sink, CompositionLifecycleEvent(
+        correlationId: correlationId,
+        operation: operation,
+        status: CompositionLifecycleStatus.failed,
+        timestamp: DateTime.now().toUtc(),
+        nodeIds: nodeIds,
+        ownerIds: ownerIds,
+        duration: stopwatch.elapsed,
+        errorType: error.runtimeType.toString(),
+        errorMessage: error.toString(),
+      ));
+      rethrow;
+    }
+  }
+
+  void _emitLifecycleEvent(
+    CompositionLifecycleEventSink? sink,
+    CompositionLifecycleEvent event,
+  ) {
+    if (sink == null) return;
+    try {
+      sink(event);
+    } catch (_) {
+      // Diagnostics must not alter graph or lifecycle semantics.
+    }
+  }
+
 }
