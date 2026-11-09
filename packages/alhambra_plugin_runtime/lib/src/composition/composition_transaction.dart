@@ -10,6 +10,7 @@ abstract interface class CompositionTransaction {
   void rollback();
   bool get isCommitted;
   bool get isRolledBack;
+  List<CompositionNode> get stagedNodes;
 }
 
 class DefaultCompositionTransaction implements CompositionTransaction {
@@ -28,6 +29,10 @@ class DefaultCompositionTransaction implements CompositionTransaction {
 
   @override
   bool get isCommitted => _committed;
+
+  @override
+  List<CompositionNode> get stagedNodes =>
+      List.unmodifiable(_stagedGraph.nodes.values);
 
   @override
   bool get isRolledBack => _rolledBack;
