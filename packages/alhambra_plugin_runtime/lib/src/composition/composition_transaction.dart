@@ -74,11 +74,24 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     }
 
     final plan = CompositionPlan.fromGraph(candidate);
-    // Validation and plan construction precede the first live mutation.
-    liveGraph.addAll(_stagedGraph.nodes.values);
-    onCommit(plan);
-    _committed = true;
+    final stagedIds = _stagedGraph.nodes.keys.toList(growable: false);
 
+    // Publish the staged graph only for the duration of the activation
+    // callback. If activation throws, remove every staged node before
+    // propagating the original error so callers never observe a partial
+    // composition graph.
+    liveGraph.addAll(_stagedGraph.nodes.values);
+    try {
+      onCommit(plan);
+    } catch (_) {
+      for (final id in stagedIds) {
+        liveGraph.remove(id);
+      }
+      rollback();
+      rethrow;
+    }
+
+    _committed = true;
     return CompositionSuccess(
       activatedNodeIds: plan.activationOrder
           .where((node) => _stagedGraph.nodes.containsKey(node.id))
