@@ -1,8 +1,10 @@
+import 'dart:developer' as developer;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:alhambra_extension/alhambra_extension.dart';
 import '../core/license/license_service.dart';
 import '../core/license/pro_plugin_host.dart';
 import '../core/plugins/builtin_plugin_loader.dart';
+import '../core/plugins/alhambra_community_plugin_bundle.dart';
 
 final extensionRuntimeProvider = Provider<ExtensionRuntime>((ref) {
   return ExtensionRuntime();
@@ -16,9 +18,30 @@ final moduleManagerProvider = Provider<ModuleManager>((ref) {
 final pluginManagerProvider = Provider<PluginManager>((ref) {
   final runtime = ref.watch(extensionRuntimeProvider);
   final manager = PluginManager(runtime: runtime);
-  // Auto-load built-in community plugins
-  BuiltInPluginLoader(pluginManager: manager).loadAll();
+  // The standalone Alhambra app opts into its Community bundle explicitly.
+  // The reusable loader itself has no built-in plugin imports.
+  BuiltInPluginLoader(
+    pluginManager: manager,
+    platformPlugins: AlhambraCommunityPluginBundle.createPlatformPlugins(),
+    domainPluginPacks: ref.watch(injectedDomainPluginPacksProvider),
+    onPluginError: (plugin, error, stackTrace) {
+      developer.log(
+        'Failed to activate plugin ${plugin.metadata.id}',
+        name: 'alhambra.plugins',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    },
+  ).loadAll();
   return manager;
+});
+
+/// Optional domain contributions supplied by an embedding application.
+///
+/// These are distinct from edition-gated Pro plugins. Community adopters may
+/// override this provider to compose Wayang, Cifr, or another product pack.
+final injectedDomainPluginPacksProvider = Provider<List<AlhambraPlugin>>((ref) {
+  return const [];
 });
 
 final injectedProPluginsProvider = Provider<List<AlhambraPlugin>>((ref) {
