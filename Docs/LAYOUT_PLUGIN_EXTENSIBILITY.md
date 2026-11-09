@@ -70,11 +70,16 @@ mechanism.
 
 ## Legacy migration
 
-The closed `AppKind` enum remains in the current `LayoutPlugin.build`
-signature during migration so existing layout implementations continue to
-compile. The host defaults it to `AppKind.custom`, never to an IDE category.
-A subsequent API revision will replace this legacy parameter with
-`ApplicationProfile` after built-in and adopter layouts have migrated.
+New layouts should implement `ProfileAwareLayoutPlugin` and receive the full
+`ApplicationProfile` in `buildForProfile`. The host prefers this contract
+whenever a layout implements it.
+
+The original `LayoutPlugin.build(..., AppKind, ...)` remains as a compatibility
+path for existing adopters. The base method now provides a clear unsupported
+implementation, allowing a new profile-aware layout to omit the legacy method.
+The host passes `AppKind.custom` only to legacy layouts. The `suitableFor`
+metadata field is deprecated in favor of `LayoutProfileRequirements`; it will
+be removed in a future breaking release.
 
 ## Ownership boundaries
 

@@ -22,7 +22,7 @@ import '../widgets/workbench/slots/main_pane_slot.dart';
 /// keeping content centred with a max-width constraint.
 ///
 /// Best for: mobile apps, PWAs, simple content-browsing UIs.
-class MobileLayout extends LayoutPlugin {
+class MobileLayout extends LayoutPlugin implements ProfileAwareLayoutPlugin {
   static const String id = 'alhambra.layout.mobile';
 
   const MobileLayout();
@@ -97,6 +97,19 @@ class MobileLayout extends LayoutPlugin {
           _slot(LayoutSlot.activityBar, () => const _DefaultMobileBottomBar()),
     );
   }
+  @override
+  Widget buildForProfile(
+    BuildContext context, {
+    required ScreenClass screenClass,
+    required ApplicationProfile applicationProfile,
+    required LayoutSlotConfig slots,
+  }) =>
+      build(
+        context,
+        screenClass: screenClass,
+        appKind: AppKind.custom,
+        slots: slots,
+      );
 }
 
 /// Default mobile navigation rail placeholder — replace via [LayoutSlot.activityBar].

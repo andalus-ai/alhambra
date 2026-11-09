@@ -190,7 +190,9 @@ abstract class LayoutPlugin {
   /// Metadata exposed in the layout registry / picker.
   LayoutPluginMetadata get metadata;
 
-  /// Builds the root widget for the given [screenClass] and [appKind].
+  /// Legacy build entry point for layouts that still use [AppKind].
+  ///
+  /// New layouts should implement [ProfileAwareLayoutPlugin] instead.
   ///
   /// * [screenClass] — the current viewport tier (small/medium/large).
   /// * [appKind] — the semantic application category provided by the host app.
@@ -201,7 +203,11 @@ abstract class LayoutPlugin {
     required ScreenClass screenClass,
     required AppKind appKind,
     required LayoutSlotConfig slots,
-  });
+  }) {
+    throw UnsupportedError(
+      'A layout must implement build or ProfileAwareLayoutPlugin.buildForProfile.',
+    );
+  }
 
   /// Called when the plugin is registered. May be overridden for one-time
   /// initialization (e.g. registering commands).
@@ -209,6 +215,20 @@ abstract class LayoutPlugin {
 
   /// Called when the plugin is unregistered / disposed.
   void onUnregistered() {}
+}
+
+/// Optional open-profile build contract for new layout implementations.
+///
+/// Legacy [LayoutPlugin] implementations may continue overriding [LayoutPlugin.build].
+/// New layouts can implement this interface and receive the full host profile
+/// without depending on the closed [AppKind] taxonomy.
+abstract interface class ProfileAwareLayoutPlugin {
+  Widget buildForProfile(
+    BuildContext context, {
+    required ScreenClass screenClass,
+    required ApplicationProfile applicationProfile,
+    required LayoutSlotConfig slots,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

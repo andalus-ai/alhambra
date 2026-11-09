@@ -21,7 +21,7 @@ import '../platform_breakpoints.dart';
 /// ```
 ///
 /// Responsive behaviour mirrors [GenericWorkbenchLayoutView]:
-/// * **large** (≥ 1024 dp): full four-column IDE layout.
+/// * **large** (≥ 1024 dp): full multi-pane workspace layout.
 /// * **medium** (600–1023 dp): activity bar + sidebar + main; secondary hidden.
 /// * **small** (< 600 dp): main pane only; sidebar accessible as a drawer via
 ///   [GenericWorkbenchLayoutView] (this shell shows a minimal two-column for

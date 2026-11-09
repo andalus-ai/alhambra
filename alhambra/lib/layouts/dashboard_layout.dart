@@ -19,7 +19,7 @@ import '../widgets/workbench/slots/side_pane_slot.dart';
 /// On **small** screens a drawer replaces the sidebar.
 ///
 /// Best for: analytics dashboards, admin panels, reporting UIs.
-class DashboardLayout extends LayoutPlugin {
+class DashboardLayout extends LayoutPlugin implements ProfileAwareLayoutPlugin {
   static const String id = 'alhambra.layout.dashboard';
 
   const DashboardLayout();
@@ -99,6 +99,19 @@ class DashboardLayout extends LayoutPlugin {
       ScreenClass.small => _DashboardSmall(slots: slots),
     };
   }
+  @override
+  Widget buildForProfile(
+    BuildContext context, {
+    required ScreenClass screenClass,
+    required ApplicationProfile applicationProfile,
+    required LayoutSlotConfig slots,
+  }) =>
+      build(
+        context,
+        screenClass: screenClass,
+        appKind: AppKind.custom,
+        slots: slots,
+      );
 }
 
 class _DashboardSmall extends StatefulWidget {
