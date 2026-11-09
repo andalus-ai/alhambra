@@ -23,7 +23,7 @@ void main() {
 
       expect(
         result.map((item) => item.id).toList(),
-        ['theme', 'core', 'commands', 'editor'],
+        ['core', 'commands', 'theme', 'editor'],
       );
     });
 
