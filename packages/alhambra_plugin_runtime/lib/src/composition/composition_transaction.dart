@@ -19,10 +19,7 @@ class DefaultCompositionTransaction implements CompositionTransaction {
   bool _committed = false;
   bool _rolledBack = false;
 
-  DefaultCompositionTransaction({
-    required this.liveGraph,
-    required this.onCommit,
-  });
+  DefaultCompositionTransaction({required this.liveGraph, required this.onCommit});
 
   @override
   bool get isCommitted => _committed;
@@ -39,47 +36,51 @@ class DefaultCompositionTransaction implements CompositionTransaction {
   @override
   void stageAll(Iterable<CompositionNode> nodes) {
     _ensureOpen();
-    final candidate = CompositionGraph();
-    candidate.addAll(_stagedGraph.nodes.values);
+    final candidate = CompositionGraph()..addAll(_stagedGraph.nodes.values);
     candidate.addAll(nodes);
+    final replacement = candidate.nodes.values.toList(growable: false);
     for (final id in _stagedGraph.nodes.keys.toList()) {
       _stagedGraph.remove(id);
     }
-    _stagedGraph.addAll(candidate.nodes.values);
+    _stagedGraph.addAll(replacement);
   }
 
   @override
   CompositionResult commit() {
     _ensureOpen();
 
-    final candidate = CompositionGraph();
-    try {
-      candidate.addAll(liveGraph.nodes.values);
-      candidate.addAll(_stagedGraph.nodes.values);
-    } on ArgumentError catch (error) {
-      rollback();
-      return CompositionFailure(diagnostics: [
-        DuplicateNodeDiagnostic(
-          nodeId: _duplicateId(error),
-          existingOwnerId: 'live graph',
-          newOwnerId: 'staged graph',
-        ),
-      ]);
+    // Detect conflicts explicitly so diagnostics retain the actual owners.
+    final liveNodes = liveGraph.nodes;
+    for (final staged in _stagedGraph.nodes.values) {
+      final existing = liveNodes[staged.id];
+      if (existing != null) {
+        rollback();
+        return CompositionFailure(diagnostics: [
+          DuplicateNodeDiagnostic(
+            nodeId: staged.id,
+            existingOwnerId: existing.ownerId,
+            newOwnerId: staged.ownerId,
+          ),
+        ]);
+      }
     }
 
+    final candidate = CompositionGraph()..addAll(liveNodes.values);
+    candidate.addAll(_stagedGraph.nodes.values);
     final diagnostics = candidate.validate();
     if (diagnostics.isNotEmpty) {
       rollback();
       return CompositionFailure(diagnostics: diagnostics);
     }
 
+    // Plan construction is deliberately before publication: a planning
+    // failure cannot leave any staged node in the live graph.
     final plan = CompositionPlan.fromGraph(candidate);
     final stagedIds = _stagedGraph.nodes.keys.toList(growable: false);
 
-    // Publish the staged graph only for the duration of the activation
-    // callback. If activation throws, remove every staged node before
-    // propagating the original error so callers never observe a partial
-    // composition graph.
+    // addAll itself is atomic. The callback is the activation phase; if it
+    // fails, remove this transaction's published nodes and close the
+    // transaction as rolled back before propagating the original exception.
     liveGraph.addAll(_stagedGraph.nodes.values);
     try {
       onCommit(plan);
@@ -87,7 +88,7 @@ class DefaultCompositionTransaction implements CompositionTransaction {
       for (final id in stagedIds) {
         liveGraph.remove(id);
       }
-      rollback();
+      _rolledBack = true;
       rethrow;
     }
 
@@ -96,7 +97,7 @@ class DefaultCompositionTransaction implements CompositionTransaction {
       activatedNodeIds: plan.activationOrder
           .where((node) => _stagedGraph.nodes.containsKey(node.id))
           .map((node) => node.id)
-          .toList(),
+          .toList(growable: false),
     );
   }
 
@@ -111,10 +112,5 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     if (_committed || _rolledBack) {
       throw StateError('Transaction is already completed');
     }
-  }
-
-  String _duplicateId(ArgumentError error) {
-    final value = error.invalidValue;
-    return value is String ? value : 'unknown';
   }
 }
