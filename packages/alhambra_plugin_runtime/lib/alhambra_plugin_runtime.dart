@@ -90,6 +90,8 @@ export 'src/composition/composition_lifecycle.dart';
 export 'src/composition/composition_plan_diff.dart';
 export 'src/composition/composition_reconciler.dart';
 export 'src/composition/composition_persistence.dart';
+export 'src/composition/composition_snapshot_migrator.dart';
+export 'src/composition/composition_compatibility.dart';
 
 // State Scope & Service Boundaries
 export 'src/runtime_scope/scoped_service_registry.dart';
