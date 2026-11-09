@@ -212,8 +212,8 @@ enum CompositionConflictPolicy {
 /// [activate] succeeds. [compensate] is invoked when preparation or activation
 /// fails; it should be idempotent and best-effort.
 abstract interface class CompositionLifecycle {
-  void prepare(CompositionPlan plan);
-  void activate(CompositionPlan plan);
+  void prepare(List<CompositionNode> orderedNodes);
+  void activate(List<CompositionNode> orderedNodes);
   void deactivate(List<CompositionNode> nodes);
-  void compensate(CompositionPlan plan, Object error, StackTrace stackTrace);
+  void compensate(List<CompositionNode> orderedNodes, Object error, StackTrace stackTrace);
 }
