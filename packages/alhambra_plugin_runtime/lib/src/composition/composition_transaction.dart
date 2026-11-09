@@ -32,46 +32,78 @@ class DefaultCompositionTransaction implements CompositionTransaction {
 
   @override
   void stage(CompositionNode node) {
-    if (_committed || _rolledBack) {
-      throw StateError('Transaction is already completed');
-    }
+    _ensureOpen();
     _stagedGraph.add(node);
   }
 
   @override
   void stageAll(Iterable<CompositionNode> nodes) {
-    for (final node in nodes) {
-      stage(node);
-    }
+    _ensureOpen();
+    // Stage into a temporary graph first, so a duplicate doesn't partially stage.
+    final candidate = CompositionGraph();
+    candidate.addAll(_stagedGraph.nodes.values);
+    candidate.addAll(nodes);
+    _stagedGraph
+      ..removeAll(_stagedGraph.nodes.keys.toList())
+      ..addAll(candidate.nodes.values);
   }
 
   @override
   CompositionResult commit() {
-    if (_committed) throw StateError('Transaction already committed');
-    if (_rolledBack) throw StateError('Transaction has been rolled back');
+    _ensureOpen();
 
-    // Validate staged graph against both staged nodes and existing live nodes
-    final diagnostics = _stagedGraph.validate(
-      knownExternalNodeIds: liveGraph.nodes.keys.toSet(),
-    );
+    // Candidate graph includes the live graph, allowing cross-transaction
+    // dependencies and cycles to be validated as one coherent composition.
+    final candidate = CompositionGraph();
+    try {
+      candidate.addAll(liveGraph.nodes.values);
+      candidate.addAll(_stagedGraph.nodes.values);
+    } on ArgumentError catch (error) {
+      rollback();
+      return CompositionFailure(diagnostics: [
+        DuplicateNodeDiagnostic(
+          nodeId: _duplicateId(error),
+          existingOwnerId: 'live graph',
+          newOwnerId: 'staged graph',
+        ),
+      ]);
+    }
 
+    final diagnostics = candidate.validate();
     if (diagnostics.isNotEmpty) {
       rollback();
       return CompositionFailure(diagnostics: diagnostics);
     }
 
-    final plan = CompositionPlan.fromGraph(_stagedGraph);
+    final plan = CompositionPlan.fromGraph(candidate);
+    // All validation happens before mutating live state.
     liveGraph.addAll(_stagedGraph.nodes.values);
     onCommit(plan);
     _committed = true;
 
     return CompositionSuccess(
-      activatedNodeIds: plan.activationOrder.map((n) => n.id).toList(),
+      activatedNodeIds: plan.activationOrder
+          .where((node) => _stagedGraph.nodes.containsKey(node.id))
+          .map((node) => node.id)
+          .toList(),
     );
   }
 
   @override
   void rollback() {
+    if (_committed) throw StateError('Cannot roll back a committed transaction');
+    if (_rolledBack) return;
     _rolledBack = true;
+  }
+
+  void _ensureOpen() {
+    if (_committed || _rolledBack) {
+      throw StateError('Transaction is already completed');
+    }
+  }
+
+  String _duplicateId(ArgumentError error) {
+    final value = error.invalidValue;
+    return value is String ? value : 'unknown';
   }
 }
