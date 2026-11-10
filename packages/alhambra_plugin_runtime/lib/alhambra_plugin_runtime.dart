@@ -32,6 +32,7 @@ export 'src/capabilities/plugin_capability_negotiator.dart';
 export 'src/reactivity/signals_engine.dart';
 
 // Plugins & Startup Pipeline
+export 'src/plugins/plugin_runtime_health.dart';
 export 'src/plugins/plugin_manager.dart';
 export 'src/plugins/plugin_loader.dart';
 export 'src/plugins/extension_manifest.dart';
