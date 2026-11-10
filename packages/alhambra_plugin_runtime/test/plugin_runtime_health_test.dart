@@ -52,6 +52,23 @@ void main() {
       );
     });
 
+    test('observes an existing state without inventing transition history', () {
+      final registry = PluginRuntimeHealthRegistry();
+      final snapshot = registry.observe(
+        pluginId: 'already-running',
+        state: PluginRuntimeState.active,
+        reason: 'Attached to existing host',
+      );
+
+      expect(snapshot.state, PluginRuntimeState.active);
+      expect(snapshot.transitionCount, 0);
+      expect(registry.history, isEmpty);
+      expect(registry.observe(
+        pluginId: 'already-running',
+        state: PluginRuntimeState.failed,
+      ).state, PluginRuntimeState.active);
+    });
+
     test('forget removes projection but retains historical transitions', () {
       final registry = PluginRuntimeHealthRegistry();
       registry.transition(pluginId: 'sample', next: PluginRuntimeState.validated);
