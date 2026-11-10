@@ -1,28 +1,59 @@
 import 'dart:async';
 
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
+import '../capabilities/plugin_capability_negotiator.dart';
 import '../extensions/extension_runtime.dart';
 import 'runtime_plugin_context.dart';
 
-/// Manages the lifecycle of compiled, application-selected plugins.
-///
-/// The manager deliberately does not discover or execute Dart code. Hosts
-/// construct the plugin instances they want to ship and pass them to this
-/// manager.
+typedef PluginCapabilityRequirementsResolver = Iterable<PluginCapabilityRequirement>
+    Function(AlhambraPlugin plugin);
+
+class PluginCapabilityNegotiationException implements Exception {
+  final String pluginId;
+  final CapabilityNegotiationResult result;
+
+  const PluginCapabilityNegotiationException({
+    required this.pluginId,
+    required this.result,
+  });
+
+  @override
+  String toString() =>
+      'PluginCapabilityNegotiationException: required capabilities for '
+      '"$pluginId" are incompatible.';
+}
+
+/// Manages compiled, application-selected plugins. Hosts construct plugin
+/// instances; this manager never discovers or executes downloaded Dart code.
 class PluginManager {
   final Map<String, AlhambraPlugin> _activePlugins = {};
   final Map<String, RuntimePluginContext> _contexts = {};
-
-  /// Per-plugin operation tails. Lifecycle work for different plugins remains
-  /// independent, while operations for the same plugin are serialized.
+  final Map<String, CapabilityNegotiationResult> _capabilityNegotiations = {};
   final Map<String, Future<void>> _operationTails = {};
 
   final ExtensionRuntime runtime;
+  final PluginCapabilityNegotiator? capabilityNegotiator;
+  final List<PluginCapabilityDeclaration> capabilityDeclarations;
+  final PluginCapabilityRequirementsResolver? capabilityRequirementsResolver;
 
-  PluginManager({ExtensionRuntime? runtime})
-      : runtime = runtime ?? ExtensionRuntime();
+  PluginManager({
+    ExtensionRuntime? runtime,
+    this.capabilityNegotiator,
+    Iterable<PluginCapabilityDeclaration> capabilityDeclarations = const [],
+    this.capabilityRequirementsResolver,
+  })  : runtime = runtime ?? ExtensionRuntime(),
+        capabilityDeclarations =
+            List<PluginCapabilityDeclaration>.unmodifiable(capabilityDeclarations) {
+    if ((capabilityNegotiator == null) !=
+        (capabilityRequirementsResolver == null)) {
+      throw ArgumentError(
+        'capabilityNegotiator and capabilityRequirementsResolver must be provided together.',
+      );
+    }
+  }
 
-  /// Activates [plugin] once and rolls back its contributions on failure.
+  /// Activates once. Negotiation runs before plugin code and never grants
+  /// permissions; the capability broker remains the authorization boundary.
   Future<void> activate(AlhambraPlugin plugin) {
     final pluginId = plugin.metadata.id;
     if (pluginId.trim().isEmpty) {
@@ -33,35 +64,50 @@ class PluginManager {
 
     return _serialize(pluginId, () async {
       if (_activePlugins.containsKey(pluginId)) return;
-
-      final context = RuntimePluginContext(
-        pluginId: pluginId,
-        runtime: runtime,
-      );
+      final context = RuntimePluginContext(pluginId: pluginId, runtime: runtime);
 
       try {
+        _negotiateCapabilities(plugin);
         await plugin.activate(context);
         runtime.validator.validateOwner(pluginId);
         _activePlugins[pluginId] = plugin;
         _contexts[pluginId] = context;
       } catch (error, stackTrace) {
-        // A cleanup failure must not hide the activation error that caused
-        // rollback. _unregisterContributions still attempts every registry.
         try {
           _unregisterContributions(pluginId);
         } catch (_) {
-          // Preserve the original activation failure.
+          // Preserve the activation failure.
         }
         Error.throwWithStackTrace(error, stackTrace);
       }
     });
   }
 
+  void _negotiateCapabilities(AlhambraPlugin plugin) {
+    final negotiator = capabilityNegotiator;
+    final resolver = capabilityRequirementsResolver;
+    if (negotiator == null || resolver == null) return;
+
+    final result = negotiator.negotiate(
+      requirements: resolver(plugin),
+      declarations: capabilityDeclarations,
+    );
+    _capabilityNegotiations[plugin.metadata.id] = result;
+    if (!result.canActivate) {
+      throw PluginCapabilityNegotiationException(
+        pluginId: plugin.metadata.id,
+        result: result,
+      );
+    }
+  }
+
+  /// Most recent negotiation outcomes, including failed pre-activation checks.
+  Map<String, CapabilityNegotiationResult> get capabilityNegotiations =>
+      Map<String, CapabilityNegotiationResult>.unmodifiable(
+        _capabilityNegotiations,
+      );
+
   /// Deactivates a plugin and always releases host-owned resources.
-  ///
-  /// If view removal, the plugin shutdown hook, or registry cleanup fails,
-  /// the first failure is propagated after all cleanup targets have been
-  /// attempted and the plugin has been removed from active state.
   Future<void> deactivate(String pluginId) {
     return _serialize(pluginId, () async {
       final plugin = _activePlugins[pluginId];
@@ -70,7 +116,6 @@ class PluginManager {
 
       Object? failure;
       StackTrace? failureStackTrace;
-
       try {
         runtime.workbench.removeViewsOwnedBy(pluginId);
         await plugin.deactivate(context);
@@ -103,7 +148,6 @@ class PluginManager {
     final completer = Completer<void>();
     final tail = completer.future;
     _operationTails[pluginId] = tail;
-
     try {
       await previous;
       return await operation();
@@ -118,7 +162,6 @@ class PluginManager {
   void _unregisterContributions(String pluginId) {
     Object? firstFailure;
     StackTrace? firstFailureStackTrace;
-
     for (final target in runtime.cleanupTargets) {
       try {
         target.unregisterAllForOwner(pluginId);
@@ -127,13 +170,11 @@ class PluginManager {
         firstFailureStackTrace ??= stackTrace;
       }
     }
-
     if (firstFailure != null) {
       Error.throwWithStackTrace(firstFailure, firstFailureStackTrace!);
     }
   }
 
-  /// A snapshot of the currently active compiled plugins.
   List<AlhambraPlugin> get activePlugins =>
       List<AlhambraPlugin>.unmodifiable(_activePlugins.values);
 }
