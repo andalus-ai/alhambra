@@ -217,3 +217,53 @@ abstract interface class CompositionLifecycle {
   void deactivate(List<CompositionNode> reverseOrderedNodes);
   void compensate(List<CompositionNode> orderedNodes, Object error, StackTrace stackTrace);
 }
+
+/// Lifecycle operations exposed through the framework-neutral diagnostics API.
+enum CompositionLifecycleOperation {
+  prepare,
+  activate,
+  deactivate,
+  compensate,
+}
+
+/// Outcome of an individual lifecycle callback.
+enum CompositionLifecycleStatus {
+  started,
+  succeeded,
+  failed,
+}
+
+/// Immutable diagnostic event emitted around a composition lifecycle callback.
+///
+/// The event model deliberately contains primitive identifiers and error
+/// summaries only; it does not expose runtime internals or telemetry vendors.
+class CompositionLifecycleEvent {
+  final String correlationId;
+  final CompositionLifecycleOperation operation;
+  final CompositionLifecycleStatus status;
+  final DateTime timestamp;
+  final List<String> nodeIds;
+  final List<String> ownerIds;
+  final Duration? duration;
+  final String? errorType;
+  final String? errorMessage;
+
+  CompositionLifecycleEvent({
+    required this.correlationId,
+    required this.operation,
+    required this.status,
+    required this.timestamp,
+    required List<String> nodeIds,
+    required List<String> ownerIds,
+    this.duration,
+    this.errorType,
+    this.errorMessage,
+  })  : nodeIds = List.unmodifiable(nodeIds),
+        ownerIds = List.unmodifiable(ownerIds);
+}
+
+/// Optional sink for lifecycle diagnostics. Sink failures must not affect
+/// composition correctness.
+typedef CompositionLifecycleEventSink = void Function(
+  CompositionLifecycleEvent event,
+);

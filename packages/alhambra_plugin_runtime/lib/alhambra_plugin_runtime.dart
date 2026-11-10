@@ -37,6 +37,7 @@ export 'src/plugins/plugin_dependency_resolver.dart';
 export 'src/plugins/runtime_plugin_context.dart';
 export 'src/plugins/plugin_startup_pipeline.dart';
 export 'src/plugins/plugin_shutdown_coordinator.dart';
+export 'src/plugins/plugin_startup_coordinator.dart';
 
 // Workbench & Layout
 export 'src/workbench/contribution_validator.dart';
@@ -91,6 +92,8 @@ export 'src/composition/composition_lifecycle.dart';
 export 'src/composition/composition_plan_diff.dart';
 export 'src/composition/composition_reconciler.dart';
 export 'src/composition/composition_persistence.dart';
+export 'src/composition/composition_snapshot_migrator.dart';
+export 'src/composition/composition_compatibility.dart';
 
 // State Scope & Service Boundaries
 export 'src/runtime_scope/scoped_service_registry.dart';
