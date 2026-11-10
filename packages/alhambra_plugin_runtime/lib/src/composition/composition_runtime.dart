@@ -6,6 +6,8 @@ import 'composition_transaction.dart';
 
 abstract interface class CompositionRuntime {
   CompositionGraph get graph;
+  Map<String, CompositionOwnerState> get ownerStates;
+  CompositionOwnerState? ownerState(String ownerId);
   CompositionTransaction beginTransaction({
     void Function(CompositionPlan plan)? onCommit,
     CompositionLifecycle? lifecycle,
@@ -18,7 +20,8 @@ abstract interface class CompositionRuntime {
 class DefaultCompositionRuntime implements CompositionRuntime {
   final CompositionGraph _liveGraph = CompositionGraph();
   final void Function(String ownerId)? onOwnerDeactivated;
-  final Map<String, CompositionLifecycle> _ownerLifecycles = {};\n  final Map<String, CompositionOwnerState> _ownerStates = {};
+  final Map<String, CompositionLifecycle> _ownerLifecycles = {};
+  final Map<String, CompositionOwnerState> _ownerStates = {};
   final CompositionLifecycleEventSink? onLifecycleEvent;
   int _nextTransactionSequence = 0;
   bool _deactivationInProgress = false;
@@ -26,7 +29,21 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   DefaultCompositionRuntime({this.onOwnerDeactivated, this.onLifecycleEvent});
 
   @override
-  CompositionGraph get graph => _liveGraph;\n\n  @override\n  Map<String, CompositionOwnerState> get ownerStates =>\n      Map.unmodifiable(_ownerStates);\n\n  @override\n  CompositionOwnerState? ownerState(String ownerId) => _ownerStates[ownerId];
+  CompositionGraph get graph => _liveGraph;
+
+  @override
+  Map<String, CompositionOwnerState> get ownerStates =>
+      Map.unmodifiable(_ownerStates);
+
+  @override
+  CompositionOwnerState? ownerState(String ownerId) => _ownerStates[ownerId];
+
+  @override
+  Map<String, CompositionOwnerState> get ownerStates =>
+      Map.unmodifiable(_ownerStates);
+
+  @override
+  CompositionOwnerState? ownerState(String ownerId) => _ownerStates[ownerId];
 
   @override
   CompositionTransaction beginTransaction({
@@ -38,7 +55,23 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     late final DefaultCompositionTransaction transaction;
     transaction = DefaultCompositionTransaction(
       liveGraph: _liveGraph,
-      beforeCommit: (nodes) {\n        final blockedOwners = nodes\n            .map((node) => node.ownerId)\n            .toSet()\n            .where((ownerId) =>\n                _ownerStates[ownerId] == CompositionOwnerState.deactivating ||\n                _ownerStates[ownerId] == CompositionOwnerState.failed)\n            .toList()\n          ..sort();\n        if (blockedOwners.isNotEmpty) {\n          throw StateError(\n            'Cannot register contributions for unavailable owner(s): '\n            '${blockedOwners.join(', ')}.',\n          );\n        }\n      },\n      onCommit: (plan) {
+      beforeCommit: (nodes) {
+        final blockedOwners = nodes
+            .map((node) => node.ownerId)
+            .toSet()
+            .where((ownerId) =>
+                _ownerStates[ownerId] == CompositionOwnerState.deactivating ||
+                _ownerStates[ownerId] == CompositionOwnerState.failed)
+            .toList()
+          ..sort();
+        if (blockedOwners.isNotEmpty) {
+          throw StateError(
+            'Cannot register contributions for unavailable owner(s): '
+            '${blockedOwners.join(', ')}.',
+          );
+        }
+      },
+      onCommit: (plan) {
         if (onCommit != null) {
           onCommit(plan);
         }
@@ -46,6 +79,9 @@ class DefaultCompositionRuntime implements CompositionRuntime {
           for (final node in transaction.stagedNodes) {
             _ownerLifecycles.putIfAbsent(node.ownerId, () => lifecycle);
           }
+        }
+        for (final node in transaction.stagedNodes) {
+          _ownerStates[node.ownerId] = CompositionOwnerState.active;
         }
       },
       lifecycle: lifecycle,
@@ -148,7 +184,15 @@ class DefaultCompositionRuntime implements CompositionRuntime {
       lifecycleNodes.putIfAbsent(node.ownerId, () => []).add(node);
     }
 
-    for (final affectedOwner in affectedOwners) {\n      _ownerStates[affectedOwner] = CompositionOwnerState.deactivating;\n    }\n\n    final deactivationCorrelationId = 'composition-deactivation-${++_nextTransactionSequence}';
+    for (final affectedOwner in affectedOwners) {
+      _ownerStates[affectedOwner] = CompositionOwnerState.deactivating;
+    }
+
+    for (final affectedOwner in affectedOwners) {
+      _ownerStates[affectedOwner] = CompositionOwnerState.deactivating;
+    }
+
+    final deactivationCorrelationId = 'composition-deactivation-${++_nextTransactionSequence}';
     final attemptedLifecycleOwners = <String>[];
     _deactivationInProgress = true;
     try {
@@ -173,12 +217,16 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         onOwnerDeactivated?.call(affectedOwner);
       }
       for (final affectedOwner in affectedOwners) {
+        _ownerStates[affectedOwner] = CompositionOwnerState.inactive;
         final stillRegistered = _liveGraph.nodes.values.any(
           (node) => node.ownerId == affectedOwner,
         );
         if (!stillRegistered) _ownerLifecycles.remove(affectedOwner);
       }
     } catch (error, stackTrace) {
+      for (final affectedOwner in affectedOwners) {
+        _ownerStates[affectedOwner] = CompositionOwnerState.failed;
+      }
       for (final ownerId in attemptedLifecycleOwners.reversed) {
         final lifecycle = _ownerLifecycles[ownerId];
         final ownedNodes = lifecycleNodes[ownerId];
