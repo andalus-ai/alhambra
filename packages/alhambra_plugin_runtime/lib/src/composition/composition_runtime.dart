@@ -21,6 +21,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   final Map<String, CompositionLifecycle> _ownerLifecycles = {};
   final CompositionLifecycleEventSink? onLifecycleEvent;
   int _nextTransactionSequence = 0;
+  bool _deactivationInProgress = false;
 
   DefaultCompositionRuntime({this.onOwnerDeactivated, this.onLifecycleEvent});
 
@@ -68,6 +69,10 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     String ownerId, [
     DeactivationStrategy strategy = DeactivationStrategy.degrade,
   ]) {
+    if (_deactivationInProgress) {
+      throw StateError('A composition owner deactivation is already in progress.');
+    }
+
     final ownedIds = _liveGraph.nodes.values
         .where((node) => node.ownerId == ownerId)
         .map((node) => node.id)
@@ -120,12 +125,6 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     // Compute the full set before mutating the live graph. Removing consumers
     // before providers keeps the operation's observable order predictable.
     final originalNodes = Map<String, CompositionNode>.from(nodes);
-    final affectedOwners = removalIds
-        .map((id) => nodes[id]!.ownerId)
-        .toSet()
-        .toList()
-      ..sort();
-
     final removalOrder = _liveGraph
         .topologicalSort()
         .map((node) => node.id)
@@ -134,6 +133,15 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         .reversed
         .toList();
 
+    // Preserve consumer-before-provider order across owners. Sorting owner IDs
+    // here would make callback order unrelated to dependency order.
+    final affectedOwners = <String>[];
+    final seenOwners = <String>{};
+    for (final id in removalOrder) {
+      final ownerId = nodes[id]!.ownerId;
+      if (seenOwners.add(ownerId)) affectedOwners.add(ownerId);
+    }
+
     final lifecycleNodes = <String, List<CompositionNode>>{};
     for (final id in removalOrder) {
       final node = nodes[id]!;
@@ -141,6 +149,8 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     }
 
     final deactivationCorrelationId = 'composition-deactivation-${++_nextTransactionSequence}';
+    final attemptedLifecycleOwners = <String>[];
+    _deactivationInProgress = true;
     try {
       // Remove graph entries first so deactivation hooks observe the new
       // graph. Nodes are supplied in consumer-before-provider order.
@@ -152,7 +162,13 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         final lifecycle = _ownerLifecycles[affectedOwner];
         final ownedNodes = lifecycleNodes[affectedOwner];
         if (lifecycle != null && ownedNodes != null) {
-          _runLifecycleHook(deactivationCorrelationId, CompositionLifecycleOperation.deactivate, ownedNodes, () => lifecycle.deactivate(ownedNodes));
+          attemptedLifecycleOwners.add(affectedOwner);
+          _runLifecycleHook(
+            deactivationCorrelationId,
+            CompositionLifecycleOperation.deactivate,
+            ownedNodes,
+            () => lifecycle.deactivate(ownedNodes),
+          );
         }
         onOwnerDeactivated?.call(affectedOwner);
       }
@@ -163,11 +179,17 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         if (!stillRegistered) _ownerLifecycles.remove(affectedOwner);
       }
     } catch (error, stackTrace) {
-      for (final entry in lifecycleNodes.entries) {
-        final lifecycle = _ownerLifecycles[entry.key];
-        if (lifecycle == null) continue;
+      for (final ownerId in attemptedLifecycleOwners.reversed) {
+        final lifecycle = _ownerLifecycles[ownerId];
+        final ownedNodes = lifecycleNodes[ownerId];
+        if (lifecycle == null || ownedNodes == null) continue;
         try {
-          _runLifecycleHook(deactivationCorrelationId, CompositionLifecycleOperation.compensate, entry.value, () => lifecycle.compensate(entry.value, error, stackTrace));
+          _runLifecycleHook(
+            deactivationCorrelationId,
+            CompositionLifecycleOperation.compensate,
+            ownedNodes,
+            () => lifecycle.compensate(ownedNodes, error, stackTrace),
+          );
         } catch (_) {
           // Preserve the original deactivation error.
         }
@@ -180,6 +202,8 @@ class DefaultCompositionRuntime implements CompositionRuntime {
       }
       _liveGraph.addAll(originalNodes.values);
       rethrow;
+    } finally {
+      _deactivationInProgress = false;
     }
   }
   void _runLifecycleHook(

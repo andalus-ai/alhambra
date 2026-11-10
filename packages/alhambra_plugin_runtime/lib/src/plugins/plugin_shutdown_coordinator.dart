@@ -3,6 +3,7 @@ import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'plugin_dependency_resolver.dart';
 import 'plugin_loader.dart';
 import 'plugin_manager.dart';
+import 'plugin_runtime_health.dart';
 
 /// A plugin shutdown failure captured without aborting the remaining shutdown.
 class PluginShutdownFailure {
@@ -66,10 +67,12 @@ class PluginShutdownReport {
 class PluginShutdownCoordinator {
   final PluginManager manager;
   final PluginDependencyResolver dependencyResolver;
+  final PluginRuntimeHealthRegistry? healthRegistry;
 
   const PluginShutdownCoordinator({
     required this.manager,
     this.dependencyResolver = const PluginDependencyResolver(),
+    this.healthRegistry,
   });
 
   Future<PluginShutdownReport> shutdown({
@@ -128,12 +131,35 @@ class PluginShutdownCoordinator {
       if (plugin == null) continue;
 
       attempted.add(id);
+      final health = healthRegistry;
+      if (health != null) {
+        health.observe(
+          pluginId: id,
+          state: PluginRuntimeState.active,
+          reason: 'Active plugin observed before coordinated shutdown',
+        );
+        health.transition(
+          pluginId: id,
+          next: PluginRuntimeState.stopping,
+          reason: 'Plugin shutdown started',
+        );
+      }
       try {
         // Use the plugin's original metadata ID because PluginManager keys
         // lifecycle state by that exact value.
         await manager.deactivate(plugin.metadata.id);
+        health?.transition(
+          pluginId: id,
+          next: PluginRuntimeState.stopped,
+          reason: 'Plugin shutdown completed',
+        );
         deactivated.add(id);
       } catch (error, stackTrace) {
+        health?.transition(
+          pluginId: id,
+          next: PluginRuntimeState.failed,
+          reason: 'Plugin shutdown failed: $error',
+        );
         failures.add(
           PluginShutdownFailure(
             pluginId: id,

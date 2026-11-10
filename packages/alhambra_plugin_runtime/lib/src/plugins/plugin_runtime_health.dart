@@ -103,6 +103,33 @@ class PluginRuntimeHealthRegistry {
     return event;
   }
 
+  /// Seeds a state observed by the host when no lifecycle history is available.
+  ///
+  /// Unlike [transition], this does not invent preceding lifecycle events.
+  /// It is intended for adapters that attach to an already-running runtime.
+  PluginRuntimeHealthSnapshot observe({
+    required String pluginId,
+    required PluginRuntimeState state,
+    DateTime? at,
+    String? reason,
+  }) {
+    final id = pluginId.trim();
+    if (id.isEmpty) {
+      throw ArgumentError.value(pluginId, 'pluginId', 'must not be empty');
+    }
+    final existing = _snapshots[id];
+    if (existing != null) return existing;
+    final snapshot = PluginRuntimeHealthSnapshot(
+      pluginId: id,
+      state: state,
+      updatedAt: at ?? DateTime.now().toUtc(),
+      reason: reason ?? 'Observed existing runtime state',
+      transitionCount: 0,
+    );
+    _snapshots[id] = snapshot;
+    return snapshot;
+  }
+
   /// Remove projection state only; this does not perform plugin cleanup.
   void forget(String pluginId) {
     final id = pluginId.trim();
