@@ -3,6 +3,7 @@ import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'plugin_dependency_resolver.dart';
 import 'plugin_loader.dart';
 import 'plugin_manager.dart';
+import 'plugin_runtime_health.dart';
 
 /// A failure while rolling back a partially-started plugin batch.
 class PluginRollbackFailure {
@@ -62,10 +63,12 @@ class PluginStartupBatchReport {
 class PluginStartupCoordinator {
   final PluginManager manager;
   final PluginDependencyResolver dependencyResolver;
+  final PluginRuntimeHealthRegistry? healthRegistry;
 
   const PluginStartupCoordinator({
     required this.manager,
     this.dependencyResolver = const PluginDependencyResolver(),
+    this.healthRegistry,
   });
 
   Future<PluginStartupBatchReport> start({
@@ -125,6 +128,25 @@ class PluginStartupCoordinator {
       );
     }
 
+    final health = healthRegistry;
+    if (health != null) {
+      for (final item in plan) {
+        final id = item.manifest.id.trim();
+        health.transition(
+          pluginId: id,
+          next: PluginRuntimeState.validated,
+          reason: 'Startup preflight completed',
+        );
+      }
+      for (final id in previouslyActiveIds) {
+        health.observe(
+          pluginId: id,
+          state: PluginRuntimeState.active,
+          reason: 'Already active before startup batch',
+        );
+      }
+    }
+
     final activated = <AlhambraPlugin>[];
 
     for (final item in plan) {
@@ -133,18 +155,51 @@ class PluginStartupCoordinator {
 
       final plugin = pluginsById[id]!;
       try {
+        health?.transition(
+          pluginId: id,
+          next: PluginRuntimeState.starting,
+          reason: 'Plugin activation started',
+        );
         await manager.activate(plugin);
         activated.add(plugin);
+        health?.transition(
+          pluginId: id,
+          next: PluginRuntimeState.active,
+          reason: 'Plugin activation completed',
+        );
       } catch (error, stackTrace) {
+        health?.transition(
+          pluginId: id,
+          next: PluginRuntimeState.failed,
+          reason: 'Plugin activation failed: $error',
+        );
         final rolledBack = <String>[];
         final rollbackFailures = <PluginRollbackFailure>[];
 
         for (final started in activated.reversed) {
           final startedId = started.metadata.id.trim();
           try {
+            health?.transition(
+              pluginId: startedId,
+              next: PluginRuntimeState.stopping,
+              reason: 'Startup rollback started',
+            );
             await manager.deactivate(startedId);
+            health?.transition(
+              pluginId: startedId,
+              next: PluginRuntimeState.stopped,
+              reason: 'Startup rollback completed',
+            );
             rolledBack.add(startedId);
           } catch (rollbackError, rollbackStackTrace) {
+            final snapshot = health?.snapshotOf(startedId);
+            if (snapshot?.state == PluginRuntimeState.stopping) {
+              health?.transition(
+                pluginId: startedId,
+                next: PluginRuntimeState.failed,
+                reason: 'Startup rollback failed: $rollbackError',
+              );
+            }
             rollbackFailures.add(
               PluginRollbackFailure(
                 pluginId: startedId,
