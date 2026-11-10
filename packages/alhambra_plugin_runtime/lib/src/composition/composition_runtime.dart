@@ -120,12 +120,6 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     // Compute the full set before mutating the live graph. Removing consumers
     // before providers keeps the operation's observable order predictable.
     final originalNodes = Map<String, CompositionNode>.from(nodes);
-    final affectedOwners = removalIds
-        .map((id) => nodes[id]!.ownerId)
-        .toSet()
-        .toList()
-      ..sort();
-
     final removalOrder = _liveGraph
         .topologicalSort()
         .map((node) => node.id)
@@ -133,6 +127,15 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         .toList()
         .reversed
         .toList();
+
+    // Preserve consumer-before-provider order across owners. Sorting owner IDs
+    // here would make callback order unrelated to dependency order.
+    final affectedOwners = <String>[];
+    final seenOwners = <String>{};
+    for (final id in removalOrder) {
+      final ownerId = nodes[id]!.ownerId;
+      if (seenOwners.add(ownerId)) affectedOwners.add(ownerId);
+    }
 
     final lifecycleNodes = <String, List<CompositionNode>>{};
     for (final id in removalOrder) {
