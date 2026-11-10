@@ -26,6 +26,8 @@ export 'src/context/context_contributor_registry.dart';
 export 'src/context/context_service.dart';
 export 'src/context/incremental_context_engine.dart';
 
+export 'src/capabilities/plugin_capability_negotiator.dart';
+
 // Reactivity & Signals
 export 'src/reactivity/signals_engine.dart';
 
