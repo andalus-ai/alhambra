@@ -38,12 +38,6 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   @override
   CompositionOwnerState? ownerState(String ownerId) => _ownerStates[ownerId];
 
-  @override
-  Map<String, CompositionOwnerState> get ownerStates =>
-      Map.unmodifiable(_ownerStates);
-
-  @override
-  CompositionOwnerState? ownerState(String ownerId) => _ownerStates[ownerId];
 
   @override
   CompositionTransaction beginTransaction({
@@ -182,10 +176,6 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     for (final id in removalOrder) {
       final node = nodes[id]!;
       lifecycleNodes.putIfAbsent(node.ownerId, () => []).add(node);
-    }
-
-    for (final affectedOwner in affectedOwners) {
-      _ownerStates[affectedOwner] = CompositionOwnerState.deactivating;
     }
 
     for (final affectedOwner in affectedOwners) {
