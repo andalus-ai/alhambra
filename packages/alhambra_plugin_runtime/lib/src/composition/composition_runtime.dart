@@ -149,7 +149,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     }
 
     final deactivationCorrelationId = 'composition-deactivation-${++_nextTransactionSequence}';
-    final completedLifecycleOwners = <String>[];
+    final attemptedLifecycleOwners = <String>[];
     _deactivationInProgress = true;
     try {
       // Remove graph entries first so deactivation hooks observe the new
@@ -162,13 +162,13 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         final lifecycle = _ownerLifecycles[affectedOwner];
         final ownedNodes = lifecycleNodes[affectedOwner];
         if (lifecycle != null && ownedNodes != null) {
+          attemptedLifecycleOwners.add(affectedOwner);
           _runLifecycleHook(
             deactivationCorrelationId,
             CompositionLifecycleOperation.deactivate,
             ownedNodes,
             () => lifecycle.deactivate(ownedNodes),
           );
-          completedLifecycleOwners.add(affectedOwner);
         }
         onOwnerDeactivated?.call(affectedOwner);
       }
@@ -179,7 +179,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
         if (!stillRegistered) _ownerLifecycles.remove(affectedOwner);
       }
     } catch (error, stackTrace) {
-      for (final ownerId in completedLifecycleOwners.reversed) {
+      for (final ownerId in attemptedLifecycleOwners.reversed) {
         final lifecycle = _ownerLifecycles[ownerId];
         final ownedNodes = lifecycleNodes[ownerId];
         if (lifecycle == null || ownedNodes == null) continue;
