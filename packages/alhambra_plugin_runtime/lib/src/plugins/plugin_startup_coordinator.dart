@@ -130,19 +130,29 @@ class PluginStartupCoordinator {
 
     final health = healthRegistry;
     if (health != null) {
-      for (final item in plan) {
-        final id = item.manifest.id.trim();
-        health.transition(
-          pluginId: id,
-          next: PluginRuntimeState.validated,
-          reason: 'Startup preflight completed',
-        );
-      }
       for (final id in previouslyActiveIds) {
         health.observe(
           pluginId: id,
           state: PluginRuntimeState.active,
           reason: 'Already active before startup batch',
+        );
+      }
+      for (final item in plan) {
+        final id = item.manifest.id.trim();
+        if (previouslyActiveIds.contains(id)) continue;
+        final current = health.snapshotOf(id)?.state;
+        if (current == PluginRuntimeState.stopped ||
+            current == PluginRuntimeState.failed) {
+          health.transition(
+            pluginId: id,
+            next: PluginRuntimeState.discovered,
+            reason: 'Plugin startup retry discovered',
+          );
+        }
+        health.transition(
+          pluginId: id,
+          next: PluginRuntimeState.validated,
+          reason: 'Startup preflight completed',
         );
       }
     }
