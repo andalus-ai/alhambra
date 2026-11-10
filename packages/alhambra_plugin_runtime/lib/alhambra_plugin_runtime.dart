@@ -26,16 +26,20 @@ export 'src/context/context_contributor_registry.dart';
 export 'src/context/context_service.dart';
 export 'src/context/incremental_context_engine.dart';
 
+export 'src/capabilities/plugin_capability_negotiator.dart';
+
 // Reactivity & Signals
 export 'src/reactivity/signals_engine.dart';
 
 // Plugins & Startup Pipeline
+export 'src/plugins/plugin_runtime_health.dart';
 export 'src/plugins/plugin_manager.dart';
 export 'src/plugins/plugin_loader.dart';
 export 'src/plugins/extension_manifest.dart';
 export 'src/plugins/plugin_dependency_resolver.dart';
 export 'src/plugins/runtime_plugin_context.dart';
 export 'src/plugins/plugin_startup_pipeline.dart';
+export 'src/plugins/plugin_shutdown_coordinator.dart';
 export 'src/plugins/plugin_startup_coordinator.dart';
 
 // Workbench & Layout
@@ -91,6 +95,8 @@ export 'src/composition/composition_lifecycle.dart';
 export 'src/composition/composition_plan_diff.dart';
 export 'src/composition/composition_reconciler.dart';
 export 'src/composition/composition_persistence.dart';
+export 'src/composition/composition_snapshot_migrator.dart';
+export 'src/composition/composition_compatibility.dart';
 
 // State Scope & Service Boundaries
 export 'src/runtime_scope/scoped_service_registry.dart';
