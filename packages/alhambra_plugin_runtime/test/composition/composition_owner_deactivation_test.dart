@@ -44,7 +44,7 @@ void main() {
     transaction.commit();
     final before = runtime.graph.nodes;
 
-    expect(runtime.deactivateOwner, throwsA(isA<StateError>()));
+    expect(() => runtime.deactivateOwner('editor'), throwsA(isA<StateError>()));
     expect(runtime.graph.nodes, before);
     expect(events.any((event) =>
       event.operation == CompositionLifecycleOperation.deactivate &&
