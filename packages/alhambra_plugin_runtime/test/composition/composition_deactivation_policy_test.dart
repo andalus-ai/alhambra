@@ -127,7 +127,8 @@ void main() {
       runtime.deactivateOwner('provider', DeactivationStrategy.cascade);
 
       expect(lifecycle.deactivatedNodeIds, [
-        ['view:a-consumer', 'view:z-consumer'],
+        ['view:z-consumer'],
+        ['view:a-consumer'],
         ['service:provider'],
       ]);
     });
