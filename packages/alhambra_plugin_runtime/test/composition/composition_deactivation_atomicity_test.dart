@@ -26,7 +26,7 @@ void main() {
     });
   });
 
-  test('only successfully deactivated owners are compensated', () {
+  test('attempted owners are compensated in reverse after a failure', () {
     final runtime = DefaultCompositionRuntime();
     final consumerLifecycle = _Lifecycle();
     final providerLifecycle = _Lifecycle(failDeactivate: true);
@@ -52,7 +52,7 @@ void main() {
     );
 
     expect(consumerLifecycle.compensated, 1);
-    expect(providerLifecycle.compensated, 0);
+    expect(providerLifecycle.compensated, 1);
     expect(runtime.graph.nodes.keys.toSet(), {
       'service:provider',
       'view:consumer',
