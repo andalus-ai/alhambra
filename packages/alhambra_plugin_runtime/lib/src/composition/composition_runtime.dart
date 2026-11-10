@@ -18,7 +18,7 @@ abstract interface class CompositionRuntime {
 class DefaultCompositionRuntime implements CompositionRuntime {
   final CompositionGraph _liveGraph = CompositionGraph();
   final void Function(String ownerId)? onOwnerDeactivated;
-  final Map<String, CompositionLifecycle> _ownerLifecycles = {};
+  final Map<String, CompositionLifecycle> _ownerLifecycles = {};\n  final Map<String, CompositionOwnerState> _ownerStates = {};
   final CompositionLifecycleEventSink? onLifecycleEvent;
   int _nextTransactionSequence = 0;
   bool _deactivationInProgress = false;
@@ -26,7 +26,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   DefaultCompositionRuntime({this.onOwnerDeactivated, this.onLifecycleEvent});
 
   @override
-  CompositionGraph get graph => _liveGraph;
+  CompositionGraph get graph => _liveGraph;\n\n  @override\n  Map<String, CompositionOwnerState> get ownerStates =>\n      Map.unmodifiable(_ownerStates);\n\n  @override\n  CompositionOwnerState? ownerState(String ownerId) => _ownerStates[ownerId];
 
   @override
   CompositionTransaction beginTransaction({
@@ -38,7 +38,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     late final DefaultCompositionTransaction transaction;
     transaction = DefaultCompositionTransaction(
       liveGraph: _liveGraph,
-      onCommit: (plan) {
+      beforeCommit: (nodes) {\n        final blockedOwners = nodes\n            .map((node) => node.ownerId)\n            .toSet()\n            .where((ownerId) =>\n                _ownerStates[ownerId] == CompositionOwnerState.deactivating ||\n                _ownerStates[ownerId] == CompositionOwnerState.failed)\n            .toList()\n          ..sort();\n        if (blockedOwners.isNotEmpty) {\n          throw StateError(\n            'Cannot register contributions for unavailable owner(s): '\n            '${blockedOwners.join(', ')}.',\n          );\n        }\n      },\n      onCommit: (plan) {
         if (onCommit != null) {
           onCommit(plan);
         }
@@ -148,7 +148,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
       lifecycleNodes.putIfAbsent(node.ownerId, () => []).add(node);
     }
 
-    final deactivationCorrelationId = 'composition-deactivation-${++_nextTransactionSequence}';
+    for (final affectedOwner in affectedOwners) {\n      _ownerStates[affectedOwner] = CompositionOwnerState.deactivating;\n    }\n\n    final deactivationCorrelationId = 'composition-deactivation-${++_nextTransactionSequence}';
     final attemptedLifecycleOwners = <String>[];
     _deactivationInProgress = true;
     try {
