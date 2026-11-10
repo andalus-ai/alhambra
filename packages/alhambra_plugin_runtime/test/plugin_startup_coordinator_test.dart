@@ -175,6 +175,87 @@ void main() {
       ]);
     });
 
+    test('projects successful activation lifecycle into health registry', () async {
+      final events = <String>[];
+      final registry = PluginRuntimeHealthRegistry();
+      final coordinator = PluginStartupCoordinator(
+        manager: PluginManager(),
+        healthRegistry: registry,
+      );
+
+      final report = await coordinator.start(
+        discoveredPlugins: [_discovered('core')],
+        compiledPlugins: {'core': _RecordingPlugin('core', events)},
+      );
+
+      expect(report.succeeded, isTrue);
+      expect(registry.snapshotOf('core')!.state, PluginRuntimeState.active);
+      expect(registry.history.map((event) => event.current), [
+        PluginRuntimeState.validated,
+        PluginRuntimeState.starting,
+        PluginRuntimeState.active,
+      ]);
+    });
+
+    test('projects activation failure and rollback lifecycle', () async {
+      final events = <String>[];
+      final registry = PluginRuntimeHealthRegistry();
+      final coordinator = PluginStartupCoordinator(
+        manager: PluginManager(),
+        healthRegistry: registry,
+      );
+
+      final report = await coordinator.start(
+        discoveredPlugins: [
+          _discovered('core'),
+          _discovered('broken', dependencies: ['core']),
+        ],
+        compiledPlugins: {
+          'core': _RecordingPlugin('core', events),
+          'broken': _RecordingPlugin('broken', events, failActivation: true),
+        },
+      );
+
+      expect(report.succeeded, isFalse);
+      expect(registry.snapshotOf('broken')!.state, PluginRuntimeState.failed);
+      expect(registry.snapshotOf('core')!.state, PluginRuntimeState.stopped);
+      expect(registry.history.where((e) => e.pluginId == 'core').map((e) => e.current), [
+        PluginRuntimeState.validated,
+        PluginRuntimeState.starting,
+        PluginRuntimeState.active,
+        PluginRuntimeState.stopping,
+        PluginRuntimeState.stopped,
+      ]);
+    });
+
+    test('retries a previously failed plugin with a fresh lifecycle', () async {
+      final events = <String>[];
+      final registry = PluginRuntimeHealthRegistry();
+      final manager = PluginManager();
+      final first = PluginStartupCoordinator(manager: manager, healthRegistry: registry);
+      await first.start(
+        discoveredPlugins: [_discovered('retry')],
+        compiledPlugins: {'retry': _RecordingPlugin('retry', events, failActivation: true)},
+      );
+      final second = PluginStartupCoordinator(manager: manager, healthRegistry: registry);
+      final report = await second.start(
+        discoveredPlugins: [_discovered('retry')],
+        compiledPlugins: {'retry': _RecordingPlugin('retry', events)},
+      );
+
+      expect(report.succeeded, isTrue);
+      expect(registry.snapshotOf('retry')!.state, PluginRuntimeState.active);
+      expect(registry.history.where((e) => e.pluginId == 'retry').map((e) => e.current), [
+        PluginRuntimeState.validated,
+        PluginRuntimeState.starting,
+        PluginRuntimeState.failed,
+        PluginRuntimeState.discovered,
+        PluginRuntimeState.validated,
+        PluginRuntimeState.starting,
+        PluginRuntimeState.active,
+      ]);
+    });
+
     test('rejects manifest and compiled plugin identity mismatch', () async {
       final events = <String>[];
       final plugin = _RecordingPlugin('runtime.id', events);
