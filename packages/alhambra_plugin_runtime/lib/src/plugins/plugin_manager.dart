@@ -64,10 +64,10 @@ class PluginManager {
 
     return _serialize(pluginId, () async {
       if (_activePlugins.containsKey(pluginId)) return;
+      _negotiateCapabilities(plugin);
       final context = RuntimePluginContext(pluginId: pluginId, runtime: runtime);
 
       try {
-        _negotiateCapabilities(plugin);
         await plugin.activate(context);
         runtime.validator.validateOwner(pluginId);
         _activePlugins[pluginId] = plugin;
