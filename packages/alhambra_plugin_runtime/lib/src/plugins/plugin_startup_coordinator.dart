@@ -68,7 +68,7 @@ class PluginStartupCoordinator {
   final PluginLifecycleCheckpointStore? checkpointStore;
   final PluginLifecycleOperationIdFactory? operationIdFactory;
 
-  PluginStartupCoordinator({
+  const PluginStartupCoordinator({
     required this.manager,
     this.dependencyResolver = const PluginDependencyResolver(),
     this.healthRegistry,
