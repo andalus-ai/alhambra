@@ -95,6 +95,32 @@ void main() {
       expect(runtime.ownerLifecycleSummary('unknown'), isNull);
     });
 
+    test('enforces the configured subscriber ceiling', () {
+      final runtime = DefaultCompositionRuntime(
+        maxLifecycleEventSubscribers: 1,
+      );
+      final subscription = runtime.subscribeLifecycleEvents((_) {});
+
+      expect(
+        () => runtime.subscribeLifecycleEvents((_) {}),
+        throwsA(isA<StateError>()),
+      );
+      subscription.cancel();
+      expect(runtime.lifecycleEventSubscriberCount, 0);
+    });
+
+    test('owner summary reflects active state after a successful commit', () {
+      final runtime = DefaultCompositionRuntime();
+      _commit(runtime, 'editor', 'save');
+
+      final summary = runtime.ownerLifecycleSummary('editor');
+      expect(summary, isNotNull);
+      expect(summary!.state, CompositionOwnerState.active);
+      expect(summary.eventCount, 4);
+      expect(summary.failureCount, 0);
+      expect(summary.lastFailure, isNull);
+    });
+
     test('cancellation prevents queued callbacks and clears pending events', () async {
       final runtime = DefaultCompositionRuntime();
       var calls = 0;
