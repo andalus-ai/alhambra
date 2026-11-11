@@ -234,6 +234,19 @@ class PluginStartupCoordinator {
           reason: 'Plugin activation completed',
         );
       } catch (error, stackTrace) {
+        try {
+          await checkpointWriter?.record(
+            pluginId: id,
+            operation: PluginLifecycleOperation.startup,
+            state: PluginLifecycleCheckpointState.failed,
+            dependencyIds: item.manifest.dependencies,
+            failureCode: error.runtimeType.toString(),
+            failureSummary: 'Startup operation failed',
+          );
+        } catch (_) {
+          // Keep the original failure; the last durable in-flight state
+          // remains a recovery signal.
+        }
         health?.transition(
           pluginId: id,
           next: PluginRuntimeState.failed,
@@ -245,12 +258,22 @@ class PluginStartupCoordinator {
         for (final started in activated.reversed) {
           final startedId = started.metadata.id.trim();
           try {
+            await checkpointWriter?.record(
+              pluginId: startedId,
+              operation: PluginLifecycleOperation.startup,
+              state: PluginLifecycleCheckpointState.rollbackPending,
+            );
             health?.transition(
               pluginId: startedId,
               next: PluginRuntimeState.stopping,
               reason: 'Startup rollback started',
             );
             await manager.deactivate(startedId);
+            await checkpointWriter?.record(
+              pluginId: startedId,
+              operation: PluginLifecycleOperation.startup,
+              state: PluginLifecycleCheckpointState.stopped,
+            );
             health?.transition(
               pluginId: startedId,
               next: PluginRuntimeState.stopped,
@@ -258,6 +281,17 @@ class PluginStartupCoordinator {
             );
             rolledBack.add(startedId);
           } catch (rollbackError, rollbackStackTrace) {
+            try {
+              await checkpointWriter?.record(
+                pluginId: startedId,
+                operation: PluginLifecycleOperation.startup,
+                state: PluginLifecycleCheckpointState.rollbackFailed,
+                failureCode: rollbackError.runtimeType.toString(),
+                failureSummary: 'Startup rollback failed',
+              );
+            } catch (_) {
+              // The last durable rollbackPending state requires recovery.
+            }
             final snapshot = health?.snapshotOf(startedId);
             if (snapshot?.state == PluginRuntimeState.stopping) {
               health?.transition(
