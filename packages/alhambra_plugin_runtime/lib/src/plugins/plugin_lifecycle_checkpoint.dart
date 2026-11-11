@@ -101,3 +101,58 @@ class InMemoryPluginLifecycleCheckpointStore
     _checkpoints.remove(pluginId);
   }
 }
+
+/// Creates operation identifiers for checkpoint batches. Hosts that coordinate
+/// multiple processes should inject a globally unique ID factory.
+typedef PluginLifecycleOperationIdFactory = String Function();
+
+/// Writes monotonically sequenced records for one coordinator invocation.
+class PluginLifecycleCheckpointWriter {
+  PluginLifecycleCheckpointWriter({
+    required this.store,
+    required this.operationId,
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now {
+    if (operationId.trim().isEmpty) {
+      throw ArgumentError.value(operationId, 'operationId');
+    }
+  }
+
+  final PluginLifecycleCheckpointStore store;
+  final String operationId;
+  final DateTime Function() _clock;
+  final Map<String, int> _sequences = {};
+  final Map<String, DateTime> _createdAt = {};
+
+  Future<PluginLifecycleCheckpoint> record({
+    required String pluginId,
+    required PluginLifecycleOperation operation,
+    required PluginLifecycleCheckpointState state,
+    Iterable<String> dependencyIds = const [],
+    int attempt = 1,
+    String? failureCode,
+    String? failureSummary,
+  }) async {
+    final previousSequence = _sequences[pluginId] ??
+        (await store.read(pluginId))?.sequence ??
+        -1;
+    final now = _clock().toUtc();
+    final createdAt = _createdAt.putIfAbsent(pluginId, () => now);
+    final checkpoint = PluginLifecycleCheckpoint(
+      pluginId: pluginId,
+      operationId: operationId,
+      operation: operation,
+      state: state,
+      sequence: previousSequence + 1,
+      attempt: attempt,
+      createdAt: createdAt,
+      updatedAt: now.isBefore(createdAt) ? createdAt : now,
+      dependencyIds: dependencyIds,
+      failureCode: failureCode,
+      failureSummary: failureSummary,
+    );
+    await store.write(checkpoint);
+    _sequences[pluginId] = checkpoint.sequence;
+    return checkpoint;
+  }
+}
