@@ -6,6 +6,7 @@ import 'composition_transaction.dart';
 
 abstract interface class CompositionRuntime {
   CompositionGraph get graph;
+  List<CompositionLifecycleEvent> get lifecycleEvents;
   Map<String, CompositionOwnerState> get ownerStates;
   CompositionOwnerState? ownerState(String ownerId);
   CompositionTransaction beginTransaction({
@@ -24,13 +25,24 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   final Map<String, CompositionLifecycle> _ownerLifecycles = {};
   final Map<String, CompositionOwnerState> _ownerStates = {};
   final CompositionLifecycleEventSink? onLifecycleEvent;
+  final int maxLifecycleEvents;
+  final List<CompositionLifecycleEvent> _lifecycleEvents = [];
   int _nextTransactionSequence = 0;
   bool _deactivationInProgress = false;
 
-  DefaultCompositionRuntime({this.onOwnerDeactivated, this.onLifecycleEvent});
+  DefaultCompositionRuntime({
+    this.onOwnerDeactivated,
+    this.onLifecycleEvent,
+    this.maxLifecycleEvents = 1000,
+  }) : assert(maxLifecycleEvents > 0);
 
   @override
   CompositionGraph get graph => _liveGraph;
+
+  /// Immutable, bounded in-memory history of lifecycle events.
+  @override
+  List<CompositionLifecycleEvent> get lifecycleEvents =>
+      List.unmodifiable(_lifecycleEvents);
 
   @override
   Map<String, CompositionOwnerState> get ownerStates =>
@@ -81,7 +93,10 @@ class DefaultCompositionRuntime implements CompositionRuntime {
       },
       lifecycle: lifecycle,
       correlationId: correlationId ?? 'composition-${++_nextTransactionSequence}',
-      onLifecycleEvent: onLifecycleEvent ?? this.onLifecycleEvent,
+      onLifecycleEvent: (event) => _recordLifecycleEvent(
+        event,
+        onLifecycleEvent ?? this.onLifecycleEvent,
+      ),
     );
     return transaction;
   }
@@ -370,6 +385,20 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     CompositionLifecycleEventSink? sink,
     CompositionLifecycleEvent event,
   ) {
+    _recordLifecycleEvent(event, sink);
+  }
+
+  void _recordLifecycleEvent(
+    CompositionLifecycleEvent event,
+    CompositionLifecycleEventSink? sink,
+  ) {
+    _lifecycleEvents.add(event);
+    if (_lifecycleEvents.length > maxLifecycleEvents) {
+      _lifecycleEvents.removeRange(
+        0,
+        _lifecycleEvents.length - maxLifecycleEvents,
+      );
+    }
     if (sink == null) return;
     try {
       sink(event);
