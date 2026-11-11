@@ -72,7 +72,7 @@ class PluginShutdownCoordinator {
   final PluginLifecycleCheckpointStore? checkpointStore;
   final PluginLifecycleOperationIdFactory? operationIdFactory;
 
-  PluginShutdownCoordinator({
+  const PluginShutdownCoordinator({
     required this.manager,
     this.dependencyResolver = const PluginDependencyResolver(),
     this.healthRegistry,
