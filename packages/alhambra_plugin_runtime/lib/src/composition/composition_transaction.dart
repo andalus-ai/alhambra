@@ -19,6 +19,7 @@ class DefaultCompositionTransaction implements CompositionTransaction {
   final CompositionLifecycle? lifecycle;
   final String correlationId;
   final CompositionLifecycleEventSink? onLifecycleEvent;
+  final void Function(List<CompositionNode> nodes)? beforeCommit;
   final CompositionGraph _stagedGraph = CompositionGraph();
   bool _committed = false;
   bool _rolledBack = false;
@@ -29,6 +30,7 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     this.lifecycle,
     required this.correlationId,
     this.onLifecycleEvent,
+    this.beforeCommit,
   });
 
   @override
@@ -91,6 +93,14 @@ class DefaultCompositionTransaction implements CompositionTransaction {
     // failure cannot leave any staged node in the live graph.
     final plan = CompositionPlan.fromGraph(candidate);
     final stagedIds = _stagedGraph.nodes.keys.toList(growable: false);
+
+    // Runtime policy checks run before lifecycle side effects or graph publication.
+    try {
+      beforeCommit?.call(stagedNodes);
+    } catch (error, stackTrace) {
+      _rolledBack = true;
+      Error.throwWithStackTrace(error, stackTrace);
+    }
 
     // Preparation runs before publication so validation/setup failures cannot
     // expose partially activated contributions.
