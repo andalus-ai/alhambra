@@ -30,6 +30,7 @@ class PluginManager {
   final Map<String, RuntimePluginContext> _contexts = {};
   final Map<String, CapabilityNegotiationResult> _capabilityNegotiations = {};
   final Map<String, Future<void>> _operationTails = {};
+  Future<void> _lifecycleBatchTail = Future<void>.value();
 
   final ExtensionRuntime runtime;
   final PluginCapabilityNegotiator? capabilityNegotiator;
@@ -49,6 +50,23 @@ class PluginManager {
       throw ArgumentError(
         'capabilityNegotiator and capabilityRequirementsResolver must be provided together.',
       );
+    }
+  }
+
+  /// Runs a coordinator lifecycle batch exclusively across this manager.
+  ///
+  /// Startup and shutdown coordinators share this FIFO gate so their
+  /// dependency plans, rollback, and health projections cannot interleave.
+  /// Individual plugin operations remain serialized by [_serialize].
+  Future<T> runExclusiveLifecycleBatch<T>(Future<T> Function() operation) async {
+    final previous = _lifecycleBatchTail;
+    final release = Completer<void>();
+    _lifecycleBatchTail = release.future;
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release.complete();
     }
   }
 

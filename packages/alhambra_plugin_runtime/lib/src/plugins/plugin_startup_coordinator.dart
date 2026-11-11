@@ -74,6 +74,18 @@ class PluginStartupCoordinator {
   Future<PluginStartupBatchReport> start({
     required Iterable<DiscoveredPlugin> discoveredPlugins,
     required Map<String, AlhambraPlugin> compiledPlugins,
+  }) {
+    return manager.runExclusiveLifecycleBatch(
+      () => _start(
+        discoveredPlugins: discoveredPlugins,
+        compiledPlugins: compiledPlugins,
+      ),
+    );
+  }
+
+  Future<PluginStartupBatchReport> _start({
+    required Iterable<DiscoveredPlugin> discoveredPlugins,
+    required Map<String, AlhambraPlugin> compiledPlugins,
   }) async {
     late final List<DiscoveredPlugin> plan;
     late final Map<String, AlhambraPlugin> pluginsById;
