@@ -52,7 +52,7 @@ class PluginRuntimeReconciler {
     return manager.runExclusiveLifecycleBatch(_reconcile);
   }
 
-  PluginRuntimeReconciliationReport _reconcile() {
+  Future<PluginRuntimeReconciliationReport> _reconcile() async {
     final activeById = <String, AlhambraPlugin>{};
     for (final plugin in manager.activePlugins) {
       final id = plugin.metadata.id.trim();
