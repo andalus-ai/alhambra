@@ -1,6 +1,7 @@
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 
 import 'plugin_dependency_resolver.dart';
+import 'plugin_lifecycle_checkpoint.dart';
 import 'plugin_loader.dart';
 import 'plugin_manager.dart';
 import 'plugin_runtime_health.dart';
@@ -64,11 +65,15 @@ class PluginStartupCoordinator {
   final PluginManager manager;
   final PluginDependencyResolver dependencyResolver;
   final PluginRuntimeHealthRegistry? healthRegistry;
+  final PluginLifecycleCheckpointStore? checkpointStore;
+  final PluginLifecycleOperationIdFactory? operationIdFactory;
 
-  const PluginStartupCoordinator({
+  PluginStartupCoordinator({
     required this.manager,
     this.dependencyResolver = const PluginDependencyResolver(),
     this.healthRegistry,
+    this.checkpointStore,
+    this.operationIdFactory,
   });
 
   Future<PluginStartupBatchReport> start({
@@ -170,6 +175,33 @@ class PluginStartupCoordinator {
     }
 
     final activated = <AlhambraPlugin>[];
+    final checkpointWriter = checkpointStore == null
+        ? null
+        : PluginLifecycleCheckpointWriter(
+            store: checkpointStore!,
+            operationId: operationIdFactory?.call() ??
+                'startup-${DateTime.now().microsecondsSinceEpoch}',
+          );
+
+    // Persist the complete plan before invoking plugin code.
+    try {
+      for (final item in plan) {
+        final id = item.manifest.id.trim();
+        if (previouslyActiveIds.contains(id)) continue;
+        await checkpointWriter?.record(
+          pluginId: id,
+          operation: PluginLifecycleOperation.startup,
+          state: PluginLifecycleCheckpointState.planned,
+          dependencyIds: item.manifest.dependencies,
+        );
+      }
+    } catch (error, stackTrace) {
+      return PluginStartupBatchReport(
+        succeeded: false,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
 
     for (final item in plan) {
       final id = item.manifest.id.trim();
@@ -177,6 +209,12 @@ class PluginStartupCoordinator {
 
       final plugin = pluginsById[id]!;
       try {
+        await checkpointWriter?.record(
+          pluginId: id,
+          operation: PluginLifecycleOperation.startup,
+          state: PluginLifecycleCheckpointState.starting,
+          dependencyIds: item.manifest.dependencies,
+        );
         health?.transition(
           pluginId: id,
           next: PluginRuntimeState.starting,
@@ -184,6 +222,12 @@ class PluginStartupCoordinator {
         );
         await manager.activate(plugin);
         activated.add(plugin);
+        await checkpointWriter?.record(
+          pluginId: id,
+          operation: PluginLifecycleOperation.startup,
+          state: PluginLifecycleCheckpointState.active,
+          dependencyIds: item.manifest.dependencies,
+        );
         health?.transition(
           pluginId: id,
           next: PluginRuntimeState.active,
