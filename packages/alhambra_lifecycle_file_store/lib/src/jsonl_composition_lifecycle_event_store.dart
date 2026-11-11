@@ -50,6 +50,21 @@ final class JsonlCompositionLifecycleEventStore
     }
   }
 
+  /// Removes an unterminated tail left by an interrupted prior append before
+  /// adding a new record. Without this repair, the next newline would turn the
+  /// fragment into a malformed complete record.
+  Future<void> _discardIncompleteTail() async {
+    if (!await file.exists()) return;
+    final bytes = await file.readAsBytes();
+    if (bytes.isEmpty || bytes.last == 0x0a) return;
+    final lastNewline = bytes.lastIndexOf(0x0a);
+    await file.writeAsBytes(
+      bytes.sublist(0, lastNewline + 1),
+      mode: FileMode.write,
+      flush: true,
+    );
+  }
+
   /// Removes events older than [retainFrom] and/or keeps only the newest
   /// [maxEvents] records.
   ///
