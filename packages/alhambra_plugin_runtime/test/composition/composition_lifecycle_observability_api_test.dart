@@ -86,7 +86,8 @@ void main() {
 
       final summary = runtime.ownerLifecycleSummary('editor');
       expect(summary, isNotNull);
-      expect(summary!.state, CompositionOwnerState.inactive);
+      expect(summary!.state, isNull,
+          reason: 'failed activation never publishes the owner as active');
       expect(summary.eventCount, 6);
       expect(summary.failureCount, 1);
       expect(summary.lastFailure!.operation, CompositionLifecycleOperation.activate);
