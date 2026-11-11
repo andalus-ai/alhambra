@@ -15,6 +15,7 @@ abstract interface class CompositionRuntime {
     CompositionLifecycleEventSink? onLifecycleEvent,
   });
   void deactivateOwner(String ownerId, [DeactivationStrategy strategy]);
+  void recoverOwner(String ownerId);
 }
 
 class DefaultCompositionRuntime implements CompositionRuntime {
@@ -83,6 +84,78 @@ class DefaultCompositionRuntime implements CompositionRuntime {
       onLifecycleEvent: onLifecycleEvent ?? this.onLifecycleEvent,
     );
     return transaction;
+  }
+
+  /// Re-establishes a failed owner's contributions using its registered
+  /// lifecycle. Recovery is explicit: failed owners remain unavailable until
+  /// both preparation and activation complete successfully.
+  @override
+  void recoverOwner(String ownerId) {
+    if (_deactivationInProgress) {
+      throw StateError('A composition owner operation is already in progress.');
+    }
+    if (_ownerStates[ownerId] != CompositionOwnerState.failed) {
+      throw StateError(
+        'Cannot recover owner "$ownerId" from state '
+        '"${_ownerStates[ownerId]?.name ?? 'unknown'}".',
+      );
+    }
+
+    final ownedNodes = _liveGraph.nodes.values
+        .where((node) => node.ownerId == ownerId)
+        .toList(growable: false);
+    if (ownedNodes.isEmpty) {
+      throw StateError('Cannot recover owner "$ownerId": no contributions are registered.');
+    }
+    final lifecycle = _ownerLifecycles[ownerId];
+    if (lifecycle == null) {
+      throw StateError(
+        'Cannot recover owner "$ownerId": no lifecycle is registered.',
+      );
+    }
+
+    final diagnostics = _liveGraph.validate();
+    if (diagnostics.isNotEmpty) {
+      throw StateError(
+        'Cannot recover owner "$ownerId": composition graph is invalid: '
+        '${diagnostics.map((diagnostic) => diagnostic.message).join('; ')}',
+      );
+    }
+
+    final orderedNodes = _liveGraph.topologicalSort();
+    final correlationId =
+        'composition-recovery-${++_nextTransactionSequence}';
+    _deactivationInProgress = true;
+    try {
+      _runLifecycleHook(
+        correlationId,
+        CompositionLifecycleOperation.prepare,
+        orderedNodes,
+        () => lifecycle.prepare(orderedNodes),
+      );
+      _runLifecycleHook(
+        correlationId,
+        CompositionLifecycleOperation.activate,
+        orderedNodes,
+        () => lifecycle.activate(orderedNodes),
+      );
+      _ownerStates[ownerId] = CompositionOwnerState.active;
+    } catch (error, stackTrace) {
+      try {
+        _runLifecycleHook(
+          correlationId,
+          CompositionLifecycleOperation.compensate,
+          orderedNodes,
+          () => lifecycle.compensate(orderedNodes, error, stackTrace),
+        );
+      } catch (_) {
+        // Keep the original recovery error and leave the owner failed.
+      }
+      _ownerStates[ownerId] = CompositionOwnerState.failed;
+      rethrow;
+    } finally {
+      _deactivationInProgress = false;
+    }
   }
 
   /// Deactivates every composition node contributed by [ownerId].
