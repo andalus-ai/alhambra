@@ -193,7 +193,12 @@ final class CompositionFailure extends CompositionResult {
   const CompositionFailure({required this.diagnostics});
 }
 
-enum CompositionOwnerState {\n  active,\n  deactivating,\n  inactive,\n  failed,\n}\n\nenum DeactivationStrategy {
+enum CompositionOwnerState {
+  active,
+  deactivating,
+  inactive,
+  failed,
+}\n\nenum DeactivationStrategy {
   reject,
   cascade,
   degrade,
