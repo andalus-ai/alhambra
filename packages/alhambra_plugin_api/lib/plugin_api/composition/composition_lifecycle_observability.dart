@@ -1,4 +1,5 @@
 import 'composition_contracts.dart';
+import 'composition_lifecycle_event_store.dart';
 
 /// Receives lifecycle diagnostics asynchronously from a composition runtime.
 ///
