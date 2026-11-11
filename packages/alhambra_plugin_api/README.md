@@ -1,39 +1,22 @@
-<!--
-This README describes the package. If you publish this package to pub.dev,
-this README's contents appear on the landing page for your package.
+# Alhambra Plugin API
 
-For information about how to write a good package README, see the guide for
-[writing package pages](https://dart.dev/tools/pub/writing-package-pages).
+Framework-neutral contracts shared by Alhambra hosts, plugins, and runtime
+implementations. The API package contains contribution models, composition
+contracts, lifecycle events, and storage/observability ports. It has no
+dependency on a concrete persistence engine or product UI.
 
-For general information about developing packages, see the Dart guide for
-[creating packages](https://dart.dev/guides/libraries/create-packages)
-and the Flutter guide for
-[developing packages and plugins](https://flutter.dev/to/develop-packages).
--->
+## Composition lifecycle observability
 
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
+The composition API defines:
 
-## Features
+- `CompositionLifecycleEvent`: immutable correlation, operation, outcome,
+  timestamp, node/owner IDs, duration, and safe error-summary fields.
+- `CompositionLifecycleEventStore`: asynchronous persistence/query port.
+- `CompositionLifecycleObservability`: subscription, bounded-history query,
+  correlation timeline, and owner-summary contract.
+- `CompositionLifecycleEventSubscription`: cancellation and per-subscriber
+  dropped-event reporting.
 
-TODO: List what your package can do. Maybe include images, gifs, or videos.
-
-## Getting started
-
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
-
-## Usage
-
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder.
-
-```dart
-const like = 'sample';
-```
-
-## Additional information
-
-TODO: Tell users more about the package: where to find more information, how to
-contribute to the package, how to file issues, what response they can expect
-from the package authors, and more.
+Hosts may implement these contracts with in-memory, JSONL, database, or remote
+telemetry adapters. Runtime implementations should isolate observer failures
+from composition correctness and make event loss/backpressure observable.
