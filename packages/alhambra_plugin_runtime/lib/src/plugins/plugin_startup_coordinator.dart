@@ -258,11 +258,16 @@ class PluginStartupCoordinator {
         for (final started in activated.reversed) {
           final startedId = started.metadata.id.trim();
           try {
-            await checkpointWriter?.record(
-              pluginId: startedId,
-              operation: PluginLifecycleOperation.startup,
-              state: PluginLifecycleCheckpointState.rollbackPending,
-            );
+            try {
+              await checkpointWriter?.record(
+                pluginId: startedId,
+                operation: PluginLifecycleOperation.startup,
+                state: PluginLifecycleCheckpointState.rollbackPending,
+              );
+            } catch (_) {
+              // Compensation must still run if the checkpoint backend fails.
+              // The last durable state remains available for host recovery.
+            }
             health?.transition(
               pluginId: startedId,
               next: PluginRuntimeState.stopping,
