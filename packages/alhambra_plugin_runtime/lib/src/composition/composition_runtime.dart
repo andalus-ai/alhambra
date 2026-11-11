@@ -27,10 +27,14 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   final Map<String, CompositionOwnerState> _ownerStates = {};
   final CompositionLifecycleEventSink? onLifecycleEvent;
   final int maxLifecycleEvents;
+  final int maxLifecycleEventSubscribers;
+  final int maxPendingLifecycleEventsPerSubscriber;
   late final CompositionLifecycleObservabilityRuntime _observability =
       CompositionLifecycleObservabilityRuntime(
     ownerStatesProvider: () => _ownerStates,
     maxHistoryEvents: maxLifecycleEvents,
+    maxSubscribers: maxLifecycleEventSubscribers,
+    maxPendingEventsPerSubscriber: maxPendingLifecycleEventsPerSubscriber,
   );
   int _nextTransactionSequence = 0;
   bool _deactivationInProgress = false;
@@ -39,7 +43,11 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     this.onOwnerDeactivated,
     this.onLifecycleEvent,
     this.maxLifecycleEvents = 1000,
-  }) : assert(maxLifecycleEvents > 0);
+    this.maxLifecycleEventSubscribers = 64,
+    this.maxPendingLifecycleEventsPerSubscriber = 128,
+  })  : assert(maxLifecycleEvents > 0),
+        assert(maxLifecycleEventSubscribers > 0),
+        assert(maxPendingLifecycleEventsPerSubscriber > 0);
 
   @override
   CompositionGraph get graph => _liveGraph;
