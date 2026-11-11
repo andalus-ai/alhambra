@@ -91,6 +91,7 @@ export 'src/composition/composition_graph.dart';
 export 'src/composition/composition_plan.dart';
 export 'src/composition/composition_transaction.dart';
 export 'src/composition/composition_runtime.dart';
+export 'src/composition/composition_lifecycle_event_journal.dart';
 export 'src/composition/composition_lifecycle.dart';
 export 'src/composition/composition_plan_diff.dart';
 export 'src/composition/composition_reconciler.dart';
