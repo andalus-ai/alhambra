@@ -9,8 +9,8 @@ import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 ///
 /// Each line is a self-contained, versioned event record. Appends are
 /// serialized within this store instance and flushed before [append]
-/// completes. The file is opened per operation, so the store does not hold
-/// file handles across application suspension or shutdown.
+/// completes. Compaction uses a sibling temporary directory so the new file
+/// is prepared on the same filesystem before the old file is moved aside.
 ///
 /// This implementation is intended for a single-process writer. Multiple
 /// processes writing the same file require an external lock or a different
@@ -27,23 +27,135 @@ final class JsonlCompositionLifecycleEventStore
     CompositionLifecycleEventJsonCodec? codec,
   }) : codec = codec ?? const CompositionLifecycleEventJsonCodec();
 
-  @override
-  Future<void> append(CompositionLifecycleEvent event) {
-    final operation = _writeTail.then((_) => _appendOne(event));
-    // Keep the queue usable after a failed append while returning the failure
-    // to the caller that submitted this event.
-    _writeTail = operation.catchError((Object _) {});
+  Future<T> _enqueue<T>(Future<T> Function() action) {
+    final operation = _writeTail.then((_) => action());
+    // Keep the queue usable after failure while preserving the failure for
+    // the caller that submitted this operation.
+    _writeTail = operation.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return operation;
   }
+
+  @override
+  Future<void> append(CompositionLifecycleEvent event) =>
+      _enqueue(() => _appendOne(event));
 
   Future<void> _appendOne(CompositionLifecycleEvent event) async {
     await file.parent.create(recursive: true);
     final handle = await file.open(mode: FileMode.append);
     try {
-      await handle.writeString('${codec.encode(event)}\n', encoding: utf8);
+      await handle.writeString('${codec.encode(event)}\\n', encoding: utf8);
       await handle.flush();
     } finally {
       await handle.close();
+    }
+  }
+
+  /// Removes events older than [retainFrom] and/or keeps only the newest
+  /// [maxEvents] records.
+  ///
+  /// [retainFrom] is inclusive. When both arguments are supplied, the time
+  /// filter is applied first and [maxEvents] then caps the remaining newest
+  /// records. At least one policy must be supplied. Returns the number of
+  /// records removed.
+  ///
+  /// The replacement is fully written and flushed before the current file is
+  /// moved to a temporary backup and the replacement is renamed into place.
+  /// If installing the replacement fails, the backup is restored. The
+  /// temporary directory is always cleaned up best-effort.
+  ///
+  /// Compaction is serialized with append operations submitted to this
+  /// instance. Like appends, it does not coordinate with other processes.
+  Future<int> compact({
+    DateTime? retainFrom,
+    int? maxEvents,
+  }) {
+    if (retainFrom == null && maxEvents == null) {
+      throw ArgumentError('Provide retainFrom, maxEvents, or both.');
+    }
+    if (maxEvents != null && maxEvents < 1) {
+      throw ArgumentError.value(maxEvents, 'maxEvents', 'Must be greater than zero.');
+    }
+    return _enqueue(() => _compactOne(
+          retainFrom: retainFrom,
+          maxEvents: maxEvents,
+        ));
+  }
+
+  Future<int> _compactOne({
+    DateTime? retainFrom,
+    int? maxEvents,
+  }) async {
+    if (!await file.exists()) return 0;
+
+    final events = await _readAllCompleteEvents();
+    final retained = <CompositionLifecycleEvent>[];
+    for (final event in events) {
+      if (retainFrom != null && event.timestamp.isBefore(retainFrom)) {
+        continue;
+      }
+      retained.add(event);
+    }
+
+    final ordered = _stableChronological(retained);
+    final capped = maxEvents != null && ordered.length > maxEvents
+        ? ordered.skip(ordered.length - maxEvents).toList(growable: false)
+        : ordered;
+    final removed = events.length - capped.length;
+
+    final tempDirectory = await file.parent.createTemp(
+      '.${file.uri.pathSegments.isEmpty ? 'events' : file.uri.pathSegments.last}.compact-',
+    );
+    final replacement = File('${tempDirectory.path}/replacement.jsonl');
+    final backup = File('${tempDirectory.path}/original.jsonl');
+    var originalMoved = false;
+    try {
+      final sink = replacement.openWrite(mode: FileMode.writeOnly, encoding: utf8);
+      try {
+        for (final event in capped) {
+          sink.writeln(codec.encode(event));
+        }
+      } finally {
+        await sink.flush();
+        await sink.close();
+      }
+      // Flush the replacement to the filesystem before touching the source.
+      final replacementHandle = await replacement.open(mode: FileMode.append);
+      try {
+        await replacementHandle.flush();
+      } finally {
+        await replacementHandle.close();
+      }
+
+      await file.rename(backup.path);
+      originalMoved = true;
+      try {
+        await replacement.rename(file.path);
+        originalMoved = false;
+      } catch (_) {
+        if (originalMoved && await backup.exists()) {
+          await backup.rename(file.path);
+          originalMoved = false;
+        }
+        rethrow;
+      }
+      return removed;
+    } finally {
+      // If an unexpected failure happened after moving the original, make a
+      // final best-effort restoration before removing temporary artifacts.
+      if (originalMoved && await backup.exists() && !await file.exists()) {
+        try {
+          await backup.rename(file.path);
+        } on FileSystemException {
+          // Leave the backup in place rather than deleting the only copy.
+        }
+      }
+      if (await tempDirectory.exists()) {
+        try {
+          await tempDirectory.delete(recursive: true);
+        } on FileSystemException {
+          // A retained backup is safer than risking data loss.
+        }
+      }
     }
   }
 
@@ -51,38 +163,49 @@ final class JsonlCompositionLifecycleEventStore
   Future<List<CompositionLifecycleEvent>> query(
     CompositionLifecycleEventQuery query,
   ) async {
-    // Ensure queries observe all appends submitted before this call.
+    // Ensure queries observe all appends/compactions submitted before this call.
     await _writeTail;
     if (!await file.exists()) return const [];
 
+    final events = await _readAllCompleteEvents();
+    final matches = events.where((event) => _matches(event, query)).toList();
+    final ordered = _stableChronological(matches);
+    return List<CompositionLifecycleEvent>.unmodifiable(
+      ordered.take(query.limit),
+    );
+  }
+
+  Future<List<CompositionLifecycleEvent>> _readAllCompleteEvents() async {
+    if (!await file.exists()) return const [];
     final bytes = await file.readAsBytes();
     if (bytes.isEmpty) return const [];
-    final text = utf8.decode(bytes, allowMalformed: false);
-    final hasCompleteFinalLine = text.endsWith('\n');
-    final lines = text.split('\n');
-    if (hasCompleteFinalLine) {
-      lines.removeLast();
-    } else {
-      // A crash may leave only the final record incomplete. Ignore that
-      // fragment; malformed records terminated by newline remain corruption.
-      lines.removeLast();
-    }
 
-    final matches = <CompositionLifecycleEvent>[];
-    for (final line in lines) {
-      if (line.isEmpty) continue;
-      final event = codec.decode(line);
-      if (!_matches(event, query)) continue;
-      matches.add(event);
+    // Split at the byte-level newline delimiter. This also lets us ignore an
+    // interrupted final UTF-8 sequence without weakening validation of any
+    // newline-terminated record.
+    final events = <CompositionLifecycleEvent>[];
+    var start = 0;
+    for (var index = 0; index < bytes.length; index++) {
+      if (bytes[index] != 0x0a) continue;
+      final lineBytes = bytes.sublist(start, index);
+      start = index + 1;
+      if (lineBytes.isEmpty) continue;
+      final line = utf8.decode(lineBytes, allowMalformed: false);
+      events.add(codec.decode(line));
     }
+    // Bytes after the last newline are an incomplete record and are ignored.
+    return events;
+  }
 
-    matches.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    if (matches.length <= query.limit) {
-      return List<CompositionLifecycleEvent>.unmodifiable(matches);
-    }
-    return List<CompositionLifecycleEvent>.unmodifiable(
-      matches.take(query.limit),
-    );
+  List<CompositionLifecycleEvent> _stableChronological(
+    List<CompositionLifecycleEvent> events,
+  ) {
+    final indexed = events.indexed.toList();
+    indexed.sort((a, b) {
+      final byTime = a.$2.timestamp.compareTo(b.$2.timestamp);
+      return byTime != 0 ? byTime : a.$1.compareTo(b.$1);
+    });
+    return indexed.map((entry) => entry.$2).toList(growable: false);
   }
 
   bool _matches(
