@@ -122,7 +122,9 @@ class DefaultCompositionRuntime implements CompositionRuntime {
       );
     }
 
-    final orderedNodes = _liveGraph.topologicalSort();
+    final orderedNodes = _liveGraph.topologicalSort()
+        .where((node) => node.ownerId == ownerId)
+        .toList(growable: false);
     final correlationId =
         'composition-recovery-${++_nextTransactionSequence}';
     _deactivationInProgress = true;
