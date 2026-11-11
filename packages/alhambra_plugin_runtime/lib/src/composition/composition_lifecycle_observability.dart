@@ -198,7 +198,11 @@ final class _LifecycleEventSubscription
   }
 
   void _drain() {
-    while (!_cancelled && _pending.isNotEmpty) {
+    if (_cancelled) {
+      _scheduled = false;
+      return;
+    }
+    if (_pending.isNotEmpty) {
       final event = _pending.removeAt(0);
       try {
         listener(event);
@@ -208,6 +212,8 @@ final class _LifecycleEventSubscription
     }
     _scheduled = false;
     if (!_cancelled && _pending.isNotEmpty) {
+      // Yield between callbacks so a slow subscriber cannot monopolize the
+      // microtask queue when its backlog is full.
       _scheduled = true;
       scheduleMicrotask(_drain);
     }
