@@ -77,6 +77,14 @@ class PluginShutdownCoordinator {
 
   Future<PluginShutdownReport> shutdown({
     required Iterable<DiscoveredPlugin> discoveredPlugins,
+  }) {
+    return manager.runExclusiveLifecycleBatch(
+      () => _shutdown(discoveredPlugins: discoveredPlugins),
+    );
+  }
+
+  Future<PluginShutdownReport> _shutdown({
+    required Iterable<DiscoveredPlugin> discoveredPlugins,
   }) async {
     late final List<DiscoveredPlugin> shutdownPlan;
     late final Map<String, AlhambraPlugin> activeById;
