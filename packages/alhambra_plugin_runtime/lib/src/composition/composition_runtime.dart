@@ -3,8 +3,9 @@ import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'composition_graph.dart';
 import 'composition_plan.dart';
 import 'composition_transaction.dart';
+import 'composition_lifecycle_observability.dart';
 
-abstract interface class CompositionRuntime {
+abstract interface class CompositionRuntime implements CompositionLifecycleObservability {
   CompositionGraph get graph;
   List<CompositionLifecycleEvent> get lifecycleEvents;
   Map<String, CompositionOwnerState> get ownerStates;
@@ -26,7 +27,11 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   final Map<String, CompositionOwnerState> _ownerStates = {};
   final CompositionLifecycleEventSink? onLifecycleEvent;
   final int maxLifecycleEvents;
-  final List<CompositionLifecycleEvent> _lifecycleEvents = [];
+  late final CompositionLifecycleObservabilityRuntime _observability =
+      CompositionLifecycleObservabilityRuntime(
+    ownerStatesProvider: () => _ownerStates,
+    maxHistoryEvents: maxLifecycleEvents,
+  );
   int _nextTransactionSequence = 0;
   bool _deactivationInProgress = false;
 
@@ -42,7 +47,56 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   /// Immutable, bounded in-memory history of lifecycle events.
   @override
   List<CompositionLifecycleEvent> get lifecycleEvents =>
-      List.unmodifiable(_lifecycleEvents);
+      _observability.lifecycleEvents;
+
+  @override
+  int get lifecycleEventSubscriberCount =>
+      _observability.lifecycleEventSubscriberCount;
+
+  @override
+  int get droppedLifecycleEventCount =>
+      _observability.droppedLifecycleEventCount;
+
+  @override
+  CompositionLifecycleEventSubscription subscribeLifecycleEvents(
+    CompositionLifecycleEventListener listener,
+  ) => _observability.subscribeLifecycleEvents(listener);
+
+  @override
+  List<CompositionLifecycleEvent> queryLifecycleEvents({
+    String? correlationId,
+    String? ownerId,
+    CompositionLifecycleOperation? operation,
+    CompositionLifecycleStatus? status,
+    DateTime? from,
+    DateTime? to,
+    DateTime? before,
+    int limit = 100,
+  }) => _observability.queryLifecycleEvents(
+    correlationId: correlationId,
+    ownerId: ownerId,
+    operation: operation,
+    status: status,
+    from: from,
+    to: to,
+    before: before,
+    limit: limit,
+  );
+
+  @override
+  List<CompositionLifecycleEvent> timelineForCorrelation(
+    String correlationId, {DateTime? from, DateTime? to, int limit = 100}
+  ) => _observability.timelineForCorrelation(
+    correlationId, from: from, to: to, limit: limit,
+  );
+
+  @override
+  CompositionLifecycleOwnerSummary? ownerLifecycleSummary(String ownerId) =>
+      _observability.ownerLifecycleSummary(ownerId);
+
+  @override
+  List<CompositionLifecycleOwnerSummary> get ownerLifecycleSummaries =>
+      _observability.ownerLifecycleSummaries;
 
   @override
   Map<String, CompositionOwnerState> get ownerStates =>
@@ -392,13 +446,7 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     CompositionLifecycleEvent event,
     CompositionLifecycleEventSink? sink,
   ) {
-    _lifecycleEvents.add(event);
-    if (_lifecycleEvents.length > maxLifecycleEvents) {
-      _lifecycleEvents.removeRange(
-        0,
-        _lifecycleEvents.length - maxLifecycleEvents,
-      );
-    }
+    _observability.record(event);
     if (sink == null) return;
     try {
       sink(event);
