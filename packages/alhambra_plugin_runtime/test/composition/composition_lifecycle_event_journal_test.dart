@@ -30,7 +30,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(journal.lastError, isA<StateError>());
     expect(journal.pendingCount, 2);
-    expect(() => journal.flush(), throwsA(isA<StateError>()));
+    await expectLater(journal.flush(), throwsA(isA<StateError>()));
 
     await journal.retryFailedWrites();
     expect(store.events, [first, second]);
@@ -43,7 +43,7 @@ void main() {
     final store = _MemoryStore(gate: gate);
     final journal = CompositionLifecycleEventJournal(
       store: store,
-      maxPendingEvents: 1,
+      maxPendingEvents: 2,
     );
 
     expect(journal.add(_event('accepted')), isTrue);
