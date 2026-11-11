@@ -1,0 +1,16 @@
+name: alhambra_lifecycle_file_store
+description: File-backed append-only composition lifecycle event store for Alhambra.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  alhambra_plugin_api:
+    path: ../alhambra_plugin_api
+  alhambra_plugin_runtime:
+    path: ../alhambra_plugin_runtime
+
+dev_dependencies:
+  test: ^1.25.0

@@ -32,6 +32,7 @@ export 'src/capabilities/plugin_capability_negotiator.dart';
 export 'src/reactivity/signals_engine.dart';
 
 // Plugins & Startup Pipeline
+export 'src/plugins/plugin_lifecycle_checkpoint.dart';
 export 'src/plugins/plugin_runtime_health.dart';
 export 'src/plugins/plugin_runtime_reconciler.dart';
 export 'src/plugins/plugin_manager.dart';
@@ -92,6 +93,8 @@ export 'src/composition/composition_graph.dart';
 export 'src/composition/composition_plan.dart';
 export 'src/composition/composition_transaction.dart';
 export 'src/composition/composition_runtime.dart';
+export 'src/composition/composition_lifecycle_event_journal.dart';
+export 'src/composition/composition_lifecycle_event_codec.dart';
 export 'src/composition/composition_lifecycle.dart';
 export 'src/composition/composition_plan_diff.dart';
 export 'src/composition/composition_reconciler.dart';
