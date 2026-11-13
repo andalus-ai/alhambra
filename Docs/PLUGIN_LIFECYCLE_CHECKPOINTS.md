@@ -15,6 +15,31 @@ attempt, timestamps, dependency IDs, and optional sanitized failure metadata.
 It excludes plugin instances, runtime contexts, configuration secrets,
 credentials, and arbitrary plugin-owned state.
 
+## Coordinator integration
+
+Both startup and shutdown coordinators accept an optional
+PluginLifecycleCheckpointStore and optional operation-ID factory. When a
+store is configured, coordinators:
+
+1. Persist the complete planned set before invoking plugin lifecycle hooks.
+2. Persist starting or stopping immediately before each side effect.
+3. Persist active or stopped after successful completion.
+4. Persist failed for failed lifecycle operations.
+5. Persist rollbackPending, then stopped or rollbackFailed, during startup
+   compensation.
+
+A failure to persist the planned set prevents the batch from starting. A
+failure to persist an individual pre-operation state prevents that plugin's
+side effect. Startup compensation is still attempted if writing
+rollbackPending fails: checkpoint storage must not prevent best-effort
+cleanup of already-started plugins.
+
+If a post-operation checkpoint write fails, the coordinator reports a failure
+even though the plugin hook may already have completed. In particular, a
+shutdown hook may have completed and PluginManager may have removed the plugin
+from its active set even when the final stopped checkpoint could not be
+written. Hosts should reconcile the checkpoint against live manager state.
+
 ## Recovery semantics
 
 The starting, stopping, and rollbackPending states are ambiguous after a
@@ -25,7 +50,9 @@ failed. A checkpoint is not proof that a side effect completed.
 The contract does not provide exactly-once execution, distributed locking,
 cross-process compare-and-set, plugin reconstruction, or automatic retry.
 Plugins remain responsible for idempotency and compensation. Hosts must
-document their store's durability and concurrency guarantees.
+document their store's durability and concurrency guarantees. Inject a
+globally unique operation-ID factory when multiple processes can coordinate
+lifecycle work.
 
 ## Store implementations
 
@@ -34,9 +61,9 @@ InMemoryPluginLifecycleCheckpointStore is for tests and ephemeral hosts only;
 it does not survive process restart. Persistent adapters should atomically
 replace a plugin's checkpoint and preserve schema versions.
 
-## Delivery scope
+## Scope
 
-This change establishes the record model and storage contract. Coordinator
-checkpoint writes, interrupted-operation scanning, and host recovery policies
-are subsequent integration work. Existing startup/shutdown behavior remains
-unchanged until those integrations are added.
+This integration records lifecycle progress. It does not scan and recover
+interrupted operations automatically, reconstruct plugin instances, or
+guarantee distributed exactly-once behavior. Those remain host-level
+responsibilities.
