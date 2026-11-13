@@ -1,267 +1,187 @@
 import '../capabilities/capability_provider_health.dart';
 import 'plugin_revocation_coordinator.dart';
 
-/// Durable outcome of one governed provider-impact decision.
-enum PluginRevocationJournalStatus {
-  pending,
-  completed,
-  rejected,
-  noOp,
-  unsupported,
-  failed,
-  reconciled,
-}
+/// Durable state of one governed provider-impact action.
+enum PluginRevocationJournalStatus { pending, completed, rejected, unsupported, failed, reconciledApplied, retryAuthorized, manualReview }
 
-/// Immutable, schema-versioned journal entry.
-///
-/// The journal stores host metadata only. It must never contain credentials,
-/// provider payloads, plugin instances, or arbitrary exception messages.
-final class PluginRevocationJournalRecord {
+/// Versioned journal entry. Persist adapters should store enum names (not ordinals).
+final class PluginRevocationJournalEntry {
   static const int currentSchemaVersion = 1;
-
   final int schemaVersion;
-  final int revision;
-  final String idempotencyKey;
-  final String operationId;
-  final String correlationId;
-  final String pluginId;
-  final String providerOwnerId;
+  final String idempotencyKey, operationId, pluginId, providerOwnerId;
   final CapabilityImpactAction action;
   final PluginRevocationJournalStatus status;
-  final bool? approvalGranted;
-  final DateTime createdAt;
-  final DateTime updatedAt;
-  final String? detail;
+  final int revision;
+  final DateTime createdAt, updatedAt;
+  final String? correlationId, detail;
 
-  PluginRevocationJournalRecord({
+  PluginRevocationJournalEntry({
     this.schemaVersion = currentSchemaVersion,
-    required this.revision,
-    required this.idempotencyKey,
-    required this.operationId,
-    required this.correlationId,
-    required this.pluginId,
-    required this.providerOwnerId,
-    required this.action,
-    required this.status,
-    required this.createdAt,
-    required this.updatedAt,
-    this.approvalGranted,
-    this.detail,
+    required this.idempotencyKey, required this.operationId,
+    required this.pluginId, required this.providerOwnerId,
+    required this.action, required this.status, required this.revision,
+    required this.createdAt, required this.updatedAt,
+    this.correlationId, this.detail,
   }) {
-    if (schemaVersion != currentSchemaVersion) {
-      throw ArgumentError.value(schemaVersion, 'schemaVersion',
-          'Unsupported revocation journal schema.');
+    if (schemaVersion < 1) throw ArgumentError.value(schemaVersion, 'schemaVersion');
+    for (final field in [idempotencyKey, operationId, pluginId, providerOwnerId]) {
+      if (field.trim().isEmpty) throw ArgumentError('Journal identity fields must not be empty.');
     }
-    if (revision < 0) throw ArgumentError.value(revision, 'revision');
-    for (final entry in <String, String>{
-      'idempotencyKey': idempotencyKey,
-      'operationId': operationId,
-      'correlationId': correlationId,
-      'pluginId': pluginId,
-      'providerOwnerId': providerOwnerId,
-    }.entries) {
-      if (entry.value.trim().isEmpty) {
-        throw ArgumentError.value(entry.value, entry.key, 'Must not be empty.');
-      }
-    }
-    if (updatedAt.isBefore(createdAt)) {
-      throw ArgumentError('updatedAt must not be before createdAt.');
-    }
+    if (revision < 1) throw ArgumentError.value(revision, 'revision');
+    if (updatedAt.isBefore(createdAt)) throw ArgumentError('updatedAt precedes createdAt');
   }
 
-  PluginRevocationJournalRecord nextRevision({
+  bool get requiresReconciliation =>
+      status == PluginRevocationJournalStatus.pending ||
+      status == PluginRevocationJournalStatus.failed ||
+      status == PluginRevocationJournalStatus.retryAuthorized ||
+      status == PluginRevocationJournalStatus.manualReview;
+
+  PluginRevocationJournalEntry next({
     required PluginRevocationJournalStatus status,
-    required DateTime updatedAt,
-    bool? approvalGranted,
+    required DateTime at,
     String? detail,
-  }) =>
-      PluginRevocationJournalRecord(
-        schemaVersion: schemaVersion,
-        revision: revision + 1,
-        idempotencyKey: idempotencyKey,
-        operationId: operationId,
-        correlationId: correlationId,
-        pluginId: pluginId,
-        providerOwnerId: providerOwnerId,
-        action: action,
-        status: status,
-        approvalGranted: approvalGranted ?? this.approvalGranted,
-        createdAt: createdAt,
-        updatedAt: updatedAt.isBefore(createdAt) ? createdAt : updatedAt,
-        detail: detail,
-      );
+  }) => PluginRevocationJournalEntry(
+    schemaVersion: schemaVersion, idempotencyKey: idempotencyKey,
+    operationId: operationId, pluginId: pluginId, providerOwnerId: providerOwnerId,
+    action: action, status: status, revision: revision + 1,
+    createdAt: createdAt,
+    updatedAt: at.toUtc().isBefore(createdAt) ? createdAt : at.toUtc(),
+    correlationId: correlationId, detail: detail,
+  );
 }
 
-/// Persistence contract for revocation journaling.
-///
-/// Production adapters must implement createIfAbsent and compareAndSet as
-/// atomic transactions/conditional writes across all runtime processes.
+/// Atomic persistence boundary. Production implementations must provide
+/// linearizable insert-if-absent and compare-and-set across host processes.
 abstract interface class PluginRevocationJournalStore {
-  Future<PluginRevocationJournalRecord?> read(String idempotencyKey);
-  Future<List<PluginRevocationJournalRecord>> readAll();
-
-  /// Atomically creates revision 0 only if the key does not already exist.
-  Future<bool> createIfAbsent(PluginRevocationJournalRecord record);
-
-  /// Atomically replaces a record iff its current revision matches
-  /// [expectedRevision]. The replacement must have revision + 1.
+  Future<PluginRevocationJournalEntry?> read(String idempotencyKey);
+  Future<List<PluginRevocationJournalEntry>> readAll();
+  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry);
   Future<bool> compareAndSet({
     required String idempotencyKey,
     required int expectedRevision,
-    required PluginRevocationJournalRecord replacement,
+    required PluginRevocationJournalEntry replacement,
   });
 }
 
-/// Single-process reference store. Not crash durable or multi-process safe.
-class InMemoryPluginRevocationJournalStore
-    implements PluginRevocationJournalStore {
-  final Map<String, PluginRevocationJournalRecord> _records = {};
-
+/// Reference store for tests and single-process development only.
+class InMemoryPluginRevocationJournalStore implements PluginRevocationJournalStore {
+  final Map<String, PluginRevocationJournalEntry> _entries = {};
   @override
-  Future<PluginRevocationJournalRecord?> read(String key) async =>
-      _records[key];
-
+  Future<PluginRevocationJournalEntry?> read(String key) async => _entries[key];
   @override
-  Future<List<PluginRevocationJournalRecord>> readAll() async =>
-      List.unmodifiable(_records.values);
-
+  Future<List<PluginRevocationJournalEntry>> readAll() async =>
+      List.unmodifiable(_entries.values.toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt)));
   @override
-  Future<bool> createIfAbsent(PluginRevocationJournalRecord record) async {
-    if (record.revision != 0 ||
-        record.status != PluginRevocationJournalStatus.pending) {
-      throw ArgumentError('A new journal entry must be pending at revision 0.');
-    }
-    if (_records.containsKey(record.idempotencyKey)) return false;
-    _records[record.idempotencyKey] = record;
+  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry) async {
+    if (_entries.containsKey(entry.idempotencyKey)) return false;
+    _entries[entry.idempotencyKey] = entry;
     return true;
   }
-
   @override
   Future<bool> compareAndSet({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalRecord replacement,
+    required String idempotencyKey, required int expectedRevision,
+    required PluginRevocationJournalEntry replacement,
   }) async {
-    final current = _records[idempotencyKey];
-    if (current == null || current.revision != expectedRevision) return false;
-    if (replacement.idempotencyKey != idempotencyKey ||
-        replacement.revision != expectedRevision + 1) {
-      throw ArgumentError('Replacement key/revision does not match CAS request.');
-    }
-    _records[idempotencyKey] = replacement;
+    final current = _entries[idempotencyKey];
+    if (current == null || current.revision != expectedRevision ||
+        replacement.revision != expectedRevision + 1 ||
+        replacement.idempotencyKey != idempotencyKey) return false;
+    _entries[idempotencyKey] = replacement;
     return true;
   }
 }
 
 
-/// Bridges the existing governed execution coordinator to the durable journal.
-///
-/// Supply a host correlation-ID resolver so provider events, revocation
-/// decisions, lifecycle operations, and audit events can share one trace.
+/// Adapts the durable journal to the execution-store contract used by
+/// [PluginRevocationCoordinator]. Hosts can inject this into the coordinator
+/// so execution claims and terminal outcomes share the same journal.
 class JournalBackedPluginRevocationExecutionStore
     implements PluginRevocationExecutionStore {
   final PluginRevocationJournalStore journal;
-  final String Function(PluginRevocationExecutionRecord record)
-      correlationIdFor;
 
-  JournalBackedPluginRevocationExecutionStore({
-    required this.journal,
-    required this.correlationIdFor,
-  });
+  JournalBackedPluginRevocationExecutionStore(this.journal);
 
   @override
   Future<PluginRevocationExecutionRecord?> read(String idempotencyKey) async {
     final entry = await journal.read(idempotencyKey);
     if (entry == null) return null;
+    return _toExecution(entry);
+  }
+
+  @override
+  Future<bool> writePending(PluginRevocationExecutionRecord record) =>
+      journal.insertIfAbsent(PluginRevocationJournalEntry(
+        idempotencyKey: record.idempotencyKey,
+        operationId: record.operationId,
+        pluginId: record.pluginId,
+        providerOwnerId: record.providerOwnerId,
+        action: record.action,
+        status: PluginRevocationJournalStatus.pending,
+        revision: 1,
+        createdAt: record.updatedAt,
+        updatedAt: record.updatedAt,
+        detail: record.detail,
+      ));
+
+  @override
+  Future<void> complete(PluginRevocationExecutionRecord record) async {
+    final current = await journal.read(record.idempotencyKey);
+    if (current == null) {
+      throw StateError('No journal entry for revocation operation.');
+    }
+    final replacement = current.next(
+      status: switch (record.status) {
+        PluginRevocationExecutionStatus.completed ||
+        PluginRevocationExecutionStatus.alreadyCompleted =>
+          PluginRevocationJournalStatus.completed,
+        PluginRevocationExecutionStatus.rejected =>
+          PluginRevocationJournalStatus.rejected,
+        PluginRevocationExecutionStatus.unsupported =>
+          PluginRevocationJournalStatus.unsupported,
+        PluginRevocationExecutionStatus.noOp =>
+          PluginRevocationJournalStatus.completed,
+        PluginRevocationExecutionStatus.failed =>
+          PluginRevocationJournalStatus.failed,
+        PluginRevocationExecutionStatus.requiresReconciliation =>
+          PluginRevocationJournalStatus.manualReview,
+      },
+      at: record.updatedAt,
+      detail: record.detail,
+    );
+    final saved = await journal.compareAndSet(
+      idempotencyKey: record.idempotencyKey,
+      expectedRevision: current.revision,
+      replacement: replacement,
+    );
+    if (!saved) throw StateError('Concurrent journal update; reload before writing.');
+  }
+
+  PluginRevocationExecutionRecord _toExecution(PluginRevocationJournalEntry entry) {
+    final status = switch (entry.status) {
+      PluginRevocationJournalStatus.pending ||
+      PluginRevocationJournalStatus.retryAuthorized ||
+      PluginRevocationJournalStatus.manualReview =>
+        PluginRevocationExecutionStatus.requiresReconciliation,
+      PluginRevocationJournalStatus.completed ||
+      PluginRevocationJournalStatus.reconciledApplied =>
+        PluginRevocationExecutionStatus.completed,
+      PluginRevocationJournalStatus.rejected =>
+        PluginRevocationExecutionStatus.rejected,
+      PluginRevocationJournalStatus.unsupported =>
+        PluginRevocationExecutionStatus.unsupported,
+      PluginRevocationJournalStatus.failed =>
+        PluginRevocationExecutionStatus.failed,
+    };
     return PluginRevocationExecutionRecord(
       idempotencyKey: entry.idempotencyKey,
       operationId: entry.operationId,
       pluginId: entry.pluginId,
       providerOwnerId: entry.providerOwnerId,
       action: entry.action,
-      status: _executionStatus(entry.status),
+      status: status,
       updatedAt: entry.updatedAt,
       detail: entry.detail,
     );
   }
-
-  @override
-  Future<bool> writePending(PluginRevocationExecutionRecord record) {
-    if (record.status !=
-        PluginRevocationExecutionStatus.requiresReconciliation) {
-      throw ArgumentError('Initial journal records must be pending.');
-    }
-    return journal.createIfAbsent(PluginRevocationJournalRecord(
-      revision: 0,
-      idempotencyKey: record.idempotencyKey,
-      operationId: record.operationId,
-      correlationId: correlationIdFor(record).trim(),
-      pluginId: record.pluginId,
-      providerOwnerId: record.providerOwnerId,
-      action: record.action,
-      status: PluginRevocationJournalStatus.pending,
-      createdAt: record.updatedAt,
-      updatedAt: record.updatedAt,
-      detail: record.detail,
-    ));
-  }
-
-  @override
-  Future<void> complete(PluginRevocationExecutionRecord record) async {
-    final current = await journal.read(record.idempotencyKey);
-    if (current == null ||
-        current.status != PluginRevocationJournalStatus.pending) {
-      throw StateError('No pending journal entry exists for this operation.');
-    }
-    final replacement = current.nextRevision(
-      status: _journalStatus(record.status),
-      updatedAt: record.updatedAt,
-      detail: record.detail,
-    );
-    final updated = await journal.compareAndSet(
-      idempotencyKey: record.idempotencyKey,
-      expectedRevision: current.revision,
-      replacement: replacement,
-    );
-    if (!updated) throw StateError('Concurrent journal update detected.');
-  }
-
-  PluginRevocationExecutionStatus _executionStatus(
-    PluginRevocationJournalStatus status,
-  ) =>
-      switch (status) {
-        PluginRevocationJournalStatus.pending ||
-        PluginRevocationJournalStatus.reconciled =>
-          PluginRevocationExecutionStatus.requiresReconciliation,
-        PluginRevocationJournalStatus.completed =>
-          PluginRevocationExecutionStatus.completed,
-        PluginRevocationJournalStatus.rejected =>
-          PluginRevocationExecutionStatus.rejected,
-        PluginRevocationJournalStatus.noOp =>
-          PluginRevocationExecutionStatus.noOp,
-        PluginRevocationJournalStatus.unsupported =>
-          PluginRevocationExecutionStatus.unsupported,
-        PluginRevocationJournalStatus.failed =>
-          PluginRevocationExecutionStatus.failed,
-      };
-
-  PluginRevocationJournalStatus _journalStatus(
-    PluginRevocationExecutionStatus status,
-  ) =>
-      switch (status) {
-        PluginRevocationExecutionStatus.completed =>
-          PluginRevocationJournalStatus.completed,
-        PluginRevocationExecutionStatus.rejected =>
-          PluginRevocationJournalStatus.rejected,
-        PluginRevocationExecutionStatus.noOp =>
-          PluginRevocationJournalStatus.noOp,
-        PluginRevocationExecutionStatus.unsupported =>
-          PluginRevocationJournalStatus.unsupported,
-        PluginRevocationExecutionStatus.failed =>
-          PluginRevocationJournalStatus.failed,
-        PluginRevocationExecutionStatus.requiresReconciliation =>
-          PluginRevocationJournalStatus.pending,
-        PluginRevocationExecutionStatus.alreadyCompleted =>
-          PluginRevocationJournalStatus.completed,
-      };
 }
