@@ -6,18 +6,18 @@ import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 
 import 'jsonl_composition_lifecycle_event_store.dart';
-import 'jsonl_composition_lifecycle_diagnostics.dart';
+import 'jsonl_composition_lifecycle_lifecycleDiagnostics.dart';
 
 /// Ready-to-use composition runtime backed by a durable JSONL event journal.
 ///
-/// The synchronous runtime event sink only enqueues diagnostics. Storage I/O
+/// The synchronous runtime event sink only enqueues lifecycleDiagnostics. Storage I/O
 /// happens asynchronously through [journal], so composition callbacks do not
 /// wait for disk writes. Hosts must call [close] during orderly shutdown.
 final class JsonlCompositionLifecycleRuntime {
   late final JsonlCompositionLifecycleEventStore store;
   late final CompositionLifecycleEventJournal journal;
   late final DefaultCompositionRuntime runtime;
-  late final JsonlCompositionLifecycleDiagnostics diagnostics;
+  late final JsonlCompositionLifecycleDiagnostics lifecycleDiagnostics;
 
   JsonlCompositionLifecycleRuntime({
     required File file,
@@ -43,7 +43,7 @@ final class JsonlCompositionLifecycleRuntime {
           maxPendingLifecycleEventsPerSubscriber,
       onOwnerDeactivated: onOwnerDeactivated,
     );
-    diagnostics = JsonlCompositionLifecycleDiagnostics(
+    lifecycleDiagnostics = JsonlCompositionLifecycleDiagnostics(
       store: store,
       journal: journal,
       runtime: runtime,
@@ -65,7 +65,7 @@ final class JsonlCompositionLifecycleRuntime {
   /// Retries the failed event and then drains the remaining accepted events.
   Future<void> retryFailedWrites() => journal.retryFailedWrites();
 
-  /// Flushes accepted diagnostics before applying the requested retention.
+  /// Flushes accepted lifecycleDiagnostics before applying the requested retention.
   ///
   /// This prevents compaction from running ahead of events already accepted
   /// by the runtime but still waiting in the asynchronous journal.
@@ -85,7 +85,7 @@ final class JsonlCompositionLifecycleRuntime {
     return store.query(query);
   }
 
-  /// Stops event intake and waits for all accepted diagnostics to persist.
+  /// Stops event intake and waits for all accepted lifecycleDiagnostics to persist.
   ///
   /// If persistence fails, the journal remains in its recoverable closing
   /// state. Call [retryFailedWrites] and then [close] again.
