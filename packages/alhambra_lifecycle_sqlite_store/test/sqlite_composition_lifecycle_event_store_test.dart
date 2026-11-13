@@ -165,5 +165,51 @@ void main() {
     expect(result.logFrames, greaterThanOrEqualTo(-1));
     expect(result.checkpointedFrames, greaterThanOrEqualTo(-1));
   });
+  test('rolls back the event row when owner association insertion fails', () async {
+    store = SqliteCompositionLifecycleEventStore.open(
+      path: '${directory.path}/rollback.sqlite',
+    );
+    store.database.execute('''
+      CREATE TRIGGER reject_owner BEFORE INSERT ON lifecycle_event_owners
+      BEGIN
+        SELECT RAISE(ABORT, 'injected owner association failure');
+      END
+    ''');
+    final event = CompositionLifecycleEvent(
+      eventId: 'rollback-event',
+      correlationId: 'rollback-correlation',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: DateTime.utc(2026, 7, 4),
+      nodeIds: const ['command:rollback'],
+      ownerIds: const ['owner-rollback'],
+    );
+
+    await expectLater(store.append(event), throwsA(isA<Exception>()));
+    store.database.execute('DROP TRIGGER reject_owner');
+    expect(await store.query(CompositionLifecycleEventQuery()), isEmpty);
+  });
+
+  test('recovers committed WAL data after closing and reopening', () async {
+    final path = '${directory.path}/wal-recovery.sqlite';
+    store = SqliteCompositionLifecycleEventStore.open(path: path);
+    final event = CompositionLifecycleEvent(
+      eventId: 'wal-recovery-event',
+      correlationId: 'wal-recovery-correlation',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: DateTime.utc(2026, 7, 5),
+      nodeIds: const ['command:wal-recovery'],
+      ownerIds: const ['owner-wal-recovery'],
+    );
+    await store.append(event);
+    await store.close();
+
+    store = SqliteCompositionLifecycleEventStore.open(path: path);
+    final recovered = await store.query(
+      CompositionLifecycleEventQuery(ownerId: 'owner-wal-recovery'),
+    );
+    expect(recovered.single.eventId, event.eventId);
+  });
 
 }
