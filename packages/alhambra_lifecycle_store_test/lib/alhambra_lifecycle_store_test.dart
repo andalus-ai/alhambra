@@ -103,6 +103,17 @@ void defineCompositionLifecycleEventStoreContractTests({
       expect(previous.map((event) => event.eventId), ['a', 'b']);
     });
 
+    test('uses Dart string ordering for Unicode event IDs', () async {
+      final timestamp = DateTime.utc(2026, 3, 2);
+      const supplementary = '\u{10000}';
+      const privateUse = '\uE000';
+      await store.append(_event('supplementary', timestamp, eventId: supplementary));
+      await store.append(_event('private-use', timestamp, eventId: privateUse));
+
+      final result = await store.query(CompositionLifecycleEventQuery());
+      expect(result.map((event) => event.eventId), [supplementary, privateUse]);
+    });
+
     test('treats identical retries as no-op and rejects conflicting IDs', () async {
       final event = _event(
         'retry', DateTime.utc(2026, 4, 1), eventId: 'stable-id',
