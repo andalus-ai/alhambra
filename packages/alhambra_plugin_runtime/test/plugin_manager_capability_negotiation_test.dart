@@ -18,6 +18,93 @@ class _TestPlugin implements AlhambraPlugin {
   Future<void> activate(PluginContext context) async {
     activationCount++;
   }
+
+  group('PluginManager dynamic capability providers', () {
+    test('captures current provider revision for each activation', () async {
+      final providers = CapabilityProviderRegistry();
+      providers.register(
+        ownerId: 'storage-provider',
+        declarations: const [
+          PluginCapabilityDeclaration(id: capability, major: 1, minor: 1),
+        ],
+      );
+      final plugin = _TestPlugin('dynamic-provider');
+      final manager = PluginManager(
+        capabilityNegotiator: const PluginCapabilityNegotiator(),
+        capabilityProviderRegistry: providers,
+        capabilityRequirementsResolver: (_) => const [
+          PluginCapabilityRequirement(
+            id: capability,
+            major: 1,
+            minimumMinor: 1,
+          ),
+        ],
+      );
+
+      await manager.activate(plugin);
+
+      expect(plugin.activationCount, 1);
+      expect(
+        manager.capabilityNegotiationRecords['dynamic-provider']!
+            .providerRevision,
+        1,
+      );
+      await providers.close();
+    });
+
+    test('subsequent activation sees provider withdrawal and blocks', () async {
+      final providers = CapabilityProviderRegistry();
+      providers.register(
+        ownerId: 'storage-provider',
+        declarations: const [
+          PluginCapabilityDeclaration(id: capability, major: 1),
+        ],
+      );
+      final manager = PluginManager(
+        capabilityNegotiator: const PluginCapabilityNegotiator(),
+        capabilityProviderRegistry: providers,
+        capabilityRequirementsResolver: (_) => const [
+          PluginCapabilityRequirement(id: capability, major: 1),
+        ],
+      );
+
+      await manager.activate(_TestPlugin('first-plugin'));
+      expect(providers.unregister('storage-provider'), isTrue);
+
+      final second = _TestPlugin('second-plugin');
+      await expectLater(
+        manager.activate(second),
+        throwsA(isA<PluginCapabilityNegotiationException>().having(
+          (error) => error.providerRevision,
+          'providerRevision',
+          2,
+        )),
+      );
+      expect(second.activationCount, 0);
+      expect(
+        manager.capabilityNegotiationRecords['second-plugin']!
+            .providerRevision,
+        2,
+      );
+      await providers.close();
+    });
+
+    test('rejects mixing dynamic registry and static declarations', () {
+      final providers = CapabilityProviderRegistry();
+      expect(
+        () => PluginManager(
+          capabilityNegotiator: const PluginCapabilityNegotiator(),
+          capabilityProviderRegistry: providers,
+          capabilityDeclarations: const [
+            PluginCapabilityDeclaration(id: capability, major: 1),
+          ],
+          capabilityRequirementsResolver: (_) => const [],
+        ),
+        throwsArgumentError,
+      );
+    });
+  });
+
 }
 
 void main() {
