@@ -36,7 +36,7 @@ final class PluginRevocationOutboxMessage {
   final DateTime nextAttemptAt;
   final String? leaseOwner;
   final String? leaseToken;
-  final DateTime? leaseUntil;
+  final DateTime? leaseUntil;\n  final DateTime? deliveredAt;
   final String? lastErrorCode;
 
   const PluginRevocationOutboxMessage({
@@ -152,10 +152,10 @@ class InMemoryTransactionalPluginRevocationStore
       throw ArgumentError('workerId, positive leaseDuration and limit are required.');
     }
     final instant = now.toUtc();
-    final candidates = _messages.values.where((message) {
+    for (final entry in _messages.entries.toList()) {\n      final message = entry.value;\n      if (message.state == PluginRevocationOutboxState.leased &&\n          message.leaseUntil != null && !message.leaseUntil!.isAfter(instant) &&\n          message.attempts >= maxAttempts) {\n        _messages[entry.key] = PluginRevocationOutboxMessage(\n          event: message.event, state: PluginRevocationOutboxState.deadLetter,\n          attempts: message.attempts, nextAttemptAt: message.nextAttemptAt,\n          lastErrorCode: 'lease_expired_after_max_attempts');\n      }\n    }\n    final candidates = _messages.values.where((message) {
       if (message.state == PluginRevocationOutboxState.delivered ||
           message.state == PluginRevocationOutboxState.deadLetter) return false;
-      if (message.state == PluginRevocationOutboxState.pending) {
+      if (message.attempts >= maxAttempts) return false;\n      if (message.state == PluginRevocationOutboxState.pending) {
         return !message.nextAttemptAt.isAfter(instant);
       }
       return message.leaseUntil != null && !message.leaseUntil!.isAfter(instant);
