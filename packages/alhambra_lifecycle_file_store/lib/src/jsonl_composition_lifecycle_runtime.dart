@@ -21,6 +21,8 @@ final class JsonlCompositionLifecycleRuntime {
     required File file,
     int maxPendingEvents = 512,
     int maxLifecycleEvents = 1000,
+    int maxLifecycleEventSubscribers = 64,
+    int maxPendingLifecycleEventsPerSubscriber = 128,
     CompositionLifecycleEventJsonCodec? codec,
     void Function(Object error, StackTrace stackTrace)? onWriteError,
     void Function(String ownerId)? onOwnerDeactivated,
@@ -34,6 +36,9 @@ final class JsonlCompositionLifecycleRuntime {
     runtime = DefaultCompositionRuntime(
       onLifecycleEvent: journal.call,
       maxLifecycleEvents: maxLifecycleEvents,
+      maxLifecycleEventSubscribers: maxLifecycleEventSubscribers,
+      maxPendingLifecycleEventsPerSubscriber:
+          maxPendingLifecycleEventsPerSubscriber,
       onOwnerDeactivated: onOwnerDeactivated,
     );
   }
