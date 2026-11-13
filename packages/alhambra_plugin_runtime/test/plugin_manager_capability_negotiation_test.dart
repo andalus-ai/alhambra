@@ -18,6 +18,81 @@ class _TestPlugin implements AlhambraPlugin {
   Future<void> activate(PluginContext context) async {
     activationCount++;
   }
+}
+
+void main() {
+  const capability = CapabilityId('storage.read');
+
+  group('PluginManager capability negotiation', () {
+    test('required incompatibility blocks activation before plugin code', () async {
+      final plugin = _TestPlugin('required-capability');
+      final manager = PluginManager(
+        capabilityNegotiator: const PluginCapabilityNegotiator(),
+        capabilityDeclarations: const [
+          PluginCapabilityDeclaration(
+            id: capability,
+            major: 1,
+            available: false,
+          ),
+        ],
+        capabilityRequirementsResolver: (_) => const [
+          PluginCapabilityRequirement(id: capability, major: 1),
+        ],
+      );
+
+      await expectLater(
+        manager.activate(plugin),
+        throwsA(isA<PluginCapabilityNegotiationException>()),
+      );
+      expect(plugin.activationCount, 0);
+      expect(manager.activePlugins, isEmpty);
+      expect(manager.capabilityNegotiations['required-capability']!.canActivate,
+          isFalse);
+    });
+
+    test('optional incompatibility permits activation and remains observable',
+        () async {
+      final plugin = _TestPlugin('optional-capability');
+      final manager = PluginManager(
+        capabilityNegotiator: const PluginCapabilityNegotiator(),
+        capabilityDeclarations: const [],
+        capabilityRequirementsResolver: (_) => const [
+          PluginCapabilityRequirement(
+            id: capability,
+            major: 1,
+            required: false,
+          ),
+        ],
+      );
+
+      await manager.activate(plugin);
+      expect(plugin.activationCount, 1);
+      expect(manager.capabilityNegotiations['optional-capability']!.status,
+          CapabilityNegotiationStatus.degraded);
+    });
+
+    test('legacy manager remains compatible when negotiation is omitted',
+        () async {
+      final plugin = _TestPlugin('legacy-plugin');
+      final manager = PluginManager();
+      await manager.activate(plugin);
+      expect(plugin.activationCount, 1);
+      expect(manager.capabilityNegotiations, isEmpty);
+    });
+
+    test('requires negotiator and requirement resolver together', () {
+      expect(
+        () => PluginManager(
+          capabilityNegotiator: const PluginCapabilityNegotiator(),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => PluginManager(capabilityRequirementsResolver: (_) => const []),
+        throwsArgumentError,
+      );
+    });
+  });
 
   group('PluginManager dynamic capability providers', () {
     test('captures current provider revision for each activation', () async {
@@ -42,7 +117,6 @@ class _TestPlugin implements AlhambraPlugin {
       );
 
       await manager.activate(plugin);
-
       expect(plugin.activationCount, 1);
       expect(
         manager.capabilityNegotiationRecords['dynamic-provider']!
@@ -98,99 +172,6 @@ class _TestPlugin implements AlhambraPlugin {
           capabilityDeclarations: const [
             PluginCapabilityDeclaration(id: capability, major: 1),
           ],
-          capabilityRequirementsResolver: (_) => const [],
-        ),
-        throwsArgumentError,
-      );
-    });
-  });
-
-}
-
-void main() {
-  const capability = CapabilityId('storage.read');
-
-  group('PluginManager capability negotiation', () {
-    test('required incompatibility blocks activation before plugin code', () async {
-      final plugin = _TestPlugin('required-capability');
-      final manager = PluginManager(
-        capabilityNegotiator: const PluginCapabilityNegotiator(),
-        capabilityDeclarations: const [
-          PluginCapabilityDeclaration(
-            id: capability,
-            major: 1,
-            available: false,
-          ),
-        ],
-        capabilityRequirementsResolver: (_) => const [
-          PluginCapabilityRequirement(
-            id: capability,
-            major: 1,
-            required: true,
-          ),
-        ],
-      );
-
-      await expectLater(
-        manager.activate(plugin),
-        throwsA(isA<PluginCapabilityNegotiationException>()),
-      );
-
-      expect(plugin.activationCount, 0);
-      expect(manager.activePlugins, isEmpty);
-      expect(
-        manager.capabilityNegotiations['required-capability']!.canActivate,
-        isFalse,
-      );
-    });
-
-    test('optional incompatibility allows activation and remains observable',
-        () async {
-      final plugin = _TestPlugin('optional-capability');
-      final manager = PluginManager(
-        capabilityNegotiator: const PluginCapabilityNegotiator(),
-        capabilityDeclarations: const [],
-        capabilityRequirementsResolver: (_) => const [
-          PluginCapabilityRequirement(
-            id: capability,
-            major: 1,
-            required: false,
-          ),
-        ],
-      );
-
-      await manager.activate(plugin);
-
-      expect(plugin.activationCount, 1);
-      expect(manager.activePlugins, [same(plugin)]);
-      final result =
-          manager.capabilityNegotiations['optional-capability']!;
-      expect(result.status, CapabilityNegotiationStatus.degraded);
-      expect(result.canActivate, isTrue);
-      expect(result.issues.single.blocking, isFalse);
-    });
-
-    test('legacy manager remains compatible when negotiation is omitted',
-        () async {
-      final plugin = _TestPlugin('legacy-plugin');
-      final manager = PluginManager();
-
-      await manager.activate(plugin);
-
-      expect(plugin.activationCount, 1);
-      expect(manager.activePlugins, [same(plugin)]);
-      expect(manager.capabilityNegotiations, isEmpty);
-    });
-
-    test('requires negotiator and requirement resolver together', () {
-      expect(
-        () => PluginManager(
-          capabilityNegotiator: const PluginCapabilityNegotiator(),
-        ),
-        throwsArgumentError,
-      );
-      expect(
-        () => PluginManager(
           capabilityRequirementsResolver: (_) => const [],
         ),
         throwsArgumentError,
