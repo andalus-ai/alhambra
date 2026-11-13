@@ -48,6 +48,83 @@ void main() {
     );
   });
 
+  test('upgrades a version 1 database through ordered migrations', () async {
+    final path = '${directory.path}/upgrade-v1.sqlite';
+    final database = sqlite3.open(path);
+    database.execute('''
+      CREATE TABLE lifecycle_events (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        event_id_sort_key TEXT NOT NULL,
+        correlation_id TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        status TEXT NOT NULL,
+        timestamp_micros INTEGER NOT NULL,
+        payload TEXT NOT NULL
+      )
+    ''');
+    database.execute('''
+      CREATE TABLE lifecycle_event_owners (
+        event_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        PRIMARY KEY (event_id, owner_id),
+        FOREIGN KEY (event_id) REFERENCES lifecycle_events(event_id)
+          ON DELETE CASCADE
+      )
+    ''');
+    database.execute(
+      'CREATE INDEX idx_lifecycle_time '
+      'ON lifecycle_events(timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX idx_lifecycle_correlation_time '
+      'ON lifecycle_events(correlation_id, timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX idx_lifecycle_operation_time '
+      'ON lifecycle_events(operation, timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX idx_lifecycle_status_time '
+      'ON lifecycle_events(status, timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX idx_lifecycle_owner_time '
+      'ON lifecycle_event_owners(owner_id, event_id)',
+    );
+    database.execute('PRAGMA user_version = 1');
+    database.dispose();
+
+    store = SqliteCompositionLifecycleEventStore.open(path: path);
+
+    expect(
+      store!.database.select('PRAGMA user_version').single['user_version'],
+      SqliteCompositionLifecycleEventStore.schemaVersion,
+    );
+    expect(
+      store!.database.select(
+        "SELECT name FROM sqlite_master WHERE type = 'index' "
+        "AND name = 'idx_lifecycle_status_operation_time'",
+      ),
+      isNotEmpty,
+    );
+  });
+
+  test('uses the composite status-operation index for matching queries', () async {
+    store = SqliteCompositionLifecycleEventStore.open(
+      path: '${directory.path}/query-plan.sqlite',
+    );
+    final plan = store!.database.select(
+      'EXPLAIN QUERY PLAN SELECT payload FROM lifecycle_events '
+      'WHERE status = ? AND operation = ? '
+      'ORDER BY timestamp_micros, event_id_sort_key LIMIT ?',
+      ['succeeded', 'activate', 20],
+    );
+    expect(
+      plan.map((row) => row['detail'].toString()).join(' '),
+      contains('idx_lifecycle_status_operation_time'),
+    );
+  });
+
   test('rejects databases created by a newer schema version', () async {
     final path = '${directory.path}/future-schema.sqlite';
     final database = sqlite3.open(path);
