@@ -44,6 +44,22 @@ final class JsonlCompositionLifecycleDiagnostics {
     return List.unmodifiable(merged.take(query.limit));
   }
 
+  /// Reads a complete correlation timeline across durable and live history.
+  Future<List<CompositionLifecycleEvent>> timelineForCorrelation(
+    String correlationId, {
+    DateTime? from,
+    DateTime? to,
+    DateTime? before,
+    int limit = 100,
+  }) =>
+      query(CompositionLifecycleEventQuery(
+        correlationId: correlationId,
+        from: from,
+        to: to,
+        before: before,
+        limit: limit,
+      ));
+
   /// Builds an owner summary over durable history plus the live runtime window.
   ///
   /// Event counts are exact for the JSONL file and the current in-memory
