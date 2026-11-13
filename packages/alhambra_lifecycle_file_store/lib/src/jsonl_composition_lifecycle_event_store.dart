@@ -185,9 +185,12 @@ final class JsonlCompositionLifecycleEventStore
     final events = await _readAllCompleteEvents();
     final matches = events.where((event) => _matches(event, query)).toList();
     final ordered = _stableChronological(matches);
-    return List<CompositionLifecycleEvent>.unmodifiable(
-      ordered.take(query.limit),
-    );
+    if (query.beforeCursor != null) {
+      final preceding = ordered.where((event) => _compareEventToCursor(event, query.beforeCursor!) < 0).toList();
+      final start = preceding.length > query.limit ? preceding.length - query.limit : 0;
+      return List<CompositionLifecycleEvent>.unmodifiable(preceding.skip(start));
+    }
+    return List<CompositionLifecycleEvent>.unmodifiable(ordered.take(query.limit));
   }
 
   Future<List<CompositionLifecycleEvent>> _readAllCompleteEvents() async {
@@ -218,9 +221,16 @@ final class JsonlCompositionLifecycleEventStore
     final indexed = events.indexed.toList();
     indexed.sort((a, b) {
       final byTime = a.$2.timestamp.compareTo(b.$2.timestamp);
-      return byTime != 0 ? byTime : a.$1.compareTo(b.$1);
+      if (byTime != 0) return byTime;
+      final byId = a.$2.eventId.compareTo(b.$2.eventId);
+      return byId != 0 ? byId : a.$1.compareTo(b.$1);
     });
     return indexed.map((entry) => entry.$2).toList(growable: false);
+  }
+
+  int _compareEventToCursor(CompositionLifecycleEvent event, CompositionLifecycleEventCursor cursor) {
+    final byTime = event.timestamp.compareTo(cursor.timestamp);
+    return byTime != 0 ? byTime : event.eventId.compareTo(cursor.eventId);
   }
 
   bool _matches(
@@ -246,9 +256,9 @@ final class JsonlCompositionLifecycleEventStore
     if (query.to != null && event.timestamp.isAfter(query.to!)) {
       return false;
     }
-    if (query.before != null && !event.timestamp.isBefore(query.before!)) {
-      return false;
-    }
+    if (query.before != null && !event.timestamp.isBefore(query.before!)) return false;
+    if (query.after != null && _compareEventToCursor(event, query.after!) <= 0) return false;
+    if (query.beforeCursor != null && _compareEventToCursor(event, query.beforeCursor!) >= 0) return false;
     return true;
   }
 }
