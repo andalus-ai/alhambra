@@ -366,7 +366,6 @@ final class SqlitePluginRevocationStore
         return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
       });
 
-  @override
   Future<PluginRevocationJournalEntry?> readJournal(String idempotencyKey) async {
     _assertOpen();
     final rows = _db.select(
@@ -376,7 +375,6 @@ final class SqlitePluginRevocationStore
     return rows.isEmpty ? null : _journal(rows.first);
   }
 
-  @override
   Future<List<PluginRevocationJournalEntry>> readAllJournal() async {
     _assertOpen();
     return List.unmodifiable(_db.select(
@@ -416,7 +414,6 @@ final class SqlitePluginRevocationStore
         entry.detail,
       ];
 
-  @override
   Future<bool> insertJournalIfAbsent(PluginRevocationJournalEntry entry) async =>
       _transaction(() {
         _db.execute('''
@@ -429,7 +426,6 @@ final class SqlitePluginRevocationStore
         return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
       });
 
-  @override
   Future<bool> compareAndSetJournal({
     required String idempotencyKey,
     required int expectedRevision,
