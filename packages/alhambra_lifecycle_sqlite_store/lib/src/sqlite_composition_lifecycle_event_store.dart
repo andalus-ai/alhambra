@@ -236,6 +236,20 @@ final class SqliteCompositionLifecycleEventStore
     );
   }
 
+  /// Runs a SQLite WAL checkpoint and returns SQLite's checkpoint counters.
+  SqliteWalCheckpointResult checkpoint({
+    SqliteWalCheckpointMode mode = SqliteWalCheckpointMode.passive,
+  }) {
+    _ensureOpen();
+    final row = database.select('PRAGMA wal_checkpoint(${mode.name.toUpperCase()})').single;
+    return SqliteWalCheckpointResult(
+      busy: row['busy'] as int,
+      logFrames: row['log'] as int,
+      checkpointedFrames: row['checkpointed'] as int,
+      mode: mode,
+    );
+  }
+
   /// Closes the database only when this store opened and owns it.
   Future<void> close() async {
     if (_closed) return;
@@ -252,3 +266,36 @@ final class SqliteCompositionLifecycleEventStore
 String _eventIdSortKey(String value) => value.codeUnits
     .map((unit) => unit.toRadixString(16).padLeft(4, '0'))
     .join();
+
+/// Supported SQLite WAL checkpoint strategies.
+enum SqliteWalCheckpointMode {
+  /// Checkpoint without waiting for readers or writers.
+  passive,
+
+  /// Wait for readers to finish; allow writers to continue.
+  full,
+
+  /// Wait for readers and writers, then restart the WAL.
+  restart,
+
+  /// Truncate the WAL after checkpointing all possible frames.
+  truncate,
+}
+
+/// Raw checkpoint counters returned by SQLite.
+final class SqliteWalCheckpointResult {
+  final int busy;
+  final int logFrames;
+  final int checkpointedFrames;
+  final SqliteWalCheckpointMode mode;
+
+  const SqliteWalCheckpointResult({
+    required this.busy,
+    required this.logFrames,
+    required this.checkpointedFrames,
+    required this.mode,
+  });
+
+  bool get fullyCheckpointed =>
+      busy == 0 && logFrames >= 0 && checkpointedFrames == logFrames;
+}
