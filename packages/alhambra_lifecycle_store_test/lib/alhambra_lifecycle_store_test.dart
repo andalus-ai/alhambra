@@ -116,7 +116,7 @@ void defineCompositionLifecycleEventStoreContractTests({
         )),
         throwsA(isA<CompositionLifecycleEventIdentityConflictException>()),
       );
-      final result = await store.query(const CompositionLifecycleEventQuery());
+      final result = await store.query(CompositionLifecycleEventQuery());
       expect(result, hasLength(1));
       expect(result.single.correlationId, 'retry');
     });
@@ -125,7 +125,7 @@ void defineCompositionLifecycleEventStoreContractTests({
       await store.append(_event(
         'immutable', DateTime.utc(2026, 5, 1), eventId: 'immutable',
       ));
-      final result = await store.query(const CompositionLifecycleEventQuery());
+      final result = await store.query(CompositionLifecycleEventQuery());
       expect(
         () => result.add(_event(
           'not-allowed', DateTime.utc(2026, 5, 2), eventId: 'mutate',
