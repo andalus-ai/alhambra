@@ -173,6 +173,7 @@ final class JsonlCompositionLifecycleEventStore
         }
         rethrow;
       }
+      _clearIndex();
       return removed;
     } finally {
       // If an unexpected failure happened after moving the original, make a
