@@ -54,6 +54,34 @@ document their store's durability and concurrency guarantees. Inject a
 globally unique operation-ID factory when multiple processes can coordinate
 lifecycle work.
 
+## Recovery planner
+
+`PluginLifecycleRecoveryPlanner` performs a read-only scan of all stored
+checkpoints against the active plugin IDs reported by `PluginManager`. It
+runs under the manager's lifecycle batch gate and returns sorted findings with
+a disposition and host-facing guidance.
+
+The planner distinguishes at least these cases:
+
+- `planned` with an inactive plugin: not started; revalidate before a new run.
+- `starting` with an active plugin: activation likely completed but the final
+  checkpoint is stale; verify runtime and external side effects.
+- `starting` with an inactive plugin: ambiguous; inspect side effects before
+  retrying or compensating.
+- `stopping` with an inactive plugin: shutdown likely completed; verify
+  external cleanup before finalizing the checkpoint.
+- `stopping` with an active plugin: partial teardown may have occurred;
+  inspect before retrying.
+- `rollbackPending`: determine whether compensation remains necessary.
+- Active plugins with no checkpoint: establish provenance and a host-approved
+  baseline.
+
+The planner does not mutate the manager, health registry, or checkpoint store.
+It does not reconstruct plugin instances, call lifecycle hooks, rewrite
+checkpoints, or choose a retry policy. The host remains responsible for
+external-resource inspection, idempotency decisions, checkpoint writes using a
+new operation ID, and any explicit resume/compensation action.
+
 ## Store implementations
 
 PluginLifecycleCheckpointStore is the host persistence boundary.
@@ -63,7 +91,7 @@ replace a plugin's checkpoint and preserve schema versions.
 
 ## Scope
 
-This integration records lifecycle progress. It does not scan and recover
-interrupted operations automatically, reconstruct plugin instances, or
-guarantee distributed exactly-once behavior. Those remain host-level
+This integration records lifecycle progress and provides a read-only recovery
+planner. It does not execute recovery actions, reconstruct plugin instances,
+or guarantee distributed exactly-once behavior. Those remain host-level
 responsibilities.
