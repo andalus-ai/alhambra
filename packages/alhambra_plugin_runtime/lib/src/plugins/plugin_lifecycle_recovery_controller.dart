@@ -104,6 +104,7 @@ class PluginLifecycleRecoveryController {
           );
         }
         nextState = PluginLifecycleCheckpointState.active;
+        break;
       case PluginLifecycleRecoveryAction.acknowledgeStopped:
         if (isActive) {
           throw StateError(
@@ -111,6 +112,7 @@ class PluginLifecycleRecoveryController {
           );
         }
         nextState = PluginLifecycleCheckpointState.stopped;
+        break;
       case PluginLifecycleRecoveryAction.markFailed:
         if (isActive) {
           throw StateError(
@@ -119,6 +121,7 @@ class PluginLifecycleRecoveryController {
           );
         }
         nextState = PluginLifecycleCheckpointState.failed;
+        break;
     }
 
     if (request.action == PluginLifecycleRecoveryAction.markFailed &&
