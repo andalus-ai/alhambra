@@ -22,6 +22,16 @@ final class JsonlCompositionLifecycleEventStore
 
   Future<void> _writeTail = Future<void>.value();
 
+  // Rebuilt once from the authoritative JSONL log and maintained on append.
+  // These indexes avoid replaying the file for every query in this process.
+  bool _indexReady = false;
+  final Map<String, CompositionLifecycleEvent> _eventsById = {};
+  final List<CompositionLifecycleEvent> _orderedEvents = [];
+  final Map<String, Set<String>> _byCorrelation = {};
+  final Map<String, Set<String>> _byOwner = {};
+  final Map<String, Set<String>> _byOperation = {};
+  final Map<String, Set<String>> _byStatus = {};
+
   JsonlCompositionLifecycleEventStore({
     required this.file,
     CompositionLifecycleEventJsonCodec? codec,
@@ -41,13 +51,24 @@ final class JsonlCompositionLifecycleEventStore
 
   Future<void> _appendOne(CompositionLifecycleEvent event) async {
     await file.parent.create(recursive: true);
+    await _discardIncompleteTail();
+    await _ensureIndex();
+
+    final existing = _eventsById[event.eventId];
+    if (existing != null) {
+      if (_sameEvent(existing, event)) return;
+      throw LifecycleEventIdentityConflictException(event.eventId);
+    }
+
+    final encoded = codec.encode(event);
     final handle = await file.open(mode: FileMode.append);
     try {
-      await handle.writeString('${codec.encode(event)}\\n', encoding: utf8);
+      await handle.writeString('$encoded\n', encoding: utf8);
       await handle.flush();
     } finally {
       await handle.close();
     }
+    _addToIndex(event);
   }
 
   /// Removes an unterminated tail left by an interrupted prior append before
@@ -55,8 +76,19 @@ final class JsonlCompositionLifecycleEventStore
   /// fragment into a malformed complete record.
   Future<void> _discardIncompleteTail() async {
     if (!await file.exists()) return;
+    final handle = await file.open(mode: FileMode.read);
+    int lastByte;
+    try {
+      final length = await handle.length();
+      if (length == 0) return;
+      await handle.setPosition(length - 1);
+      lastByte = await handle.readByte();
+    } finally {
+      await handle.close();
+    }
+    if (lastByte == 0x0a) return;
+
     final bytes = await file.readAsBytes();
-    if (bytes.isEmpty || bytes.last == 0x0a) return;
     final lastNewline = bytes.lastIndexOf(0x0a);
     await file.writeAsBytes(
       bytes.sublist(0, lastNewline + 1),
@@ -153,6 +185,7 @@ final class JsonlCompositionLifecycleEventStore
         }
         rethrow;
       }
+      _clearIndex();
       return removed;
     } finally {
       // If an unexpected failure happened after moving the original, make a
@@ -182,15 +215,121 @@ final class JsonlCompositionLifecycleEventStore
     await _writeTail;
     if (!await file.exists()) return const [];
 
-    final events = await _readAllCompleteEvents();
-    final matches = events.where((event) => _matches(event, query)).toList();
-    final ordered = _stableChronological(matches);
+    await _ensureIndex();
+    final candidates = _candidateEvents(query);
+    final filtered = candidates.where((event) => _matches(event, query)).toList();
+    final hasIndexedFilters = query.correlationId != null ||
+        query.ownerId != null ||
+        query.operation != null ||
+        query.status != null;
+    final ordered = hasIndexedFilters ? _stableChronological(filtered) : filtered;
     if (query.beforeCursor != null) {
-      final preceding = ordered.where((event) => _compareEventToCursor(event, query.beforeCursor!) < 0).toList();
-      final start = preceding.length > query.limit ? preceding.length - query.limit : 0;
+      final preceding = ordered
+          .where((event) => _compareEventToCursor(event, query.beforeCursor!) < 0)
+          .toList();
+      final start = preceding.length > query.limit
+          ? preceding.length - query.limit
+          : 0;
       return List<CompositionLifecycleEvent>.unmodifiable(preceding.skip(start));
     }
     return List<CompositionLifecycleEvent>.unmodifiable(ordered.take(query.limit));
+  }
+
+  Future<void> _ensureIndex() async {
+    if (_indexReady) return;
+    _clearIndex();
+    final events = await _readAllCompleteEvents();
+    for (final event in events) {
+      final existing = _eventsById[event.eventId];
+      if (existing == null) {
+        _addToIndex(event);
+      } else if (!_sameEvent(existing, event)) {
+        throw FormatException(
+          'Conflicting lifecycle event ID "${event.eventId}" in JSONL history.',
+        );
+      }
+      // Identical historical duplicates are collapsed in the query index.
+    }
+    _indexReady = true;
+  }
+
+  void _clearIndex() {
+    _eventsById.clear();
+    _orderedEvents.clear();
+    _byCorrelation.clear();
+    _byOwner.clear();
+    _byOperation.clear();
+    _byStatus.clear();
+    _indexReady = false;
+  }
+
+  void _addToIndex(CompositionLifecycleEvent event) {
+    _eventsById[event.eventId] = event;
+    var low = 0;
+    var high = _orderedEvents.length;
+    while (low < high) {
+      final middle = low + ((high - low) >> 1);
+      if (_compareEvents(_orderedEvents[middle], event) <= 0) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    _orderedEvents.insert(low, event);
+    _byCorrelation.putIfAbsent(event.correlationId, () => <String>{}).add(event.eventId);
+    for (final ownerId in event.ownerIds) {
+      _byOwner.putIfAbsent(ownerId, () => <String>{}).add(event.eventId);
+    }
+    _byOperation.putIfAbsent(event.operation.name, () => <String>{}).add(event.eventId);
+    _byStatus.putIfAbsent(event.status.name, () => <String>{}).add(event.eventId);
+    _indexReady = true;
+  }
+
+  List<CompositionLifecycleEvent> _candidateEvents(
+    CompositionLifecycleEventQuery query,
+  ) {
+    Set<String>? candidateIds;
+    void intersect(Set<String>? next) {
+      if (next == null) {
+        candidateIds = <String>{};
+      } else if (candidateIds == null) {
+        candidateIds = Set<String>.of(next);
+      } else {
+        candidateIds!.retainAll(next);
+      }
+    }
+
+    if (query.correlationId != null) intersect(_byCorrelation[query.correlationId]);
+    if (query.ownerId != null) intersect(_byOwner[query.ownerId]);
+    if (query.operation != null) intersect(_byOperation[query.operation!.name]);
+    if (query.status != null) intersect(_byStatus[query.status!.name]);
+
+    if (candidateIds == null) return List.of(_orderedEvents);
+    return candidateIds!.map((id) => _eventsById[id]!).toList(growable: false);
+  }
+
+  bool _sameEvent(
+    CompositionLifecycleEvent left,
+    CompositionLifecycleEvent right,
+  ) {
+    bool sameList(List<String> a, List<String> b) {
+      if (a.length != b.length) return false;
+      for (var index = 0; index < a.length; index++) {
+        if (a[index] != b[index]) return false;
+      }
+      return true;
+    }
+
+    return left.eventId == right.eventId &&
+        left.correlationId == right.correlationId &&
+        left.operation == right.operation &&
+        left.status == right.status &&
+        left.timestamp.toUtc() == right.timestamp.toUtc() &&
+        sameList(left.nodeIds, right.nodeIds) &&
+        sameList(left.ownerIds, right.ownerIds) &&
+        left.duration == right.duration &&
+        left.errorType == right.errorType &&
+        left.errorMessage == right.errorMessage;
   }
 
   Future<List<CompositionLifecycleEvent>> _readAllCompleteEvents() async {
@@ -213,6 +352,14 @@ final class JsonlCompositionLifecycleEventStore
     }
     // Bytes after the last newline are an incomplete record and are ignored.
     return events;
+  }
+
+  int _compareEvents(
+    CompositionLifecycleEvent left,
+    CompositionLifecycleEvent right,
+  ) {
+    final byTime = left.timestamp.compareTo(right.timestamp);
+    return byTime != 0 ? byTime : left.eventId.compareTo(right.eventId);
   }
 
   List<CompositionLifecycleEvent> _stableChronological(
@@ -261,4 +408,17 @@ final class JsonlCompositionLifecycleEventStore
     if (query.beforeCursor != null && _compareEventToCursor(event, query.beforeCursor!) >= 0) return false;
     return true;
   }
+}
+
+
+/// Reusing an event ID with a different payload is a persistence conflict.
+/// Retrying the same event ID and payload is an idempotent no-op.
+final class LifecycleEventIdentityConflictException implements Exception {
+  final String eventId;
+
+  const LifecycleEventIdentityConflictException(this.eventId);
+
+  @override
+  String toString() =>
+      'Lifecycle event ID "$eventId" already exists with a different payload.';
 }
