@@ -51,7 +51,7 @@ void main() {
         store: store,
         inspect: (_) async => PluginRevocationObservedState.applied,
         approveRetry: (_) async => true,
-        retry: (_) async => retries++,
+        retry: (_) async { retries++; },
       );
 
       final result = await reconciler.reconcilePending();
