@@ -81,9 +81,17 @@ void main() {
 
     test('flags completed deactivation while plugin is active', () async {
       final store = InMemoryPluginRevocationJournalStore();
-      await store.createIfAbsent(_record(
+      final pending = _record();
+      await store.createIfAbsent(pending);
+      final completed = pending.nextRevision(
         status: PluginRevocationJournalStatus.completed,
-      ));
+        updatedAt: DateTime.utc(2026, 1, 2),
+      );
+      await store.compareAndSet(
+        idempotencyKey: pending.idempotencyKey,
+        expectedRevision: 0,
+        replacement: completed,
+      );
       final manager = PluginManager();
       await manager.activate(_Plugin('consumer'));
 
