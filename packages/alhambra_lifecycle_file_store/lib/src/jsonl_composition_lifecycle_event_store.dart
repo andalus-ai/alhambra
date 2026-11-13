@@ -202,15 +202,106 @@ final class JsonlCompositionLifecycleEventStore
     await _writeTail;
     if (!await file.exists()) return const [];
 
-    final events = await _readAllCompleteEvents();
-    final matches = events.where((event) => _matches(event, query)).toList();
-    final ordered = _stableChronological(matches);
+    await _ensureIndex();
+    final candidates = _candidateEvents(query);
+    final ordered = _stableChronological(
+      candidates.where((event) => _matches(event, query)).toList(),
+    );
     if (query.beforeCursor != null) {
-      final preceding = ordered.where((event) => _compareEventToCursor(event, query.beforeCursor!) < 0).toList();
-      final start = preceding.length > query.limit ? preceding.length - query.limit : 0;
+      final preceding = ordered
+          .where((event) => _compareEventToCursor(event, query.beforeCursor!) < 0)
+          .toList();
+      final start = preceding.length > query.limit
+          ? preceding.length - query.limit
+          : 0;
       return List<CompositionLifecycleEvent>.unmodifiable(preceding.skip(start));
     }
     return List<CompositionLifecycleEvent>.unmodifiable(ordered.take(query.limit));
+  }
+
+  Future<void> _ensureIndex() async {
+    if (_indexReady) return;
+    _clearIndex();
+    final events = await _readAllCompleteEvents();
+    for (final event in events) {
+      final existing = _eventsById[event.eventId];
+      if (existing == null) {
+        _addToIndex(event);
+      } else if (!_sameEvent(existing, event)) {
+        throw FormatException(
+          'Conflicting lifecycle event ID "${event.eventId}" in JSONL history.',
+        );
+      }
+      // Identical historical duplicates are collapsed in the query index.
+    }
+    _indexReady = true;
+  }
+
+  void _clearIndex() {
+    _eventsById.clear();
+    _byCorrelation.clear();
+    _byOwner.clear();
+    _byOperation.clear();
+    _byStatus.clear();
+    _indexReady = false;
+  }
+
+  void _addToIndex(CompositionLifecycleEvent event) {
+    _eventsById[event.eventId] = event;
+    _byCorrelation.putIfAbsent(event.correlationId, () => <String>{}).add(event.eventId);
+    for (final ownerId in event.ownerIds) {
+      _byOwner.putIfAbsent(ownerId, () => <String>{}).add(event.eventId);
+    }
+    _byOperation.putIfAbsent(event.operation.name, () => <String>{}).add(event.eventId);
+    _byStatus.putIfAbsent(event.status.name, () => <String>{}).add(event.eventId);
+    _indexReady = true;
+  }
+
+  List<CompositionLifecycleEvent> _candidateEvents(
+    CompositionLifecycleEventQuery query,
+  ) {
+    Set<String>? candidateIds;
+    void intersect(Set<String>? next) {
+      if (next == null) {
+        candidateIds = <String>{};
+      } else if (candidateIds == null) {
+        candidateIds = Set<String>.of(next);
+      } else {
+        candidateIds!.retainAll(next);
+      }
+    }
+
+    if (query.correlationId != null) intersect(_byCorrelation[query.correlationId]);
+    if (query.ownerId != null) intersect(_byOwner[query.ownerId]);
+    if (query.operation != null) intersect(_byOperation[query.operation!.name]);
+    if (query.status != null) intersect(_byStatus[query.status!.name]);
+
+    final ids = candidateIds ?? _eventsById.keys.toSet();
+    return ids.map((id) => _eventsById[id]!).toList(growable: false);
+  }
+
+  bool _sameEvent(
+    CompositionLifecycleEvent left,
+    CompositionLifecycleEvent right,
+  ) {
+    bool sameList(List<String> a, List<String> b) {
+      if (a.length != b.length) return false;
+      for (var index = 0; index < a.length; index++) {
+        if (a[index] != b[index]) return false;
+      }
+      return true;
+    }
+
+    return left.eventId == right.eventId &&
+        left.correlationId == right.correlationId &&
+        left.operation == right.operation &&
+        left.status == right.status &&
+        left.timestamp.toUtc() == right.timestamp.toUtc() &&
+        sameList(left.nodeIds, right.nodeIds) &&
+        sameList(left.ownerIds, right.ownerIds) &&
+        left.duration == right.duration &&
+        left.errorType == right.errorType &&
+        left.errorMessage == right.errorMessage;
   }
 
   Future<List<CompositionLifecycleEvent>> _readAllCompleteEvents() async {
