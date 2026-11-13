@@ -13,7 +13,7 @@ final class JsonlSparseLifecycleIndex {
 
   final File logFile;
   final CompositionLifecycleEventJsonCodec codec;
-  late final File _indexFile = File('\${logFile.path}.sparse-index.json');
+  late final File _indexFile = File('${logFile.path}.sparse-index.json');
 
   final List<_SparseBlock> _blocks = [];
   final List<CompositionLifecycleEvent> _pending = [];
@@ -223,7 +223,7 @@ final class JsonlSparseLifecycleIndex {
       'indexedLength': _indexedLength,
       'blocks': _blocks.map((block) => block.toJson()).toList(),
     });
-    final temp = File('\${_indexFile.path}.tmp');
+    final temp = File('${_indexFile.path}.tmp');
     await temp.parent.create(recursive: true);
     final handle = await temp.open(mode: FileMode.write);
     try {
@@ -289,7 +289,7 @@ final class _SparseBlock {
     required int lastRecordOffset, required int lastRecordLength,
   }) {
     var min = events.first, max = events.first;
-    final bloom = List<int>.filled(32, 0);
+    final bloom = List<int>.filled(256, 0);
     for (final event in events) {
       if (_compare(event, min) < 0) min = event;
       if (_compare(event, max) > 0) max = event;
@@ -320,7 +320,7 @@ final class _SparseBlock {
     final min = DateTime.tryParse(value['minTimestamp'] as String? ?? '');
     final max = DateTime.tryParse(value['maxTimestamp'] as String? ?? '');
     const ints = ['offset', 'endOffset', 'count', 'lastRecordOffset', 'lastRecordLength'];
-    if (bloom.length != 32 || min == null || max == null ||
+    if (bloom.length != 256 || min == null || max == null ||
         ints.any((key) => value[key] is! int) ||
         value['minEventId'] is! String || value['maxEventId'] is! String ||
         value['lastEventId'] is! String) {
@@ -362,6 +362,6 @@ List<int> _bloomPositions(String value) {
     first = ((first ^ unit) * 0x01000193) & mask;
     second = ((second ^ unit) * 0x85ebca6b) & mask;
   }
-  final a = first % 256, b = (second | 1) % 256;
-  return [a, (a + b) % 256, (a + 2 * b) % 256];
+  final a = first % 2048, b = (second | 1) % 2048;
+  return [a, (a + b) % 2048, (a + 2 * b) % 2048];
 }
