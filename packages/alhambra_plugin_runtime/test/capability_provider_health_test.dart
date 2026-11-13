@@ -65,7 +65,7 @@ void main() {
   });
 
   group('CapabilityRevocationPlanner', () {
-    test('maps unhealthy dependencies to the configured policy', () {
+    test('maps unhealthy dependencies to the configured policy', () async {
       final monitor = CapabilityProviderHealthMonitor();
       final snapshot = monitor.publish(
         ownerId: 'storage',
@@ -91,10 +91,10 @@ void main() {
       expect(decisions.every((decision) =>
           decision.action == CapabilityImpactAction.suspend), isTrue);
       expect(decisions.first.reason, 'Provider process exited');
-      monitor.close();
+      await monitor.close();
     });
 
-    test('supports notify, degrade, suspend and deactivate policies', () {
+    test('supports notify, degrade, suspend and deactivate policies', () async {
       final monitor = CapabilityProviderHealthMonitor();
       final snapshot = monitor.publish(
         ownerId: 'search',
