@@ -32,7 +32,7 @@ final recentEvents = await host.query(
   CompositionLifecycleEventQuery(ownerId: 'editor-plugin', limit: 50),
 );
 
-// Durable history + the bounded live window, deduplicated by event content.
+// Durable history + the bounded live window, deduplicated by stable event ID.
 final ownerSummary =
     await host.lifecycleDiagnostics.ownerSummary('editor-plugin');
 final allOwnerSummaries =
@@ -43,7 +43,7 @@ liveSubscription.cancel();
 await host.close();
 ```
 
-The runtime callback only enqueues events; it does not wait for file I/O.
+The runtime callback only enqueues events; it does not wait for file I/O. New events receive a stable `eventId`, persisted with the record and retained across reloads.
 `lifecycleDiagnostics.query(...)` merges durable results with the live
 runtime window and removes duplicates. `ownerSummary(ownerId)` and
 `ownerSummaries()` aggregate durable event counts and failure details, then
@@ -80,7 +80,10 @@ Dart/Flutter hosts, not web builds.
 
 - Appends are serialized within one store instance and flushed before return.
 - Query replays versioned records and supports the API query filters.
-- Query results are oldest-first, with stable append order for equal timestamps.
+- Query results are oldest-first, ordered by `(timestamp, eventId)`.
+- `CompositionLifecycleEventQuery.after` and `beforeCursor` provide exclusive keyset pagination; backward pages return the nearest preceding records in oldest-first order.
+- The legacy timestamp-only `before` filter remains supported for compatibility.
+- The JSONL codec writes schema version 2 and reads both version 1 and version 2. Version 1 records receive a deterministic legacy identity when decoded.
 - An unterminated final line (including an incomplete UTF-8 sequence) is
   treated as an interrupted append and ignored; the next append repairs it.
 - A malformed newline-terminated record is reported as corruption.
