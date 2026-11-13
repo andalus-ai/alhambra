@@ -41,6 +41,34 @@ void main() {
     });
   });
 
+  test('coordinator can persist execution through the durable journal adapter', () async {
+    final journal = InMemoryPluginRevocationJournalStore();
+    final coordinator = PluginRevocationCoordinator(
+      manager: PluginManager(),
+      executionStore: JournalBackedPluginRevocationExecutionStore(journal),
+      auditSink: InMemoryPluginRevocationAuditSink(),
+      approve: (_) => true,
+    );
+
+    final report = await coordinator.execute(
+      operationId: 'journal-adapter-op',
+      decisions: [
+        CapabilityImpactDecision(
+          pluginId: 'plugin',
+          providerOwnerId: 'provider',
+          providerState: CapabilityProviderHealthState.unavailable,
+          action: CapabilityImpactAction.notify,
+          reason: 'adapter test',
+        ),
+      ],
+    );
+
+    expect(report.records.single.status, PluginRevocationExecutionStatus.noOp);
+    final entries = await journal.readAll();
+    expect(entries, hasLength(1));
+    expect(entries.single.status, PluginRevocationJournalStatus.completed);
+  });
+
   group('PluginRevocationReconciler', () {
     test('marks an already-applied action without replay', () async {
       final store = InMemoryPluginRevocationJournalStore();
