@@ -1,11 +1,16 @@
 import 'composition_contracts.dart';
 
-/// Immutable filters for reading lifecycle diagnostics from a durable store.
-///
-/// [from] and [to] are inclusive UTC time bounds. [before] is an exclusive
-/// upper bound intended for keyset-style pagination. Results are returned in
-/// ascending timestamp order; implementations should use a stable secondary
-/// key when timestamps are equal.
+/// Inclusive time bounds and exclusive keyset cursor bounds. Results are oldest-first.
+final class CompositionLifecycleEventCursor {
+  final DateTime timestamp;
+  final String eventId;
+
+  const CompositionLifecycleEventCursor({
+    required this.timestamp,
+    required this.eventId,
+  }) : assert(eventId != '');
+}
+
 final class CompositionLifecycleEventQuery {
   final String? correlationId;
   final String? ownerId;
