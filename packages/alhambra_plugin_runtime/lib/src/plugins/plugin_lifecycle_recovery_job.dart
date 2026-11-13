@@ -270,6 +270,9 @@ final class InMemoryPluginLifecycleRecoveryJobStore
         replacement.idempotencyKey != current.idempotencyKey ||
         replacement.operationId != current.operationId ||
         replacement.action != current.action ||
+        replacement.schemaVersion != current.schemaVersion ||
+        replacement.initiatedBy != current.initiatedBy ||
+        replacement.correlationId != current.correlationId ||
         !_samePluginIds(replacement.orderedPluginIds, current.orderedPluginIds) ||
         replacement.createdAt != current.createdAt) {
       return false;
