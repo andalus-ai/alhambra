@@ -293,6 +293,40 @@ void main() {
     expect(result.first.eventId, 'compact-id-28');
   });
 
+  test('paginates across sparse blocks without gaps or duplicate IDs', () async {
+    final start = DateTime.utc(2026, 6, 1);
+    for (var index = 0; index < 300; index++) {
+      await store.append(_event(
+        'page-$index',
+        start.add(Duration(seconds: index)),
+        eventId: 'page-id-${index.toString().padLeft(3, '0')}',
+      ));
+    }
+
+    final reopened = JsonlCompositionLifecycleEventStore(file: file);
+    final first = await reopened.query(CompositionLifecycleEventQuery(limit: 10));
+    final second = await reopened.query(CompositionLifecycleEventQuery(
+      after: CompositionLifecycleEventCursor(
+        timestamp: first.last.timestamp,
+        eventId: first.last.eventId,
+      ),
+      limit: 10,
+    ));
+    final previous = await reopened.query(CompositionLifecycleEventQuery(
+      beforeCursor: CompositionLifecycleEventCursor(
+        timestamp: second.first.timestamp,
+        eventId: second.first.eventId,
+      ),
+      limit: 10,
+    ));
+
+    expect(first.first.eventId, 'page-id-000');
+    expect(second.first.eventId, 'page-id-010');
+    expect(second.last.eventId, 'page-id-019');
+    expect(previous.map((event) => event.eventId),
+        first.map((event) => event.eventId));
+  });
+
   test('returns immutable query results and applies limit', () async {
     await store.append(_event('one', DateTime.utc(2026, 1, 1)));
     await store.append(_event('two', DateTime.utc(2026, 1, 2)));
