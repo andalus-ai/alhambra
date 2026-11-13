@@ -1,4 +1,5 @@
 import '../capabilities/capability_provider_health.dart';
+import 'plugin_revocation_coordinator.dart';
 
 /// Durable outcome of one governed provider-impact decision.
 enum PluginRevocationJournalStatus {
@@ -150,4 +151,117 @@ class InMemoryPluginRevocationJournalStore
     _records[idempotencyKey] = replacement;
     return true;
   }
+}
+
+
+/// Bridges the existing governed execution coordinator to the durable journal.
+///
+/// Supply a host correlation-ID resolver so provider events, revocation
+/// decisions, lifecycle operations, and audit events can share one trace.
+class JournalBackedPluginRevocationExecutionStore
+    implements PluginRevocationExecutionStore {
+  final PluginRevocationJournalStore journal;
+  final String Function(PluginRevocationExecutionRecord record)
+      correlationIdFor;
+
+  JournalBackedPluginRevocationExecutionStore({
+    required this.journal,
+    required this.correlationIdFor,
+  });
+
+  @override
+  Future<PluginRevocationExecutionRecord?> read(String idempotencyKey) async {
+    final entry = await journal.read(idempotencyKey);
+    if (entry == null) return null;
+    return PluginRevocationExecutionRecord(
+      idempotencyKey: entry.idempotencyKey,
+      operationId: entry.operationId,
+      pluginId: entry.pluginId,
+      providerOwnerId: entry.providerOwnerId,
+      action: entry.action,
+      status: _executionStatus(entry.status),
+      updatedAt: entry.updatedAt,
+      detail: entry.detail,
+    );
+  }
+
+  @override
+  Future<bool> writePending(PluginRevocationExecutionRecord record) {
+    if (record.status !=
+        PluginRevocationExecutionStatus.requiresReconciliation) {
+      throw ArgumentError('Initial journal records must be pending.');
+    }
+    return journal.createIfAbsent(PluginRevocationJournalRecord(
+      revision: 0,
+      idempotencyKey: record.idempotencyKey,
+      operationId: record.operationId,
+      correlationId: correlationIdFor(record).trim(),
+      pluginId: record.pluginId,
+      providerOwnerId: record.providerOwnerId,
+      action: record.action,
+      status: PluginRevocationJournalStatus.pending,
+      createdAt: record.updatedAt,
+      updatedAt: record.updatedAt,
+      detail: record.detail,
+    ));
+  }
+
+  @override
+  Future<void> complete(PluginRevocationExecutionRecord record) async {
+    final current = await journal.read(record.idempotencyKey);
+    if (current == null ||
+        current.status != PluginRevocationJournalStatus.pending) {
+      throw StateError('No pending journal entry exists for this operation.');
+    }
+    final replacement = current.nextRevision(
+      status: _journalStatus(record.status),
+      updatedAt: record.updatedAt,
+      detail: record.detail,
+    );
+    final updated = await journal.compareAndSet(
+      idempotencyKey: record.idempotencyKey,
+      expectedRevision: current.revision,
+      replacement: replacement,
+    );
+    if (!updated) throw StateError('Concurrent journal update detected.');
+  }
+
+  PluginRevocationExecutionStatus _executionStatus(
+    PluginRevocationJournalStatus status,
+  ) =>
+      switch (status) {
+        PluginRevocationJournalStatus.pending ||
+        PluginRevocationJournalStatus.reconciled =>
+          PluginRevocationExecutionStatus.requiresReconciliation,
+        PluginRevocationJournalStatus.completed =>
+          PluginRevocationExecutionStatus.completed,
+        PluginRevocationJournalStatus.rejected =>
+          PluginRevocationExecutionStatus.rejected,
+        PluginRevocationJournalStatus.noOp =>
+          PluginRevocationExecutionStatus.noOp,
+        PluginRevocationJournalStatus.unsupported =>
+          PluginRevocationExecutionStatus.unsupported,
+        PluginRevocationJournalStatus.failed =>
+          PluginRevocationExecutionStatus.failed,
+      };
+
+  PluginRevocationJournalStatus _journalStatus(
+    PluginRevocationExecutionStatus status,
+  ) =>
+      switch (status) {
+        PluginRevocationExecutionStatus.completed =>
+          PluginRevocationJournalStatus.completed,
+        PluginRevocationExecutionStatus.rejected =>
+          PluginRevocationJournalStatus.rejected,
+        PluginRevocationExecutionStatus.noOp =>
+          PluginRevocationJournalStatus.noOp,
+        PluginRevocationExecutionStatus.unsupported =>
+          PluginRevocationJournalStatus.unsupported,
+        PluginRevocationExecutionStatus.failed =>
+          PluginRevocationJournalStatus.failed,
+        PluginRevocationExecutionStatus.requiresReconciliation =>
+          PluginRevocationJournalStatus.pending,
+        PluginRevocationExecutionStatus.alreadyCompleted =>
+          PluginRevocationJournalStatus.completed,
+      };
 }
