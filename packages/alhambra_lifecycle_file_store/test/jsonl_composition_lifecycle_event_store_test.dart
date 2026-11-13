@@ -151,7 +151,7 @@ void main() {
     );
   });
 
-  test('rebuilds the in-memory query index after reopening', () async {
+  test('supports filtered queries after reopening', () async {
     await store.append(_event('owner-one', DateTime.utc(2026, 5, 1)));
     await store.append(_event('owner-two', DateTime.utc(2026, 5, 2)));
 
