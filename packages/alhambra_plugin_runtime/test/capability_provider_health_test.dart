@@ -119,11 +119,11 @@ void main() {
         );
         expect(decisions.single.action, entry.value);
       }
-      monitor.close();
+      await monitor.close();
     });
 
     test('emits recovery only for an actual unhealthy-to-healthy transition',
-        () {
+        () async {
       final monitor = CapabilityProviderHealthMonitor();
       final initial = monitor.publish(
         ownerId: 'storage',
@@ -158,7 +158,7 @@ void main() {
       );
 
       expect(decisions.single.action, CapabilityImpactAction.recovered);
-      monitor.close();
+      await monitor.close();
     });
   });
 }
