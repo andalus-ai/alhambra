@@ -28,6 +28,7 @@ export 'src/context/incremental_context_engine.dart';
 
 export 'src/capabilities/plugin_capability_negotiator.dart';
 export 'src/capabilities/capability_provider_registry.dart';
+export 'src/capabilities/capability_provider_health.dart';
 
 // Reactivity & Signals
 export 'src/reactivity/signals_engine.dart';
