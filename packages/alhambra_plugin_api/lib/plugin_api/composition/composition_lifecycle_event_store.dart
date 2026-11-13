@@ -14,6 +14,8 @@ final class CompositionLifecycleEventQuery {
   final DateTime? from;
   final DateTime? to;
   final DateTime? before;
+  final CompositionLifecycleEventCursor? after;
+  final CompositionLifecycleEventCursor? beforeCursor;
   final int limit;
 
   CompositionLifecycleEventQuery({
@@ -24,10 +26,15 @@ final class CompositionLifecycleEventQuery {
     this.from,
     this.to,
     this.before,
+    this.after,
+    this.beforeCursor,
     this.limit = 100,
   }) {
     if (limit < 1) {
       throw ArgumentError.value(limit, 'limit', 'Must be greater than zero.');
+    }
+    if (after != null && beforeCursor != null) {
+      throw ArgumentError('Specify after or beforeCursor, not both.');
     }
     if (from != null && to != null && from!.isAfter(to!)) {
       throw ArgumentError('The from bound must not be after the to bound.');
