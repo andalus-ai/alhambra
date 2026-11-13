@@ -38,7 +38,7 @@ final class JsonlCompositionLifecycleDiagnostics {
       from: query.from,
       to: query.to,
       before: query.before,
-      limit: runtime.lifecycleEvents.length.clamp(1, 0x7fffffff),
+      limit: runtime.lifecycleEvents.isEmpty ? 1 : runtime.lifecycleEvents.length,
     );
     final merged = _merge(durable, live);
     return List.unmodifiable(merged.take(query.limit));
@@ -60,7 +60,7 @@ final class JsonlCompositionLifecycleDiagnostics {
     );
     final live = runtime.queryLifecycleEvents(
       ownerId: ownerId,
-      limit: runtime.lifecycleEvents.length.clamp(1, 0x7fffffff),
+      limit: runtime.lifecycleEvents.isEmpty ? 1 : runtime.lifecycleEvents.length,
     );
     final events = _merge(durable, live);
     final runtimeSummary = runtime.ownerLifecycleSummary(ownerId);
