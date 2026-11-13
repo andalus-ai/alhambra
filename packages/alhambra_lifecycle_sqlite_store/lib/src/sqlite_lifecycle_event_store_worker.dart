@@ -22,7 +22,7 @@ final class SqliteLifecycleEventStoreWorker
   final StreamSubscription<Object?> _responseSubscription;
   final StreamSubscription<Object?> _errorSubscription;
   final StreamSubscription<Object?> _exitSubscription;
-  final Map<int, Completer<Map<Object?, Object?>>> _pending = {};
+  final Map<int, Completer<Map<Object?, Object?>>> _pending;
   int _nextRequestId = 0;
   bool _closing = false;
   bool _closed = false;
@@ -36,6 +36,7 @@ final class SqliteLifecycleEventStoreWorker
     required StreamSubscription<Object?> responseSubscription,
     required StreamSubscription<Object?> errorSubscription,
     required StreamSubscription<Object?> exitSubscription,
+    required Map<int, Completer<Map<Object?, Object?>>> pending,
   })  : _responses = responses,
         _errors = errors,
         _exits = exits,
@@ -43,7 +44,8 @@ final class SqliteLifecycleEventStoreWorker
         _commands = commands,
         _responseSubscription = responseSubscription,
         _errorSubscription = errorSubscription,
-        _exitSubscription = exitSubscription;
+        _exitSubscription = exitSubscription,
+        _pending = pending;
 
   /// Starts a dedicated isolate and opens [path] inside that isolate.
   ///
@@ -113,7 +115,8 @@ final class SqliteLifecycleEventStoreWorker
         responseSubscription: responseSubscription,
         errorSubscription: errorSubscription,
         exitSubscription: exitSubscription,
-      ).._pending.addAll(pending);
+        pending: pending,
+      );
     } catch (_) {
       isolate.kill(priority: Isolate.immediate);
       await responseSubscription.cancel();
