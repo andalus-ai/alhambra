@@ -37,8 +37,11 @@ host retains ownership and `store.close()` does not dispose the database.
   Unicode characters.
 - The event codec payload is retained as the canonical source of event fields;
   indexed columns are query projections, not a replacement event schema.
-- Schema version is tracked with `PRAGMA user_version`. The adapter rejects
-  databases created by a newer schema version.
+- Schema version is tracked with `PRAGMA user_version`. Ordered migrations run
+  one at a time inside transactions; a failed migration rolls back without
+  advancing the version. Databases created by a newer schema are rejected.
+- Version 2 adds a composite status/operation/time index for combined filtered
+  history queries; version 1 databases upgrade automatically.
 - File-backed databases use WAL mode and a 5-second busy timeout.
 
 ## Operational considerations
@@ -62,3 +65,17 @@ database when `close()` is called.
 
 Run the shared behavioral contract and adapter-specific tests with
 `dart test` from this package.
+
+## Performance checks
+
+Run the local smoke benchmark from this package:
+
+```sh
+dart run benchmark/sqlite_lifecycle_store_benchmark.dart 10000
+```
+
+The harness reports append throughput, a filtered owner/status query, and WAL
+checkpoint counters. It is intentionally not a CI threshold: compare runs only
+when Dart/SQLite versions, machine, filesystem, and event count are recorded.
+The adapter tests also inspect `EXPLAIN QUERY PLAN` for the combined
+status/operation query path.
