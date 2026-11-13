@@ -240,6 +240,54 @@ void main() {
     ));
   });
 
+  test('deduplicates an event id found in a persisted sparse block', () async {
+    for (var index = 0; index < 128; index++) {
+      await store.append(_event(
+        'block-event-$index',
+        DateTime.utc(2026, 4, 1).add(Duration(seconds: index)),
+        eventId: 'block-id-$index',
+      ));
+    }
+    final reopened = JsonlCompositionLifecycleEventStore(file: file);
+    final duplicate = _event(
+      'block-event-64',
+      DateTime.utc(2026, 4, 1).add(const Duration(seconds: 64)),
+      eventId: 'block-id-64',
+    );
+    final length = await file.length();
+    await reopened.append(duplicate);
+    expect(await file.length(), length);
+
+    expect(
+      () => reopened.append(_event(
+        'conflicting-block-event',
+        DateTime.utc(2026, 4, 2),
+        eventId: 'block-id-64',
+      )),
+      throwsA(isA<LifecycleEventIdentityConflictException>()),
+    );
+  });
+
+  test('invalidates sparse checkpoints after compaction', () async {
+    for (var index = 0; index < 128; index++) {
+      await store.append(_event(
+        'compact-event-$index',
+        DateTime.utc(2026, 5, 1).add(Duration(seconds: index)),
+        eventId: 'compact-id-$index',
+      ));
+    }
+    final sidecar = File('${file.path}.sparse-index.json');
+    expect(await sidecar.exists(), isTrue);
+
+    final removed = await store.compact(maxEvents: 100);
+    expect(removed, 28);
+    expect(await sidecar.exists(), isFalse);
+
+    final result = await store.query(CompositionLifecycleEventQuery(limit: 200));
+    expect(result, hasLength(100));
+    expect(result.first.eventId, 'compact-id-28');
+  });
+
   test('returns immutable query results and applies limit', () async {
     await store.append(_event('one', DateTime.utc(2026, 1, 1)));
     await store.append(_event('two', DateTime.utc(2026, 1, 2)));
