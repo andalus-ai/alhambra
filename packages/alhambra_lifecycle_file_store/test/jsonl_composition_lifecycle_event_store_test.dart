@@ -100,7 +100,7 @@ void main() {
   test('decodes schema v1 records with a stable legacy identity', () async {
     await file.parent.create(recursive: true);
     const legacy = '{"schemaVersion":1,"correlationId":"legacy","operation":"activate","status":"succeeded","timestamp":"2026-01-01T00:00:00.000Z","nodeIds":["command:save"],"ownerIds":["owner-a"]}';
-    await file.writeAsString('$legacy\\n');
+    await file.writeAsString('$legacy\n');
 
     final firstRead = await store.query(CompositionLifecycleEventQuery());
     final reopened = JsonlCompositionLifecycleEventStore(file: file);
