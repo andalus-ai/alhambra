@@ -119,6 +119,38 @@ void main() {
     });
   });
 
+  test('journal-backed store persists coordinator outcomes and correlation IDs', () async {
+    final journal = InMemoryPluginRevocationJournalStore();
+    final executionStore = JournalBackedPluginRevocationExecutionStore(
+      journal: journal,
+      correlationIdFor: (_) => 'trace-provider-event-9',
+    );
+    final coordinator = PluginRevocationCoordinator(
+      manager: PluginManager(),
+      executionStore: executionStore,
+      auditSink: InMemoryPluginRevocationAuditSink(),
+      approve: (_) => true,
+    );
+    final report = await coordinator.execute(
+      operationId: 'provider-event-9',
+      decisions: [
+        CapabilityImpactDecision(
+          pluginId: 'consumer',
+          providerOwnerId: 'provider',
+          providerState: CapabilityProviderHealthState.unavailable,
+          action: CapabilityImpactAction.notify,
+          reason: 'provider unavailable',
+        ),
+      ],
+    );
+
+    final persisted = (await journal.readAll()).single;
+    expect(report.records.single.status, PluginRevocationExecutionStatus.noOp);
+    expect(persisted.status, PluginRevocationJournalStatus.noOp);
+    expect(persisted.correlationId, 'trace-provider-event-9');
+    expect(persisted.revision, 1);
+  });
+
   test('resolver uses CAS and never retries plugin code', () async {
     final store = InMemoryPluginRevocationJournalStore();
     await store.createIfAbsent(_record());
