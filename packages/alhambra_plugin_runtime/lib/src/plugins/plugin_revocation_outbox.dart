@@ -56,11 +56,6 @@ final class PluginRevocationOutboxMessage {
 /// A production implementation MUST commit both changes in one database
 /// transaction. Implementing these as two independent writes defeats the
 /// transactional-outbox guarantee.
-abstract interface class TransactionalPluginRevocationStore
-    implements PluginRevocationExecutionStore, PluginRevocationAuditSink {
-  Future<void> completeAndEnqueue(PluginRevocationExecutionRecord record);
-}
-
 /// Persistence contract for leased outbox delivery.
 abstract interface class PluginRevocationOutboxStore {
   Future<List<PluginRevocationOutboxMessage>> claim({
