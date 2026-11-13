@@ -9,7 +9,7 @@ import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 /// treated as indexed. A missing or invalid sidecar is safely rebuilt.
 final class JsonlSparseLifecycleIndex {
   static const int blockSize = 128;
-  static const int _schemaVersion = 1;
+  static const int _schemaVersion = 2;
 
   final File logFile;
   final CompositionLifecycleEventJsonCodec codec;
@@ -144,6 +144,13 @@ final class JsonlSparseLifecycleIndex {
       final blocks = (decoded['blocks'] as List)
           .map((value) => _SparseBlock.fromJson(Map<String, Object?>.from(value as Map)))
           .toList(growable: false);
+      for (var index = 0; index < blocks.length; index++) {
+        final block = blocks[index];
+        if (block.endOffset > indexedLength ||
+            (index > 0 && blocks[index - 1].endOffset > block.offset)) {
+          return;
+        }
+      }
       if (blocks.isNotEmpty) {
         if (blocks.last.endOffset != indexedLength) return;
         final last = blocks.last;
@@ -303,7 +310,21 @@ final class _SparseBlock {
     'maxTimestamp': maxTimestamp.toIso8601String(), 'maxEventId': maxEventId,
     'lastRecordOffset': lastRecordOffset, 'lastRecordLength': lastRecordLength,
     'lastEventId': lastEventId, 'bloom': base64Encode(bloom),
+    'checksum': _checksum(),
   };
+
+  String _checksum() {
+    final value = [
+      offset, endOffset, count, minTimestamp.toUtc().toIso8601String(),
+      minEventId, maxTimestamp.toUtc().toIso8601String(), maxEventId,
+      lastRecordOffset, lastRecordLength, lastEventId, base64Encode(bloom),
+    ].join('|');
+    var hash = 0x811c9dc5;
+    for (final unit in value.codeUnits) {
+      hash = ((hash ^ unit) * 0x01000193) & 0xffffffff;
+    }
+    return hash.toRadixString(16);
+  }
 
   factory _SparseBlock.fromJson(Map<String, Object?> value) {
     final bloom = base64Decode(value['bloom'] as String);
@@ -327,8 +348,9 @@ final class _SparseBlock {
     if (block.offset < 0 || block.endOffset <= block.offset ||
         block.count != JsonlSparseLifecycleIndex.blockSize ||
         block.lastRecordOffset < block.offset ||
-        block.lastRecordOffset + block.lastRecordLength > block.endOffset) {
-      throw const FormatException('Invalid sparse lifecycle index offsets.');
+        block.lastRecordOffset + block.lastRecordLength > block.endOffset ||
+        value['checksum'] != block._checksum()) {
+      throw const FormatException('Invalid sparse lifecycle index block or checksum.');
     }
     return block;
   }
