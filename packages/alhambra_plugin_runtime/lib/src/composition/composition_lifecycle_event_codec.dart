@@ -7,13 +7,14 @@ import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 /// This codec is storage-neutral: file, database, and remote adapters can use
 /// it without making the public plugin API depend on a serialization format.
 final class CompositionLifecycleEventJsonCodec {
-  static const int currentSchemaVersion = 1;
+  static const int currentSchemaVersion = 2;
 
   const CompositionLifecycleEventJsonCodec();
 
   String encode(CompositionLifecycleEvent event) {
     return jsonEncode(<String, Object?>{
       'schemaVersion': currentSchemaVersion,
+      'eventId': event.eventId,
       'correlationId': event.correlationId,
       'operation': event.operation.name,
       'status': event.status.name,
@@ -40,10 +41,9 @@ final class CompositionLifecycleEventJsonCodec {
 
     final value = Map<String, Object?>.from(decoded);
     final version = value['schemaVersion'];
-    if (version != currentSchemaVersion) {
+    if (version != 1 && version != currentSchemaVersion) {
       throw FormatException(
-        'Unsupported lifecycle event schema $version; '
-        'expected $currentSchemaVersion.',
+        'Unsupported lifecycle event schema $version; supported versions are 1 and $currentSchemaVersion.',
       );
     }
 
@@ -72,7 +72,12 @@ final class CompositionLifecycleEventJsonCodec {
       throw const FormatException('durationMicros must be a non-negative integer.');
     }
 
+    final eventId = version == 1
+        ? 'legacy-${base64Url.encode(utf8.encode(source))}'
+        : _requiredString(value, 'eventId');
+
     return CompositionLifecycleEvent(
+      eventId: eventId,
       correlationId: correlationId,
       operation: operation,
       status: status,
