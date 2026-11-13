@@ -75,8 +75,7 @@ class PluginLifecycleRecoveryFinding {
 
   bool get requiresHostAction =>
       disposition != PluginLifecycleRecoveryDisposition.consistentActive &&
-      disposition != PluginLifecycleRecoveryDisposition.notStarted &&
-      disposition != PluginLifecycleRecoveryDisposition.terminalFailure;
+      disposition != PluginLifecycleRecoveryDisposition.notStarted;
 }
 
 /// Immutable result of scanning durable checkpoints against live manager state.
