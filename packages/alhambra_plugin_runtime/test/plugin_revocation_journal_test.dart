@@ -74,7 +74,7 @@ void main() {
 
       expect(report.findings.single.disposition,
           PluginRevocationRecoveryDisposition.runtimeInactiveNeedsExternalVerification);
-      expect(report.requiresHostAction, isTrue);
+      expect(report.isConsistent, isFalse);
       expect((await store.readAll()).single.status,
           PluginRevocationJournalStatus.pending);
     });
@@ -84,7 +84,8 @@ void main() {
       await store.createIfAbsent(_record(
         status: PluginRevocationJournalStatus.completed,
       ));
-      final manager = PluginManager()..activate(_Plugin('consumer'));
+      final manager = PluginManager();
+      await manager.activate(_Plugin('consumer'));
 
       final report = await PluginRevocationRecoveryPlanner(
         store: store,
