@@ -123,6 +123,7 @@ void main() {
           PluginLifecycleRecoveryDisposition.consistentActive);
       expect(findings[1].disposition,
           PluginLifecycleRecoveryDisposition.terminalFailure);
+      expect(findings[1].requiresHostAction, isTrue);
       expect(findings[2].disposition,
           PluginLifecycleRecoveryDisposition.staleActiveCheckpoint);
     });
