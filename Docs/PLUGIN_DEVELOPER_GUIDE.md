@@ -62,7 +62,11 @@ Plugin IDs should be stable, globally unique within the host's plugin namespace,
 and suitable for persisted ownership references. Do not derive IDs from display
 names or user-editable labels.
 
-## 4. Host composition
+## 4. Runnable host example
+
+The repository includes a complete starter under [`examples/plugin_host_starter/`](../examples/plugin_host_starter/README.md). It demonstrates a host constructing a compiled plugin, activating it through `PluginManager`, and a plugin registering a command, view and settings page. Run it with `flutter pub get` and `flutter run` from that directory. Its test verifies contribution registration and owner-scoped cleanup. The example is a lifecycle/registration starter; it does not implement a complete workbench renderer.
+
+## 5. Host composition
 
 The application is the composition root. It constructs only the plugins it
 intends to ship and supplies those instances to the runtime.
@@ -82,7 +86,7 @@ await pluginManager.deactivate('example.greeting');
 This example assumes the `GreetingPlugin` class above is imported by the host.
 Do not put product-specific plugin lists into a generic Alhambra package.
 
-## 5. Use PluginContext responsibly
+## 6. Use PluginContext responsibly
 
 The current `PluginContext` exposes:
 - `pluginId`: the owner ID used for contribution registration and cleanup.
@@ -100,7 +104,7 @@ A capability support query is not an authorization check. The host must enforce
 permissions and policy at the operation boundary, including for commands and
 external services.
 
-## 6. Lifecycle and failure behavior
+## 7. Lifecycle and failure behavior
 
 The current `PluginManager`:
 - serializes operations for the same plugin ID;
@@ -119,7 +123,7 @@ If activation or deactivation can trigger external side effects, document the
 side-effect boundary and recovery behavior. Never assume a crash makes retry
 safe. Use stable operation identities and host approval for ambiguous recovery.
 
-## 7. Capabilities are declarations, not permissions
+## 8. Capabilities are declarations, not permissions
 
 Plugin metadata may declare capability IDs. Hosts may negotiate declared
 requirements against providers before activation. A successful compatibility
@@ -130,7 +134,7 @@ Declare only capabilities the plugin actually requires. Distinguish required
 from optional requirements in the host's requirement resolver rather than
 assuming every metadata declaration is mandatory.
 
-## 8. UI contribution guidance
+## 9. UI contribution guidance
 
 Use the narrowest registrar and contribution model available. Keep widgets
 presentation-focused; pass data through explicit models and callbacks. Do not
@@ -147,7 +151,7 @@ For each contribution, document:
 The host decides which surfaces and contributions are enabled. A contribution
 being registered does not imply that the host must display or authorize it.
 
-## 9. Testing checklist
+## 10. Testing checklist
 
 At minimum, test:
 - stable metadata and plugin ID;
@@ -161,7 +165,7 @@ At minimum, test:
 Use fake services and deterministic inputs. Keep network and database integration
 tests in the corresponding adapter or host test suite.
 
-## 10. Compatibility and publishing
+## 11. Compatibility and publishing
 
 Treat metadata IDs, contribution IDs, public constructors and persisted fields
 as compatibility-sensitive. Prefer additive API changes. For breaking changes,
@@ -172,7 +176,7 @@ versions, license compatibility, transitive dependency footprint and host
 compatibility. Do not claim compatibility with a host version unless it has
 been tested against that version.
 
-## 11. Current limitations
+## 12. Current limitations
 
 This guide reflects the current API surface. It does not claim:
 - arbitrary runtime code download or hot installation;
