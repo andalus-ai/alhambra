@@ -81,3 +81,20 @@ abstract interface class CompositionLifecycleEventStore {
     CompositionLifecycleEventQuery query,
   );
 }
+
+
+/// Reusing a lifecycle event ID with a different payload is a storage conflict.
+///
+/// Adapters should throw this exception when an append attempts to reuse an
+/// existing [CompositionLifecycleEvent.eventId] for a non-identical event.
+/// Retrying the same ID and payload is an idempotent no-op.
+final class CompositionLifecycleEventIdentityConflictException
+    implements Exception {
+  final String eventId;
+
+  const CompositionLifecycleEventIdentityConflictException(this.eventId);
+
+  @override
+  String toString() =>
+      'Lifecycle event ID "$eventId" already exists with a different payload.';
+}
