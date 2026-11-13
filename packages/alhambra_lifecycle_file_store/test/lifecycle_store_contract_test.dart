@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:alhambra_lifecycle_file_store/alhambra_lifecycle_file_store.dart';
 import 'package:alhambra_lifecycle_store_test/alhambra_lifecycle_store_test.dart';
+import 'package:test/test.dart';
 
 void main() {
   late Directory directory;
