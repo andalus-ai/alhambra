@@ -118,7 +118,7 @@ final class PluginLifecycleRecoveryJob {
     required this.operationId,
     required this.action,
     required Iterable<String> orderedPluginIds,
-    Iterable<PluginRecoveryJobStep>? steps,
+    required Iterable<PluginRecoveryJobStep> steps,
     required this.status,
     required this.revision,
     required this.createdAt,
@@ -128,9 +128,7 @@ final class PluginLifecycleRecoveryJob {
     this.failureCode,
     this.failureSummary,
   })  : orderedPluginIds = List<String>.unmodifiable(orderedPluginIds),
-        steps = List<PluginRecoveryJobStep>.unmodifiable(
-          steps ?? _pendingSteps(orderedPluginIds),
-        ) {
+        steps = List<PluginRecoveryJobStep>.unmodifiable(steps) {
     if (schemaVersion < 1) throw ArgumentError.value(schemaVersion, 'schemaVersion');
     for (final value in [jobId, idempotencyKey, operationId]) {
       if (value.trim().isEmpty) throw ArgumentError('Job identity fields must not be empty.');
@@ -172,6 +170,7 @@ final class PluginLifecycleRecoveryJob {
     operationId: operationId,
     action: action,
     orderedPluginIds: orderedPluginIds,
+    steps: _pendingSteps(orderedPluginIds),
     status: PluginRecoveryJobStatus.planned,
     revision: 1,
     createdAt: at.toUtc(),
