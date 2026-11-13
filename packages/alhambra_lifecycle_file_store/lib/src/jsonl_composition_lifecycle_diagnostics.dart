@@ -162,15 +162,4 @@ final class JsonlCompositionLifecycleDiagnostics {
 
   String _identity(CompositionLifecycleEvent event) => event.eventId;
 
-  String _legacyFingerprint(CompositionLifecycleEvent event) => [
-        event.correlationId,
-        event.operation.name,
-        event.status.name,
-        event.timestamp.toUtc().microsecondsSinceEpoch,
-        event.nodeIds.join('\u001f'),
-        event.ownerIds.join('\u001f'),
-        event.duration?.inMicroseconds ?? '',
-        event.errorType ?? '',
-        event.errorMessage ?? '',
-      ].join('\u001e');
 }
