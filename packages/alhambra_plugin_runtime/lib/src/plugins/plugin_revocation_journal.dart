@@ -1,4 +1,4 @@
-import 'package:alhambra_plugin_runtime/src/capabilities/capability_provider_health.dart';
+import '../capabilities/capability_provider_health.dart';
 
 /// Durable state of one governed provider-impact action.
 enum PluginRevocationJournalStatus { pending, completed, rejected, unsupported, failed, reconciledApplied, retryAuthorized, manualReview }
