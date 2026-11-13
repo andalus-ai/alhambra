@@ -7,9 +7,9 @@ import 'package:sqlite3/sqlite3.dart';
 /// SQLite-backed lifecycle event store with transactional idempotent writes.
 ///
 /// The adapter accepts a host-owned [Database] or can open and own one using
-/// [SqliteCompositionLifecycleEventStore.open]. SQLite calls are synchronous;
-/// applications with latency-sensitive UI threads should host the database
-/// on a dedicated isolate and communicate with it through their own adapter.
+/// [SqliteCompositionLifecycleEventStore.open]. SQLite calls are synchronous.
+/// UI hosts should use [SqliteLifecycleEventStoreWorker] to move database work
+/// to a dedicated isolate.
 final class SqliteCompositionLifecycleEventStore
     implements CompositionLifecycleEventStore {
   static const int schemaVersion = 1;
