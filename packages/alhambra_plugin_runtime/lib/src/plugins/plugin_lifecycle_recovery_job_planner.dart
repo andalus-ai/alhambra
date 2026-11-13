@@ -135,6 +135,11 @@ final class PluginLifecycleRecoveryJobPlanner {
     final PluginRecoveryJobDisposition overall;
     if (job.status == PluginRecoveryJobStatus.cancelled) {
       overall = PluginRecoveryJobDisposition.cancelled;
+    } else if (job.status == PluginRecoveryJobStatus.interrupted) {
+      overall = PluginRecoveryJobDisposition.interruptedNeedsInspection;
+    } else if (job.status == PluginRecoveryJobStatus.failed ||
+        job.status == PluginRecoveryJobStatus.manualReview) {
+      overall = PluginRecoveryJobDisposition.failedNeedsDecision;
     } else if (dispositions.contains(PluginRecoveryJobStepDisposition.activeStateMismatch) ||
         dispositions.contains(PluginRecoveryJobStepDisposition.checkpointMissing) ||
         dispositions.contains(PluginRecoveryJobStepDisposition.checkpointChanged)) {
