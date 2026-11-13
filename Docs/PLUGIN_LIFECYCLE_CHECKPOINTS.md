@@ -82,6 +82,31 @@ checkpoints, or choose a retry policy. The host remains responsible for
 external-resource inspection, idempotency decisions, checkpoint writes using a
 new operation ID, and any explicit resume/compensation action.
 
+
+## Explicit recovery actions
+
+`PluginLifecycleRecoveryController` applies a narrow set of host-approved
+checkpoint decisions:
+
+- `acknowledgeActive`: only when `PluginManager` confirms the plugin is active.
+- `acknowledgeStopped`: only when `PluginManager` confirms the plugin is inactive.
+  The host must separately verify external cleanup before using this action.
+- `markFailed`: only when the plugin is inactive and the host supplies a
+  non-empty failure summary.
+
+Every action requires the operation ID and sequence observed by the caller and
+a new operation ID for the recovery decision. The controller rejects stale
+requests and writes the next sequence while holding the manager's lifecycle
+batch gate. It preserves dependency metadata and clears obsolete failure
+metadata when acknowledging a successful state.
+
+These checks protect against stale callers within one manager instance. The
+current store contract does not provide cross-process compare-and-set: hosts
+that allow multiple processes to update the same plugin checkpoint must
+serialize writes externally or extend their persistence adapter with an
+atomic conditional-write guarantee. The controller never invokes
+`activate()`, `deactivate()`, or plugin-specific compensation.
+
 ## Store implementations
 
 PluginLifecycleCheckpointStore is the host persistence boundary.

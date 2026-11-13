@@ -126,3 +126,5 @@ export 'src/projection/projection_engine.dart';
 export 'src/packaging/packaging_engine.dart';
 export 'src/discovery/plugin_discovery_manager.dart';
 export 'src/di/service_graph_engine.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_controller.dart';
