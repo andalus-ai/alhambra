@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:alhambra_lifecycle_sqlite_store/alhambra_lifecycle_sqlite_store!.dart';
+import 'package:alhambra_lifecycle_sqlite_store/alhambra_lifecycle_sqlite_store.dart';
 import 'package:alhambra_lifecycle_store_test/alhambra_lifecycle_store_test.dart';
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
