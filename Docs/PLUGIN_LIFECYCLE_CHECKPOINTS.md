@@ -107,6 +107,47 @@ serialize writes externally or extend their persistence adapter with an
 atomic conditional-write guarantee. The controller never invokes
 `activate()`, `deactivate()`, or plugin-specific compensation.
 
+
+
+## Controlled recovery execution
+
+`PluginLifecycleRecoveryRunner` is the explicit execution boundary for
+recovering one plugin at a time. A host supplies a
+`PluginLifecycleRecoveryExecutor` implementation. The runner provides a
+context containing the compiled plugin and inspected checkpoint; the executor
+performs plugin-specific idempotency checks and external preparation, then
+must invoke exactly one matching lifecycle operation through the context.
+
+Supported actions:
+
+- `resumeStartup`: accepts an incomplete startup checkpoint, requires a
+  matching compiled plugin instance and all declared dependencies to be
+  active, then calls the normal `PluginManager.activate()` path.
+- `compensateShutdown`: accepts an interrupted shutdown or pending startup
+  rollback, requires the target to be active, and refuses to stop it while an
+  active dependent remains. It calls the normal `PluginManager.deactivate()`
+  path.
+
+Each execution requires the operation ID and sequence previously inspected by
+the host plus a new operation ID. The runner writes an in-flight checkpoint
+before invoking host code, increments the attempt, and records active/stopped
+on success or failed on an execution error. If the final checkpoint write
+fails after the plugin action completed, the in-flight record remains a signal
+for the recovery planner and the host must reconcile against live manager
+state.
+
+The runner handles one plugin per call. Hosts must order startup calls
+dependency-first and shutdown/compensation calls in reverse dependency order.
+The host executor must be idempotency-aware: a failed attempt may have
+performed partial external work, and the runner does not promise exactly-once
+execution. The manager-wide lifecycle gate protects one manager instance;
+multiple host processes still require external serialization or a store with
+atomic conditional writes.
+
+The executor must call the matching context method exactly once. It may
+perform external checks or compensation around that call, but it must not
+retain secrets in checkpoint failure summaries or exception messages.
+
 ## Store implementations
 
 PluginLifecycleCheckpointStore is the host persistence boundary.
