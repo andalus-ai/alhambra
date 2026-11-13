@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 import 'package:sqlite3/sqlite3.dart';
@@ -38,6 +40,7 @@ final class SqliteCompositionLifecycleEventStore
     required String path,
     CompositionLifecycleEventJsonCodec? codec,
   }) {
+    File(path).parent.createSync(recursive: true);
     final database = sqlite3.open(path);
     try {
       return SqliteCompositionLifecycleEventStore._owned(
