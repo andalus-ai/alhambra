@@ -49,6 +49,33 @@ void main() {
     await host.close();
   });
 
+  test('overlays live events rejected by the persistence queue', () async {
+    final host = JsonlCompositionLifecycleRuntime(
+      file: file,
+      maxPendingEvents: 1,
+    );
+    final transaction = host.runtime.beginTransaction(
+      lifecycle: _Lifecycle(),
+      correlationId: 'queue-overflow',
+    )..stage(ServiceNode(serviceId: 'index', ownerId: 'search-plugin'));
+    expect(transaction.commit(), isA<CompositionSuccess>());
+    expect(host.rejectedEventCount, greaterThan(0));
+
+    final events = await host.lifecycleDiagnostics.query(
+      CompositionLifecycleEventQuery(
+        correlationId: 'queue-overflow',
+        limit: 20,
+      ),
+    );
+    expect(events, hasLength(4));
+
+    final owner = await host.lifecycleDiagnostics.ownerSummary('search-plugin');
+    expect(owner, isNotNull);
+    expect(owner!.eventCount, 4);
+
+    await host.close();
+  });
+
   test('aggregates durable owner history after runtime history is bounded', () async {
     final host = JsonlCompositionLifecycleRuntime(
       file: file,
