@@ -90,7 +90,7 @@ void main() {
         store: store,
         inspect: (_) async => PluginRevocationObservedState.notApplied,
         approveRetry: (_) async => false,
-        retry: (_) async => retries++,
+        retry: (_) async { retries++; },
       );
 
       final result = await reconciler.reconcile(entry);
