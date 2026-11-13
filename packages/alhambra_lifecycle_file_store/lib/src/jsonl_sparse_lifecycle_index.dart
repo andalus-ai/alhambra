@@ -138,9 +138,15 @@ final class JsonlSparseLifecycleIndex {
       if (decoded is! Map ||
           decoded['schemaVersion'] != _schemaVersion ||
           decoded['indexedLength'] is! int ||
-          decoded['blocks'] is! List) return;
+          decoded['blocks'] is! List) {
+        await _discardCheckpoint();
+        return;
+      }
       final indexedLength = decoded['indexedLength'] as int;
-      if (indexedLength < 0 || indexedLength > fileLength) return;
+      if (indexedLength < 0 || indexedLength > fileLength) {
+        await _discardCheckpoint();
+        return;
+      }
       final blocks = (decoded['blocks'] as List)
           .map((value) => _SparseBlock.fromJson(Map<String, Object?>.from(value as Map)))
           .toList(growable: false);
@@ -148,15 +154,23 @@ final class JsonlSparseLifecycleIndex {
         final block = blocks[index];
         if (block.endOffset > indexedLength ||
             (index > 0 && blocks[index - 1].endOffset > block.offset)) {
+          await _discardCheckpoint();
           return;
         }
       }
       if (blocks.isNotEmpty) {
-        if (blocks.last.endOffset != indexedLength) return;
+        if (blocks.last.endOffset != indexedLength) {
+          await _discardCheckpoint();
+          return;
+        }
         final last = blocks.last;
         final event = await _readEventAt(last.lastRecordOffset, last.lastRecordLength);
-        if (event.eventId != last.lastEventId) return;
+        if (event.eventId != last.lastEventId) {
+          await _discardCheckpoint();
+          return;
+        }
       } else if (indexedLength != 0) {
+        await _discardCheckpoint();
         return;
       }
       _blocks.addAll(blocks);
@@ -164,6 +178,17 @@ final class JsonlSparseLifecycleIndex {
     } on Object {
       _blocks.clear();
       _indexedLength = 0;
+      await _discardCheckpoint();
+    }
+  }
+
+  Future<void> _discardCheckpoint() async {
+    if (await _indexFile.exists()) {
+      try {
+        await _indexFile.delete();
+      } on FileSystemException {
+        // The log remains authoritative; the next open retries validation.
+      }
     }
   }
 
