@@ -292,19 +292,35 @@ class PluginLifecycleRecoveryRunner {
       );
     }
 
+    final operationIds = <String, String>{};
+    final uniqueOperationIds = <String>{};
+    try {
+      for (final id in orderedIds) {
+        final checkpoint = checkpoints[id]!;
+        final operationId = request.operationIdFactory(id).trim();
+        if (operationId.isEmpty || operationId == checkpoint.operationId) {
+          throw ArgumentError('Recovery operation ID for "$id" must be non-empty and differ from the checkpoint operation ID.');
+        }
+        if (!uniqueOperationIds.add(operationId)) {
+          throw ArgumentError('Recovery operation IDs must be unique within a batch.');
+        }
+        operationIds[id] = operationId;
+      }
+    } catch (error, stackTrace) {
+      return PluginLifecycleRecoveryBatchReport(
+        succeeded: false,
+        orderedPluginIds: orderedIds,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
     final completed = <String>[];
     for (var index = 0; index < orderedIds.length; index++) {
       final id = orderedIds[index];
       final checkpoint = checkpoints[id]!;
       try {
-        final operationId = request.operationIdFactory(id).trim();
-        if (operationId.isEmpty || operationId == checkpoint.operationId) {
-          throw ArgumentError('Recovery operation ID for "$id" must be non-empty and differ from the checkpoint operation ID.');
-        }
-        if (completed.any((completedId) =>
-            request.operationIdFactory(completedId).trim() == operationId)) {
-          throw ArgumentError('Recovery operation IDs must be unique within a batch.');
-        }
+        final operationId = operationIds[id]!;
         await _execute(
           PluginLifecycleRecoveryExecutionRequest(
             pluginId: id,
