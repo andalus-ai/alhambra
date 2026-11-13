@@ -26,6 +26,7 @@ final class JsonlCompositionLifecycleEventStore
   // These indexes avoid replaying the file for every query in this process.
   bool _indexReady = false;
   final Map<String, CompositionLifecycleEvent> _eventsById = {};
+  final List<CompositionLifecycleEvent> _orderedEvents = [];
   final Map<String, Set<String>> _byCorrelation = {};
   final Map<String, Set<String>> _byOwner = {};
   final Map<String, Set<String>> _byOperation = {};
@@ -75,8 +76,19 @@ final class JsonlCompositionLifecycleEventStore
   /// fragment into a malformed complete record.
   Future<void> _discardIncompleteTail() async {
     if (!await file.exists()) return;
+    final handle = await file.open(mode: FileMode.read);
+    int lastByte;
+    try {
+      final length = await handle.length();
+      if (length == 0) return;
+      await handle.setPosition(length - 1);
+      lastByte = await handle.readByte();
+    } finally {
+      await handle.close();
+    }
+    if (lastByte == 0x0a) return;
+
     final bytes = await file.readAsBytes();
-    if (bytes.isEmpty || bytes.last == 0x0a) return;
     final lastNewline = bytes.lastIndexOf(0x0a);
     await file.writeAsBytes(
       bytes.sublist(0, lastNewline + 1),
@@ -205,9 +217,12 @@ final class JsonlCompositionLifecycleEventStore
 
     await _ensureIndex();
     final candidates = _candidateEvents(query);
-    final ordered = _stableChronological(
-      candidates.where((event) => _matches(event, query)).toList(),
-    );
+    final filtered = candidates.where((event) => _matches(event, query)).toList();
+    final hasIndexedFilters = query.correlationId != null ||
+        query.ownerId != null ||
+        query.operation != null ||
+        query.status != null;
+    final ordered = hasIndexedFilters ? _stableChronological(filtered) : filtered;
     if (query.beforeCursor != null) {
       final preceding = ordered
           .where((event) => _compareEventToCursor(event, query.beforeCursor!) < 0)
@@ -240,6 +255,7 @@ final class JsonlCompositionLifecycleEventStore
 
   void _clearIndex() {
     _eventsById.clear();
+    _orderedEvents.clear();
     _byCorrelation.clear();
     _byOwner.clear();
     _byOperation.clear();
@@ -249,6 +265,17 @@ final class JsonlCompositionLifecycleEventStore
 
   void _addToIndex(CompositionLifecycleEvent event) {
     _eventsById[event.eventId] = event;
+    var low = 0;
+    var high = _orderedEvents.length;
+    while (low < high) {
+      final middle = low + ((high - low) >> 1);
+      if (_compareEvents(_orderedEvents[middle], event) <= 0) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    _orderedEvents.insert(low, event);
     _byCorrelation.putIfAbsent(event.correlationId, () => <String>{}).add(event.eventId);
     for (final ownerId in event.ownerIds) {
       _byOwner.putIfAbsent(ownerId, () => <String>{}).add(event.eventId);
@@ -277,8 +304,8 @@ final class JsonlCompositionLifecycleEventStore
     if (query.operation != null) intersect(_byOperation[query.operation!.name]);
     if (query.status != null) intersect(_byStatus[query.status!.name]);
 
-    final ids = candidateIds ?? _eventsById.keys.toSet();
-    return ids.map((id) => _eventsById[id]!).toList(growable: false);
+    if (candidateIds == null) return List.of(_orderedEvents);
+    return candidateIds!.map((id) => _eventsById[id]!).toList(growable: false);
   }
 
   bool _sameEvent(
@@ -325,6 +352,14 @@ final class JsonlCompositionLifecycleEventStore
     }
     // Bytes after the last newline are an incomplete record and are ignored.
     return events;
+  }
+
+  int _compareEvents(
+    CompositionLifecycleEvent left,
+    CompositionLifecycleEvent right,
+  ) {
+    final byTime = left.timestamp.compareTo(right.timestamp);
+    return byTime != 0 ? byTime : left.eventId.compareTo(right.eventId);
   }
 
   List<CompositionLifecycleEvent> _stableChronological(
