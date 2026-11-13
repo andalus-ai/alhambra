@@ -141,12 +141,14 @@ void main() {
         now: DateTime.utc(2026, 1, 2),
         leaseDuration: const Duration(seconds: 1),
         limit: 1,
+        maxAttempts: 8,
       )).single;
       final second = (await store.claim(
         workerId: 'worker-b',
         now: DateTime.utc(2026, 1, 2, 0, 0, 2),
         leaseDuration: const Duration(seconds: 10),
         limit: 1,
+        maxAttempts: 8,
       )).single;
 
       expect(await store.markDelivered(
