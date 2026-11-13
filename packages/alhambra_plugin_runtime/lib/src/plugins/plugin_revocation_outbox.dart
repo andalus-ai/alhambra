@@ -27,8 +27,7 @@ final class PluginRevocationAuditEvent {
 
 enum PluginRevocationOutboxState { pending, leased, delivered, deadLetter }
 
-/// Durable outbox envelope. Lease ownership is explicit to prevent stale
-/// workers from acknowledging a message claimed by a newer worker.
+/// Durable outbox envelope with an explicit lease and delivery timestamp.
 final class PluginRevocationOutboxMessage {
   final PluginRevocationAuditEvent event;
   final PluginRevocationOutboxState state;
@@ -36,7 +35,8 @@ final class PluginRevocationOutboxMessage {
   final DateTime nextAttemptAt;
   final String? leaseOwner;
   final String? leaseToken;
-  final DateTime? leaseUntil;\n  final DateTime? deliveredAt;
+  final DateTime? leaseUntil;
+  final DateTime? deliveredAt;
   final String? lastErrorCode;
 
   const PluginRevocationOutboxMessage({
@@ -47,15 +47,11 @@ final class PluginRevocationOutboxMessage {
     this.leaseOwner,
     this.leaseToken,
     this.leaseUntil,
+    this.deliveredAt,
     this.lastErrorCode,
   });
 }
 
-/// Combined transaction boundary for execution outcome + outbox insertion.
-///
-/// A production implementation MUST commit both changes in one database
-/// transaction. Implementing these as two independent writes defeats the
-/// transactional-outbox guarantee.
 /// Persistence contract for leased outbox delivery.
 abstract interface class PluginRevocationOutboxStore {
   Future<List<PluginRevocationOutboxMessage>> claim({
@@ -63,6 +59,7 @@ abstract interface class PluginRevocationOutboxStore {
     required DateTime now,
     required Duration leaseDuration,
     required int limit,
+    required int maxAttempts,
   });
 
   Future<bool> markDelivered({
@@ -103,8 +100,9 @@ class InMemoryTransactionalPluginRevocationStore
       completeAndEnqueue(record);
 
   @override
-  Future<void> append(PluginRevocationExecutionRecord record) =>
-      _enqueue(record);
+  Future<void> append(PluginRevocationExecutionRecord record) async {
+    _enqueueSync(record);
+  }
 
   @override
   Future<void> completeAndEnqueue(PluginRevocationExecutionRecord record) async {
@@ -115,8 +113,6 @@ class InMemoryTransactionalPluginRevocationStore
     _executions[record.idempotencyKey] = record;
     _enqueueSync(record);
   }
-
-  void _enqueue(PluginRevocationExecutionRecord record) => _enqueueSync(record);
 
   void _enqueueSync(PluginRevocationExecutionRecord record) {
     final eventId = '${record.idempotencyKey}:terminal';
@@ -147,15 +143,40 @@ class InMemoryTransactionalPluginRevocationStore
     required DateTime now,
     required Duration leaseDuration,
     required int limit,
+    required int maxAttempts,
   }) async {
-    if (workerId.trim().isEmpty || leaseDuration <= Duration.zero || limit < 1) {
-      throw ArgumentError('workerId, positive leaseDuration and limit are required.');
+    if (workerId.trim().isEmpty ||
+        leaseDuration <= Duration.zero ||
+        limit < 1 ||
+        maxAttempts < 1) {
+      throw ArgumentError('workerId, positive leaseDuration, limit and maxAttempts are required.');
     }
     final instant = now.toUtc();
-    for (final entry in _messages.entries.toList()) {\n      final message = entry.value;\n      if (message.state == PluginRevocationOutboxState.leased &&\n          message.leaseUntil != null && !message.leaseUntil!.isAfter(instant) &&\n          message.attempts >= maxAttempts) {\n        _messages[entry.key] = PluginRevocationOutboxMessage(\n          event: message.event, state: PluginRevocationOutboxState.deadLetter,\n          attempts: message.attempts, nextAttemptAt: message.nextAttemptAt,\n          lastErrorCode: 'lease_expired_after_max_attempts');\n      }\n    }\n    final candidates = _messages.values.where((message) {
+
+    // An expired final lease is dead-lettered instead of being reclaimed.
+    for (final entry in _messages.entries.toList()) {
+      final message = entry.value;
+      if (message.state == PluginRevocationOutboxState.leased &&
+          message.leaseUntil != null &&
+          !message.leaseUntil!.isAfter(instant) &&
+          message.attempts >= maxAttempts) {
+        _messages[entry.key] = PluginRevocationOutboxMessage(
+          event: message.event,
+          state: PluginRevocationOutboxState.deadLetter,
+          attempts: message.attempts,
+          nextAttemptAt: message.nextAttemptAt,
+          lastErrorCode: 'lease_expired_after_max_attempts',
+        );
+      }
+    }
+
+    final candidates = _messages.values.where((message) {
       if (message.state == PluginRevocationOutboxState.delivered ||
-          message.state == PluginRevocationOutboxState.deadLetter) return false;
-      if (message.attempts >= maxAttempts) return false;\n      if (message.state == PluginRevocationOutboxState.pending) {
+          message.state == PluginRevocationOutboxState.deadLetter ||
+          message.attempts >= maxAttempts) {
+        return false;
+      }
+      if (message.state == PluginRevocationOutboxState.pending) {
         return !message.nextAttemptAt.isAfter(instant);
       }
       return message.leaseUntil != null && !message.leaseUntil!.isAfter(instant);
@@ -189,13 +210,17 @@ class InMemoryTransactionalPluginRevocationStore
     required DateTime deliveredAt,
   }) async {
     final current = _messages[eventId];
-    if (current == null || current.state != PluginRevocationOutboxState.leased ||
-        current.leaseToken != leaseToken) return false;
+    if (current == null ||
+        current.state != PluginRevocationOutboxState.leased ||
+        current.leaseToken != leaseToken) {
+      return false;
+    }
     _messages[eventId] = PluginRevocationOutboxMessage(
       event: current.event,
       state: PluginRevocationOutboxState.delivered,
       attempts: current.attempts,
       nextAttemptAt: current.nextAttemptAt,
+      deliveredAt: deliveredAt.toUtc(),
     );
     return true;
   }
@@ -209,12 +234,17 @@ class InMemoryTransactionalPluginRevocationStore
     required int maxAttempts,
   }) async {
     final current = _messages[eventId];
-    if (current == null || current.state != PluginRevocationOutboxState.leased ||
-        current.leaseToken != leaseToken) return false;
+    if (current == null ||
+        current.state != PluginRevocationOutboxState.leased ||
+        current.leaseToken != leaseToken) {
+      return false;
+    }
     final dead = current.attempts >= maxAttempts;
     _messages[eventId] = PluginRevocationOutboxMessage(
       event: current.event,
-      state: dead ? PluginRevocationOutboxState.deadLetter : PluginRevocationOutboxState.pending,
+      state: dead
+          ? PluginRevocationOutboxState.deadLetter
+          : PluginRevocationOutboxState.pending,
       attempts: current.attempts,
       nextAttemptAt: nextAttemptAt.toUtc(),
       lastErrorCode: errorCode,
@@ -267,7 +297,9 @@ class PluginRevocationOutboxDispatcher {
     DateTime Function()? clock,
   })  : backoff = backoff ?? _defaultBackoff,
         clock = clock ?? DateTime.now {
-    if (workerId.trim().isEmpty || leaseDuration <= Duration.zero || maxAttempts < 1) {
+    if (workerId.trim().isEmpty ||
+        leaseDuration <= Duration.zero ||
+        maxAttempts < 1) {
       throw ArgumentError('Invalid outbox dispatcher configuration.');
     }
   }
@@ -277,13 +309,16 @@ class PluginRevocationOutboxDispatcher {
     return Duration(seconds: 1 << exponent);
   }
 
-  Future<PluginRevocationOutboxDispatchReport> dispatchBatch({int limit = 50}) async {
+  Future<PluginRevocationOutboxDispatchReport> dispatchBatch({
+    int limit = 50,
+  }) async {
     final now = clock().toUtc();
     final claimed = await store.claim(
       workerId: workerId,
       now: now,
       leaseDuration: leaseDuration,
       limit: limit,
+      maxAttempts: maxAttempts,
     );
     var delivered = 0;
     var rescheduled = 0;
