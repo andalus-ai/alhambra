@@ -64,6 +64,7 @@ final class SqliteCompositionLifecycleEventStore
       database.execute('''
         CREATE TABLE IF NOT EXISTS lifecycle_events (
           event_id TEXT PRIMARY KEY NOT NULL,
+          event_id_sort_key TEXT NOT NULL,
           correlation_id TEXT NOT NULL,
           operation TEXT NOT NULL,
           status TEXT NOT NULL,
@@ -82,19 +83,19 @@ final class SqliteCompositionLifecycleEventStore
       ''');
       database.execute(
         'CREATE INDEX IF NOT EXISTS idx_lifecycle_time '
-        'ON lifecycle_events(timestamp_micros, event_id)',
+        'ON lifecycle_events(timestamp_micros, event_id_sort_key)',
       );
       database.execute(
         'CREATE INDEX IF NOT EXISTS idx_lifecycle_correlation_time '
-        'ON lifecycle_events(correlation_id, timestamp_micros, event_id)',
+        'ON lifecycle_events(correlation_id, timestamp_micros, event_id_sort_key)',
       );
       database.execute(
         'CREATE INDEX IF NOT EXISTS idx_lifecycle_operation_time '
-        'ON lifecycle_events(operation, timestamp_micros, event_id)',
+        'ON lifecycle_events(operation, timestamp_micros, event_id_sort_key)',
       );
       database.execute(
         'CREATE INDEX IF NOT EXISTS idx_lifecycle_status_time '
-        'ON lifecycle_events(status, timestamp_micros, event_id)',
+        'ON lifecycle_events(status, timestamp_micros, event_id_sort_key)',
       );
       database.execute(
         'CREATE INDEX IF NOT EXISTS idx_lifecycle_owner_time '
@@ -128,10 +129,11 @@ final class SqliteCompositionLifecycleEventStore
 
       database.execute(
         'INSERT INTO lifecycle_events '
-        '(event_id, correlation_id, operation, status, timestamp_micros, payload) '
-        'VALUES (?, ?, ?, ?, ?, ?)',
+        '(event_id, event_id_sort_key, correlation_id, operation, status, timestamp_micros, payload) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
         [
           event.eventId,
+          _eventIdSortKey(event.eventId),
           event.correlationId,
           event.operation.name,
           event.status.name,
@@ -190,21 +192,21 @@ final class SqliteCompositionLifecycleEventStore
     }
     if (query.after != null) {
       clauses.add('(e.timestamp_micros > ? OR '
-          '(e.timestamp_micros = ? AND e.event_id > ?))');
+          '(e.timestamp_micros = ? AND e.event_id_sort_key > ?))');
       final cursor = query.after!;
       parameters
         ..add(cursor.timestamp.toUtc().microsecondsSinceEpoch)
         ..add(cursor.timestamp.toUtc().microsecondsSinceEpoch)
-        ..add(cursor.eventId);
+        ..add(_eventIdSortKey(cursor.eventId));
     }
     if (query.beforeCursor != null) {
       clauses.add('(e.timestamp_micros < ? OR '
-          '(e.timestamp_micros = ? AND e.event_id < ?))');
+          '(e.timestamp_micros = ? AND e.event_id_sort_key < ?))');
       final cursor = query.beforeCursor!;
       parameters
         ..add(cursor.timestamp.toUtc().microsecondsSinceEpoch)
         ..add(cursor.timestamp.toUtc().microsecondsSinceEpoch)
-        ..add(cursor.eventId);
+        ..add(_eventIdSortKey(cursor.eventId));
     }
 
     final backward = query.beforeCursor != null;
@@ -213,7 +215,7 @@ final class SqliteCompositionLifecycleEventStore
     final rows = database.select(
       'SELECT e.payload FROM lifecycle_events e $where '
       'ORDER BY e.timestamp_micros ${backward ? 'DESC' : 'ASC'}, '
-      'e.event_id ${backward ? 'DESC' : 'ASC'} LIMIT ?',
+      'e.event_id_sort_key ${backward ? 'DESC' : 'ASC'} LIMIT ?',
       parameters,
     );
 
@@ -236,3 +238,8 @@ final class SqliteCompositionLifecycleEventStore
     if (_closed) throw StateError('Lifecycle SQLite store is closed.');
   }
 }
+
+
+String _eventIdSortKey(String value) => value.codeUnits
+    .map((unit) => unit.toRadixString(16).padLeft(4, '0'))
+    .join();
