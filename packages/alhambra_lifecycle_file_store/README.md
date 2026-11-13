@@ -19,6 +19,9 @@ final diagnostics = JsonlCompositionLifecycleRuntime(
 );
 
 final runtime = diagnostics.runtime;
+final liveSubscription = runtime.subscribeLifecycleEvents((event) {
+  // Feed a host-owned health stream or diagnostics collector.
+});
 final transaction = runtime.beginTransaction(
   lifecycle: pluginLifecycle,
   correlationId: 'plugin-install-42',
@@ -29,11 +32,16 @@ final recentEvents = await diagnostics.query(
   CompositionLifecycleEventQuery(ownerId: 'editor-plugin', limit: 50),
 );
 
+// Durable history + the bounded live window, deduplicated by event content.
+final ownerSummary = await diagnostics.diagnostics.ownerSummary('editor-plugin');
+final allOwnerSummaries = await diagnostics.diagnostics.ownerSummaries();
+
 // On orderly application shutdown:
+liveSubscription.cancel();
 await diagnostics.close();
 ```
 
-The runtime callback only enqueues events; it does not wait for file I/O.
+The runtime callback only enqueues events; it does not wait for file I/O.\n\n`diagnostics.diagnostics.query(...)` merges durable results with the live\nruntime window and removes duplicates. `ownerSummary(ownerId)` and\n`ownerSummaries()` aggregate durable event counts and failure details, then\nattach the current owner state from the runtime. Owner aggregates cover all\nrecords in the JSONL file plus the currently retained in-memory window.
 Monitor `pendingEventCount`, `rejectedEventCount`, and `lastWriteError`.
 If a write fails, the failed event remains queued: call
 `retryFailedWrites()`, then `flush()` or `close()` again. A failed close
