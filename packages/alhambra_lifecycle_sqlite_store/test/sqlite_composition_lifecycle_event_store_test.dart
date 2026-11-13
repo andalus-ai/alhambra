@@ -4,6 +4,7 @@ import 'package:alhambra_lifecycle_sqlite_store/alhambra_lifecycle_sqlite_store.
 import 'package:alhambra_lifecycle_store_test/alhambra_lifecycle_store_test.dart';
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
+import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -44,6 +45,27 @@ void main() {
       ),
       isNotEmpty,
     );
+  });
+
+  test('rejects databases created by a newer schema version', () async {
+    final path = '${directory.path}/future-schema.sqlite';
+    final database = sqlite3.open(path);
+    database.execute('PRAGMA user_version = ${SqliteCompositionLifecycleEventStore.schemaVersion + 1}');
+    database.dispose();
+
+    expect(
+      () => SqliteCompositionLifecycleEventStore.open(path: path),
+      throwsStateError,
+    );
+  });
+
+  test('does not close a host-owned database', () async {
+    final database = sqlite3.openInMemory();
+    store = SqliteCompositionLifecycleEventStore(database: database);
+    await store.close();
+
+    database.select('SELECT 1 AS still_open');
+    database.dispose();
   });
 
   test('reopens the database and retains committed events', () async {
