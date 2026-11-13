@@ -29,7 +29,18 @@ final class JsonlCompositionLifecycleDiagnostics {
     CompositionLifecycleEventQuery query,
   ) async {
     await journal.flush();
-    final durable = await store.query(query);
+    final durable = await store.query(CompositionLifecycleEventQuery(
+      correlationId: query.correlationId,
+      ownerId: query.ownerId,
+      operation: query.operation,
+      status: query.status,
+      from: query.from,
+      to: query.to,
+      before: query.before,
+      after: query.after,
+      beforeCursor: query.beforeCursor,
+      limit: 0x7fffffff,
+    ));
     final live = runtime.queryLifecycleEvents(
       correlationId: query.correlationId,
       ownerId: query.ownerId,
