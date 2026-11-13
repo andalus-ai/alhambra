@@ -93,21 +93,43 @@ final class JsonlSparseLifecycleIndex {
     CompositionLifecycleEventQuery query,
   ) async {
     await ensureReady();
-    final matches = <CompositionLifecycleEvent>[];
+    final page = <CompositionLifecycleEvent>[];
+    final backward = query.beforeCursor != null;
+
+    void retain(CompositionLifecycleEvent event) {
+      var low = 0;
+      var high = page.length;
+      while (low < high) {
+        final middle = low + ((high - low) >> 1);
+        if (_compareEvents(page[middle], event) <= 0) {
+          low = middle + 1;
+        } else {
+          high = middle;
+        }
+      }
+      if (!backward && page.length == query.limit &&
+          low >= page.length) return;
+      if (backward && page.length == query.limit && low == 0) return;
+      page.insert(low, event);
+      if (page.length > query.limit) {
+        if (backward) {
+          page.removeAt(0);
+        } else {
+          page.removeLast();
+        }
+      }
+    }
+
     for (final block in _blocks) {
       if (!_blockMayMatch(block, query)) continue;
       for (final event in await _readBlock(block)) {
-        if (_matches(event, query)) matches.add(event);
+        if (_matches(event, query)) retain(event);
       }
     }
     for (final event in _pending) {
-      if (_matches(event, query)) matches.add(event);
+      if (_matches(event, query)) retain(event);
     }
-    matches.sort(_compareEvents);
-    if (query.beforeCursor != null && matches.length > query.limit) {
-      return List.unmodifiable(matches.skip(matches.length - query.limit));
-    }
-    return List.unmodifiable(matches.take(query.limit));
+    return List.unmodifiable(page);
   }
 
   Future<void> invalidate() async {
