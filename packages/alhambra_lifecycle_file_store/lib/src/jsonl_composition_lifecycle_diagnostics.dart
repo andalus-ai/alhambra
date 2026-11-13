@@ -122,9 +122,12 @@ final class JsonlCompositionLifecycleDiagnostics {
     for (final event in [...durable, ...live]) {
       byIdentity.putIfAbsent(_identity(event), () => event);
     }
-    final result = byIdentity.values.toList()
-      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    return result;
+    final indexed = byIdentity.values.indexed.toList()
+      ..sort((a, b) {
+        final byTime = a.$2.timestamp.compareTo(b.$2.timestamp);
+        return byTime != 0 ? byTime : a.$1.compareTo(b.$1);
+      });
+    return indexed.map((entry) => entry.$2).toList(growable: false);
   }
 
   /// The event schema intentionally has no storage-specific identifier.
