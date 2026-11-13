@@ -38,10 +38,16 @@ final class SqliteCompositionLifecycleEventStore
     required String path,
     CompositionLifecycleEventJsonCodec? codec,
   }) {
-    return SqliteCompositionLifecycleEventStore._owned(
-      database: sqlite3.open(path),
-      codec: codec,
-    );
+    final database = sqlite3.open(path);
+    try {
+      return SqliteCompositionLifecycleEventStore._owned(
+        database: database,
+        codec: codec,
+      );
+    } on Object {
+      database.dispose();
+      rethrow;
+    }
   }
 
   void _configure() {
