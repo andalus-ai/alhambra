@@ -319,7 +319,8 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
         case 'close':
           await store.close();
           host.send({'id': id, 'ok': true});
-          commands.close();
+          // Keep the command port alive until the host receives this ack;
+          // the host then terminates the now-idle isolate.
           break;
         default:
           throw ArgumentError.value(operation, 'operation', 'Unknown worker command.');
