@@ -28,7 +28,7 @@ void main() {
 
     expect(transaction.commit(), isA<CompositionSuccess>());
 
-    final events = await host.diagnostics.query(
+    final events = await host.lifecycleDiagnostics.query(
       CompositionLifecycleEventQuery(
         correlationId: 'install-search',
         limit: 20,
@@ -39,7 +39,7 @@ void main() {
       CompositionLifecycleStatus.succeeded,
     ));
 
-    final owner = await host.diagnostics.ownerSummary('search-plugin');
+    final owner = await host.lifecycleDiagnostics.ownerSummary('search-plugin');
     expect(owner, isNotNull);
     expect(owner!.state, CompositionOwnerState.active);
     expect(owner.eventCount, 4);
@@ -68,12 +68,12 @@ void main() {
 
     expect(host.runtime.lifecycleEvents, hasLength(2));
 
-    final owner = await host.diagnostics.ownerSummary('search-plugin');
+    final owner = await host.lifecycleDiagnostics.ownerSummary('search-plugin');
     expect(owner, isNotNull);
     expect(owner!.eventCount, 12);
     expect(owner.failureCount, 0);
 
-    final summaries = await host.diagnostics.ownerSummaries();
+    final summaries = await host.lifecycleDiagnostics.ownerSummaries();
     expect(summaries, hasLength(1));
     expect(summaries.single.ownerId, 'search-plugin');
     expect(summaries.single.eventCount, 12);
@@ -89,11 +89,11 @@ void main() {
     )..stage(ServiceNode(serviceId: 'index', ownerId: 'search-plugin'));
     transaction.commit();
 
-    final all = await host.diagnostics.query(
+    final all = await host.lifecycleDiagnostics.query(
       CompositionLifecycleEventQuery(limit: 20),
     );
     final start = all.first.timestamp;
-    final filtered = await host.diagnostics.query(
+    final filtered = await host.lifecycleDiagnostics.query(
       CompositionLifecycleEventQuery(
         ownerId: 'search-plugin',
         status: CompositionLifecycleStatus.succeeded,
@@ -111,8 +111,8 @@ void main() {
 
   test('returns null for an owner with no retained or durable activity', () async {
     final host = JsonlCompositionLifecycleRuntime(file: file);
-    expect(await host.diagnostics.ownerSummary('missing'), isNull);
-    expect(await host.diagnostics.ownerSummaries(), isEmpty);
+    expect(await host.lifecycleDiagnostics.ownerSummary('missing'), isNull);
+    expect(await host.lifecycleDiagnostics.ownerSummaries(), isEmpty);
     await host.close();
   });
 }
