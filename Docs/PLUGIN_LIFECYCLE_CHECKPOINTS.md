@@ -190,3 +190,20 @@ This integration records lifecycle progress and provides a read-only recovery
 planner. It does not execute recovery actions, reconstruct plugin instances,
 or guarantee distributed exactly-once behavior. Those remain host-level
 responsibilities.
+
+
+## Durable recovery jobs
+
+`PluginLifecycleRecoveryJob` records the host's durable intent for a dependency-ordered recovery batch. It has a stable job ID, idempotency key, operation ID, action, immutable ordered target list, revision, timestamps, optional initiating-actor/correlation metadata, and one progress step per plugin. Step records carry the checkpoint version observed during planning, the execution operation ID, timestamps, and sanitized outcome metadata.
+
+`PluginLifecycleRecoveryJobStore` is an aggregate persistence boundary. Hosts must implement `insertIfAbsent` and revision-based `compareAndSet` atomically across every process that can update a job. The in-memory implementation is for tests and single-isolate development only. The job record must be committed before plugin side effects begin; a production host should update the step to running before invoking the recovery runner and persist the outcome immediately after it returns.
+
+The job aggregate intentionally does not duplicate plugin checkpoint state. Per-plugin checkpoints remain authoritative for lifecycle progress; the job records intent, ordering, and the host's execution history. A job's expected checkpoint operation ID and sequence allow the host to detect stale plans.
+
+### Restart inspection
+
+`PluginLifecycleRecoveryJobPlanner.inspect()` is read-only. It compares the persisted job steps with current per-plugin checkpoints and the live active plugin IDs supplied by the host. It reports completed-and-verified, pending, running-needs-inspection, failed-needs-decision, skipped-needs-decision, missing-checkpoint, changed-checkpoint, and active-state-mismatch findings.
+
+A running step after restart is always ambiguous. The planner never retries it, marks it complete, mutates either store, or invokes plugin hooks. Hosts must inspect external side effects and issue a fresh authorized decision. Likewise, failed or skipped steps require a new decision rather than silently continuing the old request.
+
+This increment defines the durable job aggregate and restart inspection contract; it does not yet wire job writes into `executeBatch()`. That integration must preserve the ordering: persist job intent, persist a step's running claim, execute exactly one plugin recovery, persist the step outcome, then advance. If the process stops between any two writes, the planner exposes the ambiguity rather than assuming exactly-once behavior.
