@@ -91,4 +91,79 @@ void main() {
     expect(result.single.eventId, event.eventId);
     expect(codec.encode(result.single), codec.encode(event));
   });
+
+  test('worker owns SQLite on a separate isolate and supports append/query', () async {
+    final worker = await SqliteLifecycleEventStoreWorker.open(
+      path: '${directory.path}/worker.sqlite',
+    );
+    addTearDown(worker.close);
+    final event = CompositionLifecycleEvent(
+      eventId: 'worker-event',
+      correlationId: 'worker-correlation',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: DateTime.utc(2026, 7, 2),
+      nodeIds: const ['command:worker'],
+      ownerIds: const ['owner-worker'],
+    );
+
+    await worker.append(event);
+    final result = await worker.query(
+      CompositionLifecycleEventQuery(ownerId: 'owner-worker'),
+    );
+
+    expect(result.single.eventId, event.eventId);
+    expect(
+      const CompositionLifecycleEventJsonCodec().encode(result.single),
+      const CompositionLifecycleEventJsonCodec().encode(event),
+    );
+  });
+
+  test('worker preserves identity conflicts across the isolate boundary', () async {
+    final worker = await SqliteLifecycleEventStoreWorker.open(
+      path: '${directory.path}/worker-conflict.sqlite',
+    );
+    addTearDown(worker.close);
+    final event = CompositionLifecycleEvent(
+      eventId: 'worker-conflict',
+      correlationId: 'worker-correlation',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: DateTime.utc(2026, 7, 3),
+      nodeIds: const ['command:worker'],
+      ownerIds: const ['owner-worker'],
+    );
+    await worker.append(event);
+
+    await expectLater(
+      worker.append(CompositionLifecycleEvent(
+        eventId: event.eventId,
+        correlationId: 'different-correlation',
+        operation: event.operation,
+        status: event.status,
+        timestamp: event.timestamp,
+        nodeIds: event.nodeIds,
+        ownerIds: event.ownerIds,
+      )),
+      throwsA(
+        isA<CompositionLifecycleEventIdentityConflictException>()
+            .having((error) => error.eventId, 'eventId', event.eventId),
+      ),
+    );
+  });
+
+  test('worker exposes WAL checkpoint counters', () async {
+    final worker = await SqliteLifecycleEventStoreWorker.open(
+      path: '${directory.path}/worker-checkpoint.sqlite',
+    );
+    addTearDown(worker.close);
+
+    final result = await worker.checkpoint();
+
+    expect(result.mode, SqliteWalCheckpointMode.passive);
+    expect(result.busy, greaterThanOrEqualTo(0));
+    expect(result.logFrames, greaterThanOrEqualTo(-1));
+    expect(result.checkpointedFrames, greaterThanOrEqualTo(-1));
+  });
+
 }
