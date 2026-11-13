@@ -6,6 +6,7 @@ import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 
 import 'jsonl_composition_lifecycle_event_store.dart';
+import 'jsonl_composition_lifecycle_diagnostics.dart';
 
 /// Ready-to-use composition runtime backed by a durable JSONL event journal.
 ///
@@ -16,6 +17,7 @@ final class JsonlCompositionLifecycleRuntime {
   late final JsonlCompositionLifecycleEventStore store;
   late final CompositionLifecycleEventJournal journal;
   late final DefaultCompositionRuntime runtime;
+  late final JsonlCompositionLifecycleDiagnostics diagnostics;
 
   JsonlCompositionLifecycleRuntime({
     required File file,
@@ -40,6 +42,11 @@ final class JsonlCompositionLifecycleRuntime {
       maxPendingLifecycleEventsPerSubscriber:
           maxPendingLifecycleEventsPerSubscriber,
       onOwnerDeactivated: onOwnerDeactivated,
+    );
+    diagnostics = JsonlCompositionLifecycleDiagnostics(
+      store: store,
+      journal: journal,
+      runtime: runtime,
     );
   }
 
