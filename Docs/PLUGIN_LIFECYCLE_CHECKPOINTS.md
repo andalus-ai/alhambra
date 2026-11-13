@@ -148,6 +148,35 @@ The executor must call the matching context method exactly once. It may
 perform external checks or compensation around that call, but it must not
 retain secrets in checkpoint failure summaries or exception messages.
 
+
+## Dependency-ordered recovery batches
+
+`PluginLifecycleRecoveryRunner.executeBatch()` coordinates an explicit set of
+recovery targets under one manager-wide lifecycle batch gate. It reads the
+checkpoint set, validates target states and dependency prerequisites, computes
+a stable topological order, and then invokes the existing single-plugin
+recovery path sequentially.
+
+- Startup recovery executes dependency-first. Dependencies outside the selected
+  batch must already be active.
+- Shutdown compensation executes dependent-first. Active dependents outside
+  the selected batch block compensation.
+- A dependency cycle or invalid/missing prerequisite fails preflight before
+  plugin code runs.
+- Each target receives a distinct operation ID supplied by the host factory.
+  IDs are generated and validated before the first lifecycle operation.
+- The batch stops at the first execution failure. The report identifies the
+  failed plugin, completed plugins, and untouched remaining plugins. Successful
+  checkpoints are retained; the host must inspect the failure before starting
+  another batch.
+
+The batch is not a distributed transaction and does not automatically retry.
+The shared manager gate protects one `PluginManager` instance. Multi-process
+hosts still need external serialization and checkpoint-store conditional
+writes. Hosts should persist the batch intent in their own durable job/audit
+store if they need to reconstruct the complete batch request after a process
+restart; per-plugin checkpoints remain the source of execution progress.
+
 ## Store implementations
 
 PluginLifecycleCheckpointStore is the host persistence boundary.
