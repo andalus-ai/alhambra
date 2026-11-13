@@ -12,6 +12,7 @@ void main() {
   SqliteCompositionLifecycleEventStore? store;
 
   setUp(() async {
+    store = null;
     directory = await Directory.systemTemp.createTemp('alhambra-sqlite-events-');
   });
 
@@ -40,7 +41,7 @@ void main() {
     final version = store!.database.select('PRAGMA user_version').single['user_version'];
     expect(version, SqliteCompositionLifecycleEventStore.schemaVersion);
     expect(
-      store.database.select(
+      store!.database.select(
         "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_lifecycle_time'",
       ),
       isNotEmpty,
@@ -84,7 +85,7 @@ void main() {
       ownerIds: const ['owner-reopen'],
     );
     await store!.append(event);
-    await store.close();
+    await store!.close();
 
     store = SqliteCompositionLifecycleEventStore.open(path: path);
     final result = await store!.query(CompositionLifecycleEventQuery());
@@ -185,9 +186,9 @@ void main() {
       ownerIds: const ['owner-rollback'],
     );
 
-    await expectLater(store.append(event), throwsA(isA<Exception>()));
+    await expectLater(store!.append(event), throwsA(isA<Exception>()));
     store.database.execute('DROP TRIGGER reject_owner');
-    expect(await store.query(CompositionLifecycleEventQuery()), isEmpty);
+    expect(await store!.query(CompositionLifecycleEventQuery()), isEmpty);
   });
 
   test('recovers committed WAL data after closing and reopening', () async {
@@ -206,7 +207,7 @@ void main() {
     await store.close();
 
     store = SqliteCompositionLifecycleEventStore.open(path: path);
-    final recovered = await store.query(
+    final recovered = await store!.query(
       CompositionLifecycleEventQuery(ownerId: 'owner-wal-recovery'),
     );
     expect(recovered.single.eventId, event.eventId);
