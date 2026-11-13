@@ -51,6 +51,15 @@ final class SqlitePluginRevocationStore
   }
 
   void _migrate() {
+    final version =
+        _db.select('PRAGMA user_version').first['user_version'] as int;
+    if (version > 1) {
+      throw UnsupportedError(
+        'Database schema version $version is newer than this adapter supports.',
+      );
+    }
+    if (version == 1) return;
+
     _db.execute('''
       CREATE TABLE IF NOT EXISTS plugin_revocation_execution (
         idempotency_key TEXT PRIMARY KEY,
