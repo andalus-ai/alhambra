@@ -84,6 +84,15 @@ abstract interface class PluginRevocationAuditSink {
   Future<void> append(PluginRevocationExecutionRecord record);
 }
 
+/// Store and audit sink sharing one atomic commit boundary.
+///
+/// Implementations must persist the terminal execution update and its audit
+/// outbox event in the same transaction.
+abstract interface class TransactionalPluginRevocationStore
+    implements PluginRevocationExecutionStore, PluginRevocationAuditSink {
+  Future<void> completeAndEnqueue(PluginRevocationExecutionRecord record);
+}
+
 class InMemoryPluginRevocationAuditSink implements PluginRevocationAuditSink {
   final List<PluginRevocationExecutionRecord> _records = [];
 
@@ -239,8 +248,16 @@ class PluginRevocationCoordinator {
       );
     }
 
-    await executionStore.complete(outcome);
-    await auditSink.append(outcome);
+    final transactional = executionStore;
+    if (transactional is TransactionalPluginRevocationStore &&
+        identical(auditSink, transactional)) {
+      await transactional.completeAndEnqueue(outcome);
+    } else {
+      // Compatibility path for legacy host adapters. This is not atomic;
+      // production hosts should provide one shared transactional store.
+      await executionStore.complete(outcome);
+      await auditSink.append(outcome);
+    }
     return outcome;
   }
 
