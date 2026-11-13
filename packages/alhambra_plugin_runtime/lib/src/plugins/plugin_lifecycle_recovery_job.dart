@@ -36,7 +36,7 @@ final class PluginRecoveryJobStep {
   final String? failureCode;
   final String? failureSummary;
 
-  const PluginRecoveryJobStep({
+  PluginRecoveryJobStep({
     required this.pluginId,
     required this.ordinal,
     this.status = PluginRecoveryJobStepStatus.pending,
