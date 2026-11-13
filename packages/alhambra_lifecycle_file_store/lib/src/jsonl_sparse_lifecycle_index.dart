@@ -66,16 +66,51 @@ final class JsonlSparseLifecycleIndex {
 
   Future<CompositionLifecycleEvent?> findEventById(String eventId) async {
     await ensureReady();
+    CompositionLifecycleEvent? found;
+    void accept(CompositionLifecycleEvent event) {
+      if (event.eventId != eventId) return;
+      if (found != null && !_sameEvent(found!, event)) {
+        throw FormatException(
+          'Conflicting lifecycle event ID "$eventId" in JSONL history.',
+        );
+      }
+      found ??= event;
+    }
+
     for (final block in _blocks) {
       if (!block.mightContain(eventId)) continue;
       for (final event in await _readBlock(block)) {
-        if (event.eventId == eventId) return event;
+        accept(event);
       }
     }
     for (final event in _pending) {
-      if (event.eventId == eventId) return event;
+      accept(event);
     }
-    return null;
+    return found;
+  }
+
+  bool _sameEvent(
+    CompositionLifecycleEvent left,
+    CompositionLifecycleEvent right,
+  ) {
+    bool sameList(List<String> a, List<String> b) {
+      if (a.length != b.length) return false;
+      for (var index = 0; index < a.length; index++) {
+        if (a[index] != b[index]) return false;
+      }
+      return true;
+    }
+
+    return left.eventId == right.eventId &&
+        left.correlationId == right.correlationId &&
+        left.operation == right.operation &&
+        left.status == right.status &&
+        left.timestamp.toUtc() == right.timestamp.toUtc() &&
+        sameList(left.nodeIds, right.nodeIds) &&
+        sameList(left.ownerIds, right.ownerIds) &&
+        left.duration == right.duration &&
+        left.errorType == right.errorType &&
+        left.errorMessage == right.errorMessage;
   }
 
 
@@ -87,6 +122,7 @@ final class JsonlSparseLifecycleIndex {
     final backward = query.beforeCursor != null;
 
     void retain(CompositionLifecycleEvent event) {
+      if (page.any((existing) => existing.eventId == event.eventId)) return;
       var low = 0;
       var high = page.length;
       while (low < high) {
