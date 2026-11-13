@@ -130,17 +130,18 @@ void main() {
         approve: (_) => throw StateError('approval service unavailable'),
       );
 
-      final first = await coordinator.execute(
-        operationId: 'provider-event-6',
-        decisions: [decision(CapabilityImpactAction.deactivate)],
+      await expectLater(
+        coordinator.execute(
+          operationId: 'provider-event-6',
+          decisions: [decision(CapabilityImpactAction.deactivate)],
+        ),
+        throwsStateError,
       );
       final retry = await coordinator.execute(
         operationId: 'provider-event-6',
         decisions: [decision(CapabilityImpactAction.deactivate)],
       );
 
-      expect(first.records.single.status,
-          PluginRevocationExecutionStatus.failed);
       expect(retry.records.single.status,
           PluginRevocationExecutionStatus.requiresReconciliation);
     });
