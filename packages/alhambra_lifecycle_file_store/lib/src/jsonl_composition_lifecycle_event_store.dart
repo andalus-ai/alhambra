@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'jsonl_sparse_lifecycle_index.dart';
-
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
+
+import 'jsonl_sparse_lifecycle_index.dart';
 
 /// Append-only JSON Lines store for composition lifecycle events.
 ///
@@ -267,14 +267,6 @@ final class JsonlCompositionLifecycleEventStore
     return events;
   }
 
-  int _compareEvents(
-    CompositionLifecycleEvent left,
-    CompositionLifecycleEvent right,
-  ) {
-    final byTime = left.timestamp.compareTo(right.timestamp);
-    return byTime != 0 ? byTime : left.eventId.compareTo(right.eventId);
-  }
-
   List<CompositionLifecycleEvent> _stableChronological(
     List<CompositionLifecycleEvent> events,
   ) {
@@ -288,39 +280,7 @@ final class JsonlCompositionLifecycleEventStore
     return indexed.map((entry) => entry.$2).toList(growable: false);
   }
 
-  int _compareEventToCursor(CompositionLifecycleEvent event, CompositionLifecycleEventCursor cursor) {
-    final byTime = event.timestamp.compareTo(cursor.timestamp);
-    return byTime != 0 ? byTime : event.eventId.compareTo(cursor.eventId);
-  }
 
-  bool _matches(
-    CompositionLifecycleEvent event,
-    CompositionLifecycleEventQuery query,
-  ) {
-    if (query.correlationId != null &&
-        event.correlationId != query.correlationId) {
-      return false;
-    }
-    if (query.ownerId != null && !event.ownerIds.contains(query.ownerId)) {
-      return false;
-    }
-    if (query.operation != null && event.operation != query.operation) {
-      return false;
-    }
-    if (query.status != null && event.status != query.status) {
-      return false;
-    }
-    if (query.from != null && event.timestamp.isBefore(query.from!)) {
-      return false;
-    }
-    if (query.to != null && event.timestamp.isAfter(query.to!)) {
-      return false;
-    }
-    if (query.before != null && !event.timestamp.isBefore(query.before!)) return false;
-    if (query.after != null && _compareEventToCursor(event, query.after!) <= 0) return false;
-    if (query.beforeCursor != null && _compareEventToCursor(event, query.beforeCursor!) >= 0) return false;
-    return true;
-  }
 }
 
 
