@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:alhambra_lifecycle_file_store/alhambra_lifecycle_file_store.dart';
@@ -160,6 +161,83 @@ void main() {
     );
 
     expect(result.map((event) => event.correlationId), ['owner-one', 'owner-two']);
+  });
+
+  test('persists sparse checkpoints and resumes from the indexed prefix', () async {
+    final events = List.generate(
+      JsonlSparseLifecycleIndex.blockSize + 7,
+      (index) => _event(
+        'checkpoint-$index',
+        DateTime.utc(2026, 1, 1).add(Duration(minutes: index)),
+        eventId: 'checkpoint-event-$index',
+      ),
+    );
+    for (final event in events) {
+      await store.append(event);
+    }
+
+    final sidecar = File('${file.path}.sparse-index.json');
+    expect(await sidecar.exists(), isTrue);
+    final checkpoint = jsonDecode(await sidecar.readAsString()) as Map;
+    expect(checkpoint['schemaVersion'], 1);
+    expect((checkpoint['blocks'] as List), hasLength(1));
+
+    final reopened = JsonlCompositionLifecycleEventStore(file: file);
+    final result = await reopened.query(
+      CompositionLifecycleEventQuery(
+        from: DateTime.utc(2026, 1, 1).add(const Duration(minutes: 125)),
+        limit: 20,
+      ),
+    );
+    expect(result.map((event) => event.eventId), [
+      for (var index = 125; index < events.length; index++)
+        'checkpoint-event-$index',
+    ]);
+  });
+
+  test('rebuilds a damaged sparse index without losing log records', () async {
+    for (var index = 0; index < JsonlSparseLifecycleIndex.blockSize + 2; index++) {
+      await store.append(_event(
+        'damaged-index-$index',
+        DateTime.utc(2026, 2, 1).add(Duration(seconds: index)),
+        eventId: 'damaged-event-$index',
+      ));
+    }
+
+    final sidecar = File('${file.path}.sparse-index.json');
+    await sidecar.writeAsString('{not-json');
+    final reopened = JsonlCompositionLifecycleEventStore(file: file);
+    final result = await reopened.query(
+      CompositionLifecycleEventQuery(limit: 200),
+    );
+    expect(result, hasLength(JsonlSparseLifecycleIndex.blockSize + 2));
+    expect(result.first.eventId, 'damaged-event-0');
+    expect(result.last.eventId, 'damaged-event-129');
+  });
+
+  test('uses block time ranges without assuming append timestamp order', () async {
+    final base = DateTime.utc(2026, 3, 1);
+    for (var index = 0; index < JsonlSparseLifecycleIndex.blockSize; index++) {
+      final minute = index.isEven ? index : 1000 - index;
+      await store.append(_event(
+        'unordered-$index',
+        base.add(Duration(minutes: minute)),
+        eventId: 'unordered-event-$index',
+      ));
+    }
+
+    final reopened = JsonlCompositionLifecycleEventStore(file: file);
+    final result = await reopened.query(CompositionLifecycleEventQuery(
+      from: base.add(const Duration(minutes: 990)),
+      to: base.add(const Duration(minutes: 1000)),
+      limit: 20,
+    ));
+    expect(result, isNotEmpty);
+    expect(result, everyElement(
+      predicate<CompositionLifecycleEvent>((event) =>
+        !event.timestamp.isBefore(base.add(const Duration(minutes: 990))) &&
+        !event.timestamp.isAfter(base.add(const Duration(minutes: 1000)))),
+    ));
   });
 
   test('returns immutable query results and applies limit', () async {
