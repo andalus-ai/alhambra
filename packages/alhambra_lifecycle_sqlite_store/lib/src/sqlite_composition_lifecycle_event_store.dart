@@ -12,7 +12,12 @@ import 'package:sqlite3/sqlite3.dart';
 /// to a dedicated isolate.
 final class SqliteCompositionLifecycleEventStore
     implements CompositionLifecycleEventStore {
-  static const int schemaVersion = 1;
+  static const int schemaVersion = 2;
+
+  static final List<_SqliteSchemaMigration> _migrations = [
+    _SqliteSchemaMigration(version: 1, apply: _createInitialSchema),
+    _SqliteSchemaMigration(version: 2, apply: _addCombinedStatusOperationIndex),
+  ];
 
   final Database database;
   final CompositionLifecycleEventJsonCodec codec;
@@ -58,64 +63,77 @@ final class SqliteCompositionLifecycleEventStore
     database.execute('PRAGMA busy_timeout = 5000');
     database.execute('PRAGMA journal_mode = WAL');
 
-    final version = database.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > schemaVersion) {
+    final currentVersion =
+        database.select('PRAGMA user_version').first['user_version'] as int;
+    if (currentVersion > schemaVersion) {
       throw StateError(
-        'Lifecycle database schema $version is newer than supported $schemaVersion.',
+        'Lifecycle database schema $currentVersion is newer than supported $schemaVersion.',
       );
     }
-    if (version == 0) _createSchema();
+
+    for (final migration in _migrations) {
+      if (migration.version <= currentVersion) continue;
+      database.execute('BEGIN IMMEDIATE');
+      try {
+        migration.apply(database);
+        database.execute('PRAGMA user_version = ${migration.version}');
+        database.execute('COMMIT');
+      } on Object {
+        database.execute('ROLLBACK');
+        rethrow;
+      }
+    }
   }
 
-  void _createSchema() {
-    database.execute('BEGIN IMMEDIATE');
-    try {
-      database.execute('''
-        CREATE TABLE IF NOT EXISTS lifecycle_events (
-          event_id TEXT PRIMARY KEY NOT NULL,
-          event_id_sort_key TEXT NOT NULL,
-          correlation_id TEXT NOT NULL,
-          operation TEXT NOT NULL,
-          status TEXT NOT NULL,
-          timestamp_micros INTEGER NOT NULL,
-          payload TEXT NOT NULL
-        )
-      ''');
-      database.execute('''
-        CREATE TABLE IF NOT EXISTS lifecycle_event_owners (
-          event_id TEXT NOT NULL,
-          owner_id TEXT NOT NULL,
-          PRIMARY KEY (event_id, owner_id),
-          FOREIGN KEY (event_id) REFERENCES lifecycle_events(event_id)
-            ON DELETE CASCADE
-        )
-      ''');
-      database.execute(
-        'CREATE INDEX IF NOT EXISTS idx_lifecycle_time '
-        'ON lifecycle_events(timestamp_micros, event_id_sort_key)',
-      );
-      database.execute(
-        'CREATE INDEX IF NOT EXISTS idx_lifecycle_correlation_time '
-        'ON lifecycle_events(correlation_id, timestamp_micros, event_id_sort_key)',
-      );
-      database.execute(
-        'CREATE INDEX IF NOT EXISTS idx_lifecycle_operation_time '
-        'ON lifecycle_events(operation, timestamp_micros, event_id_sort_key)',
-      );
-      database.execute(
-        'CREATE INDEX IF NOT EXISTS idx_lifecycle_status_time '
-        'ON lifecycle_events(status, timestamp_micros, event_id_sort_key)',
-      );
-      database.execute(
-        'CREATE INDEX IF NOT EXISTS idx_lifecycle_owner_time '
-        'ON lifecycle_event_owners(owner_id, event_id)',
-      );
-      database.execute('PRAGMA user_version = $schemaVersion');
-      database.execute('COMMIT');
-    } on Object {
-      database.execute('ROLLBACK');
-      rethrow;
-    }
+  static void _createInitialSchema(Database database) {
+    database.execute('''
+      CREATE TABLE IF NOT EXISTS lifecycle_events (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        event_id_sort_key TEXT NOT NULL,
+        correlation_id TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        status TEXT NOT NULL,
+        timestamp_micros INTEGER NOT NULL,
+        payload TEXT NOT NULL
+      )
+    ''');
+    database.execute('''
+      CREATE TABLE IF NOT EXISTS lifecycle_event_owners (
+        event_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        PRIMARY KEY (event_id, owner_id),
+        FOREIGN KEY (event_id) REFERENCES lifecycle_events(event_id)
+          ON DELETE CASCADE
+      )
+    ''');
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_time '
+      'ON lifecycle_events(timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_correlation_time '
+      'ON lifecycle_events(correlation_id, timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_operation_time '
+      'ON lifecycle_events(operation, timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_status_time '
+      'ON lifecycle_events(status, timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_owner_time '
+      'ON lifecycle_event_owners(owner_id, event_id)',
+    );
+  }
+
+  /// Adds an index for the common status + operation + chronological query.
+  static void _addCombinedStatusOperationIndex(Database database) {
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_status_operation_time '
+      'ON lifecycle_events(status, operation, timestamp_micros, event_id_sort_key)',
+    );
   }
 
   @override
@@ -298,4 +316,15 @@ final class SqliteWalCheckpointResult {
 
   bool get fullyCheckpointed =>
       busy == 0 && logFrames >= 0 && checkpointedFrames == logFrames;
+}
+
+/// One ordered, transactional SQLite schema migration.
+final class _SqliteSchemaMigration {
+  final int version;
+  final void Function(Database database) apply;
+
+  const _SqliteSchemaMigration({
+    required this.version,
+    required this.apply,
+  });
 }
