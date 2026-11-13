@@ -2,11 +2,22 @@ import 'dart:async';
 
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import '../capabilities/plugin_capability_negotiator.dart';
+import '../capabilities/capability_provider_registry.dart';
 import '../extensions/extension_runtime.dart';
 import 'runtime_plugin_context.dart';
 
 typedef PluginCapabilityRequirementsResolver = Iterable<PluginCapabilityRequirement>
     Function(AlhambraPlugin plugin);
+
+final class PluginCapabilityNegotiationRecord {
+  final CapabilityNegotiationResult result;
+  final int? providerRevision;
+
+  const PluginCapabilityNegotiationRecord({
+    required this.result,
+    required this.providerRevision,
+  });
+}
 
 class PluginCapabilityNegotiationException implements Exception {
   final String pluginId;
@@ -28,12 +39,12 @@ class PluginCapabilityNegotiationException implements Exception {
 class PluginManager {
   final Map<String, AlhambraPlugin> _activePlugins = {};
   final Map<String, RuntimePluginContext> _contexts = {};
-  final Map<String, CapabilityNegotiationResult> _capabilityNegotiations = {};
+  final Map<String, CapabilityNegotiationRecord> _capabilityNegotiationRecords = {};
   final Map<String, Future<void>> _operationTails = {};
   Future<void> _lifecycleBatchTail = Future<void>.value();
 
   final ExtensionRuntime runtime;
-  final PluginCapabilityNegotiator? capabilityNegotiator;
+  final PluginCapabilityNegotiator? capabilityNegotiator;\n  final CapabilityProviderRegistry? capabilityProviderRegistry;
   final List<PluginCapabilityDeclaration> capabilityDeclarations;
   final PluginCapabilityRequirementsResolver? capabilityRequirementsResolver;
 
