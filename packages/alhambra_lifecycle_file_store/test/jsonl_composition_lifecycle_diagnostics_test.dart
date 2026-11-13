@@ -38,6 +38,11 @@ void main() {
     expect(events.map((event) => event.status), everyElement(
       CompositionLifecycleStatus.succeeded,
     ));
+    final timeline = await host.lifecycleDiagnostics.timelineForCorrelation(
+      'install-search',
+      limit: 20,
+    );
+    expect(timeline, hasLength(4));
 
     final owner = await host.lifecycleDiagnostics.ownerSummary('search-plugin');
     expect(owner, isNotNull);
