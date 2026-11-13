@@ -305,7 +305,7 @@ class PluginRevocationOutboxDispatcher {
   }
 
   static Duration _defaultBackoff(int attempt) {
-    final exponent = attempt.clamp(0, 8);
+    final exponent = attempt.clamp(0, 8) as int;
     return Duration(seconds: 1 << exponent);
   }
 
