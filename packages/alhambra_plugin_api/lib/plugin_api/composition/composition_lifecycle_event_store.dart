@@ -1,6 +1,11 @@
 import 'composition_contracts.dart';
 
-/// Inclusive time bounds and exclusive keyset cursor bounds. Results are oldest-first.
+/// Immutable lifecycle query bounds and keyset cursors.
+///
+/// [from] and [to] are inclusive. [before] is a legacy exclusive timestamp
+/// bound. [after] and [beforeCursor] are exclusive composite bounds over
+/// `(timestamp, eventId)`, so pagination remains deterministic when several
+/// events share a timestamp. Results are always ordered oldest-first.
 final class CompositionLifecycleEventCursor {
   final DateTime timestamp;
   final String eventId;
@@ -55,10 +60,20 @@ final class CompositionLifecycleEventQuery {
 /// document their flush and shutdown guarantees. A store should preserve the
 /// original event fields and must not rewrite timestamps or correlation IDs.
 ///
-/// Query results must be ordered oldest-first and respect [query]'s filters
-/// and limit. The runtime's bounded in-memory history remains independent:
-/// configuring a store does not imply that the runtime blocks lifecycle
-/// callbacks on storage I/O.
+/// Query results must be ordered oldest-first and respect every [query] bound
+/// and its limit. Implementations should use `eventId` as an idempotency key:
+/// an identical retry should not create a second record, while reuse of an ID
+/// for a different payload should be rejected. Adapters must document their
+/// durability and indexing strategy.
+///
+/// The API deliberately does not prescribe an index format, query planner,
+/// transaction mechanism, or persistence engine. JSONL, SQLite, and remote
+/// database adapters can implement the same timestamp/event-ID cursor
+/// semantics without exposing backend-specific types.
+///
+/// The runtime's bounded in-memory history remains independent: configuring
+/// a store does not imply that the runtime blocks lifecycle callbacks on
+/// storage I/O.
 abstract interface class CompositionLifecycleEventStore {
   Future<void> append(CompositionLifecycleEvent event);
 
