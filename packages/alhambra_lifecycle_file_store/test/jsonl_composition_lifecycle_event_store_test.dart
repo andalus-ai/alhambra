@@ -165,7 +165,7 @@ void main() {
 
   test('persists sparse checkpoints and resumes from the indexed prefix', () async {
     final events = List.generate(
-      JsonlSparseLifecycleIndex.blockSize + 7,
+      128 + 7,
       (index) => _event(
         'checkpoint-$index',
         DateTime.utc(2026, 1, 1).add(Duration(minutes: index)),
@@ -196,7 +196,7 @@ void main() {
   });
 
   test('rebuilds a damaged sparse index without losing log records', () async {
-    for (var index = 0; index < JsonlSparseLifecycleIndex.blockSize + 2; index++) {
+    for (var index = 0; index < 128 + 2; index++) {
       await store.append(_event(
         'damaged-index-$index',
         DateTime.utc(2026, 2, 1).add(Duration(seconds: index)),
@@ -210,14 +210,14 @@ void main() {
     final result = await reopened.query(
       CompositionLifecycleEventQuery(limit: 200),
     );
-    expect(result, hasLength(JsonlSparseLifecycleIndex.blockSize + 2));
+    expect(result, hasLength(128 + 2));
     expect(result.first.eventId, 'damaged-event-0');
     expect(result.last.eventId, 'damaged-event-129');
   });
 
   test('uses block time ranges without assuming append timestamp order', () async {
     final base = DateTime.utc(2026, 3, 1);
-    for (var index = 0; index < JsonlSparseLifecycleIndex.blockSize; index++) {
+    for (var index = 0; index < 128; index++) {
       final minute = index.isEven ? index : 1000 - index;
       await store.append(_event(
         'unordered-$index',
