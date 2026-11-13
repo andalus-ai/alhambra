@@ -102,7 +102,7 @@ Dart/Flutter hosts, not web builds.
   lifecycle operations.
 - Durable owner aggregation scans the full retained JSONL history and merges
   the bounded live window, deduplicating events shared by both sources.
-- Compaction is serialized with appends submitted to the same store instance and invalidates the process-local indexes so the next query rebuilds them from the compacted log.
+- Compaction is serialized with appends submitted to the same store instance and invalidates the sparse sidecar so the next query rebuilds it from the compacted log.
 - A complete replacement is written and flushed before the old file is moved
   aside; failed installation triggers a best-effort restore.
 - The adapter assumes one process writes the file. It does not provide
