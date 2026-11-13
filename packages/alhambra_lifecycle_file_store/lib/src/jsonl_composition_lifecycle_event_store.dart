@@ -22,6 +22,15 @@ final class JsonlCompositionLifecycleEventStore
 
   Future<void> _writeTail = Future<void>.value();
 
+  // Rebuilt once from the authoritative JSONL log and maintained on append.
+  // These indexes avoid replaying the file for every query in this process.
+  bool _indexReady = false;
+  final Map<String, CompositionLifecycleEvent> _eventsById = {};
+  final Map<String, Set<String>> _byCorrelation = {};
+  final Map<String, Set<String>> _byOwner = {};
+  final Map<String, Set<String>> _byOperation = {};
+  final Map<String, Set<String>> _byStatus = {};
+
   JsonlCompositionLifecycleEventStore({
     required this.file,
     CompositionLifecycleEventJsonCodec? codec,
@@ -41,13 +50,24 @@ final class JsonlCompositionLifecycleEventStore
 
   Future<void> _appendOne(CompositionLifecycleEvent event) async {
     await file.parent.create(recursive: true);
+    await _discardIncompleteTail();
+    await _ensureIndex();
+
+    final existing = _eventsById[event.eventId];
+    if (existing != null) {
+      if (_sameEvent(existing, event)) return;
+      throw LifecycleEventIdentityConflictException(event.eventId);
+    }
+
+    final encoded = codec.encode(event);
     final handle = await file.open(mode: FileMode.append);
     try {
-      await handle.writeString('${codec.encode(event)}\\n', encoding: utf8);
+      await handle.writeString('$encoded\\n', encoding: utf8);
       await handle.flush();
     } finally {
       await handle.close();
     }
+    _addToIndex(event);
   }
 
   /// Removes an unterminated tail left by an interrupted prior append before
