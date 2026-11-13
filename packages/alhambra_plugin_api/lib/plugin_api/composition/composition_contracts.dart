@@ -198,7 +198,9 @@ enum CompositionOwnerState {
   deactivating,
   inactive,
   failed,
-}\n\nenum DeactivationStrategy {
+}
+
+enum DeactivationStrategy {
   reject,
   cascade,
   degrade,
