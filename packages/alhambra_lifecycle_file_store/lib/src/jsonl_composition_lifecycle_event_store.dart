@@ -62,7 +62,7 @@ final class JsonlCompositionLifecycleEventStore
     final encoded = codec.encode(event);
     final handle = await file.open(mode: FileMode.append);
     try {
-      await handle.writeString('$encoded\\n', encoding: utf8);
+      await handle.writeString('$encoded\n', encoding: utf8);
       await handle.flush();
     } finally {
       await handle.close();
