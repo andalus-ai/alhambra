@@ -7,8 +7,6 @@ environment:
   sdk: ^3.13.2
 
 dependencies:
+  test: ^1.25.0
   alhambra_plugin_api:
     path: ../alhambra_plugin_api
-
-dev_dependencies:
-  test: ^1.25.0
