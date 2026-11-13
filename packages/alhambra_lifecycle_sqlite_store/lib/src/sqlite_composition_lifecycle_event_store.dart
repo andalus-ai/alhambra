@@ -8,7 +8,7 @@ import 'package:sqlite3/sqlite3.dart';
 ///
 /// The adapter accepts a host-owned [Database] or can open and own one using
 /// [SqliteCompositionLifecycleEventStore.open]. SQLite calls are synchronous.
-/// UI hosts should use [SqliteLifecycleEventStoreWorker] to move database work
+/// UI hosts should use the isolate worker adapter to move database work
 /// to a dedicated isolate.
 final class SqliteCompositionLifecycleEventStore
     implements CompositionLifecycleEventStore {
