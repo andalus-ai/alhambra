@@ -43,10 +43,18 @@ host retains ownership and `store.close()` does not dispose the database.
 
 ## Operational considerations
 
-The `sqlite3` Dart API is synchronous. This adapter wraps operations in the
-asynchronous store interface, but it does not move database work off the
-calling isolate. Applications with latency-sensitive UI threads should own
-the database on a dedicated isolate and expose a message-based adapter.
+The `sqlite3` Dart API is synchronous. The direct adapter preserves a
+simple host-owned connection model and does not move work off the calling
+isolate. Flutter/UI hosts should use `SqliteLifecycleEventStoreWorker.open`:
+it starts a long-lived isolate, opens the database there, and transfers only
+JSON event payloads and primitive query values across the message boundary.
+SQLite connections and statements never cross isolates. The worker serializes
+commands and exposes explicit `close()` and `checkpoint()` operations.
+
+Both adapters expose explicit WAL checkpointing. PASSIVE is recommended for
+routine maintenance; FULL, RESTART, and TRUNCATE are available for controlled
+maintenance. Results include SQLite's busy, log-frame, and checkpointed-frame
+counters so callers can detect incomplete checkpoints.
 
 The adapter does not own databases passed to its constructor. Only instances
 created with `SqliteCompositionLifecycleEventStore.open()` close their
