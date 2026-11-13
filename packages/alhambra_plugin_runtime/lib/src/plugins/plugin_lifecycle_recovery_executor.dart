@@ -80,6 +80,49 @@ abstract interface class PluginLifecycleRecoveryExecutor {
   Future<void> execute(PluginLifecycleRecoveryExecutionContext context);
 }
 
+
+/// Immutable request to recover a selected set of plugins as one dependency
+/// ordered batch. The caller explicitly chooses the recovery targets.
+class PluginLifecycleRecoveryBatchRequest {
+  final List<String> pluginIds;
+  final PluginLifecycleRecoveryExecutionAction action;
+  final Map<String, AlhambraPlugin> compiledPlugins;
+  final String Function(String pluginId) operationIdFactory;
+
+  PluginLifecycleRecoveryBatchRequest({
+    required Iterable<String> pluginIds,
+    required this.action,
+    this.compiledPlugins = const {},
+    required this.operationIdFactory,
+  }) : pluginIds = List<String>.unmodifiable(pluginIds);
+}
+
+/// Result of a dependency-ordered recovery batch.
+///
+/// A batch stops at its first execution failure. Completed plugin checkpoints
+/// remain durable; the remaining IDs are returned for a later host decision.
+class PluginLifecycleRecoveryBatchReport {
+  final bool succeeded;
+  final List<String> orderedPluginIds;
+  final List<String> completedPluginIds;
+  final List<String> skippedPluginIds;
+  final String? failedPluginId;
+  final Object? error;
+  final StackTrace? stackTrace;
+
+  PluginLifecycleRecoveryBatchReport({
+    required this.succeeded,
+    required Iterable<String> orderedPluginIds,
+    Iterable<String> completedPluginIds = const [],
+    Iterable<String> skippedPluginIds = const [],
+    this.failedPluginId,
+    this.error,
+    this.stackTrace,
+  })  : orderedPluginIds = List<String>.unmodifiable(orderedPluginIds),
+        completedPluginIds = List<String>.unmodifiable(completedPluginIds),
+        skippedPluginIds = List<String>.unmodifiable(skippedPluginIds);
+}
+
 /// Runs one explicitly requested recovery under the manager-wide lifecycle
 /// gate. Hosts recover graphs dependency-first for startup and reverse
 /// dependency order for shutdown/compensation.
@@ -102,6 +145,212 @@ class PluginLifecycleRecoveryRunner {
   }) {
     return manager.runExclusiveLifecycleBatch(
       () => _execute(request, compiledPlugin: compiledPlugin),
+    );
+  }
+
+
+  /// Executes a selected recovery set in dependency-safe order.
+  ///
+  /// The complete checkpoint/dependency preflight and all plugin operations
+  /// run under one manager-wide lifecycle gate. Startup is dependency-first;
+  /// shutdown compensation is dependent-first. Execution stops at the first
+  /// failure so a failed dependent is never followed by stopping its dependency.
+  Future<PluginLifecycleRecoveryBatchReport> executeBatch(
+    PluginLifecycleRecoveryBatchRequest request,
+  ) {
+    return manager.runExclusiveLifecycleBatch(() => _executeBatch(request));
+  }
+
+  Future<PluginLifecycleRecoveryBatchReport> _executeBatch(
+    PluginLifecycleRecoveryBatchRequest request,
+  ) async {
+    late final List<String> orderedIds;
+    late final Map<String, PluginLifecycleCheckpoint> checkpoints;
+    try {
+      final selected = <String>[];
+      final selectedSet = <String>{};
+      for (final rawId in request.pluginIds) {
+        final id = rawId.trim();
+        if (id.isEmpty) throw ArgumentError.value(rawId, 'pluginIds');
+        if (!selectedSet.add(id)) {
+          throw ArgumentError('Recovery batch contains duplicate plugin "$id".');
+        }
+        selected.add(id);
+      }
+      if (selected.isEmpty) {
+        throw ArgumentError('Recovery batch must contain at least one plugin.');
+      }
+
+      final allCheckpoints = await store.readAll();
+      checkpoints = <String, PluginLifecycleCheckpoint>{};
+      for (final checkpoint in allCheckpoints) {
+        final id = checkpoint.pluginId.trim();
+        if (checkpoints.containsKey(id)) {
+          throw StateError('Checkpoint store returned duplicate records for "$id".');
+        }
+        checkpoints[id] = checkpoint;
+      }
+
+      final activeById = <String, AlhambraPlugin>{};
+      for (final active in manager.activePlugins) {
+        final id = active.metadata.id.trim();
+        if (id.isEmpty || activeById.containsKey(id)) {
+          throw StateError('PluginManager contains an invalid or duplicate active plugin ID "$id".');
+        }
+        activeById[id] = active;
+      }
+
+      for (final id in selected) {
+        final checkpoint = checkpoints[id];
+        if (checkpoint == null) {
+          throw StateError('No lifecycle checkpoint exists for "$id".');
+        }
+        if (request.action == PluginLifecycleRecoveryExecutionAction.resumeStartup) {
+          if (checkpoint.operation != PluginLifecycleOperation.startup ||
+              (checkpoint.state != PluginLifecycleCheckpointState.planned &&
+               checkpoint.state != PluginLifecycleCheckpointState.starting &&
+               checkpoint.state != PluginLifecycleCheckpointState.interrupted)) {
+            throw StateError('Plugin "$id" does not have an incomplete startup checkpoint.');
+          }
+          if (activeById.containsKey(id)) {
+            throw StateError('Plugin "$id" is already active; reconcile its checkpoint before recovery.');
+          }
+          final compiled = request.compiledPlugins[id];
+          if (compiled == null || compiled.metadata.id.trim() != id) {
+            throw ArgumentError('A matching compiled plugin instance is required for "$id".');
+          }
+          for (final dependencyId in checkpoint.dependencyIds) {
+            final dependency = dependencyId.trim();
+            if (!selectedSet.contains(dependency) && !activeById.containsKey(dependency)) {
+              throw StateError('Startup recovery for "$id" requires inactive dependency "$dependency" outside this batch.');
+            }
+          }
+        } else {
+          final interruptedShutdown =
+              checkpoint.operation == PluginLifecycleOperation.shutdown &&
+              (checkpoint.state == PluginLifecycleCheckpointState.stopping ||
+               checkpoint.state == PluginLifecycleCheckpointState.interrupted);
+          final pendingRollback =
+              checkpoint.operation == PluginLifecycleOperation.startup &&
+              (checkpoint.state == PluginLifecycleCheckpointState.rollbackPending ||
+               checkpoint.state == PluginLifecycleCheckpointState.rollbackFailed);
+          if (!interruptedShutdown && !pendingRollback) {
+            throw StateError('Plugin "$id" does not have a shutdown/rollback checkpoint eligible for compensation.');
+          }
+          if (!activeById.containsKey(id)) {
+            throw StateError('Plugin "$id" is inactive; reconcile its checkpoint instead of compensating it.');
+          }
+          for (final other in activeById.keys) {
+            if (other == id || selectedSet.contains(other)) continue;
+            final dependentCheckpoint = checkpoints[other];
+            if (dependentCheckpoint == null) {
+              throw StateError('Cannot establish dependency order: active plugin "$other" has no checkpoint.');
+            }
+            if (dependentCheckpoint.dependencyIds.any((dependency) => dependency.trim() == id)) {
+              throw StateError('Active dependent "$other" must be included in this shutdown compensation batch.');
+            }
+          }
+        }
+      }
+
+      // Stable Kahn topological sort. Dependency edges point from prerequisite
+      // to dependent; reverse the result for shutdown compensation.
+      final indegree = <String, int>{for (final id in selected) id: 0};
+      final dependents = <String, List<String>>{
+        for (final id in selected) id: <String>[],
+      };
+      for (final id in selected) {
+        for (final dependencyId in checkpoints[id]!.dependencyIds) {
+          final dependency = dependencyId.trim();
+          if (!selectedSet.contains(dependency)) continue;
+          indegree[id] = indegree[id]! + 1;
+          dependents[dependency]!.add(id);
+        }
+      }
+      final ready = selected.where((id) => indegree[id] == 0).toList();
+      final dependencyFirst = <String>[];
+      while (ready.isNotEmpty) {
+        final id = ready.removeAt(0);
+        dependencyFirst.add(id);
+        for (final dependent in dependents[id]!) {
+          indegree[dependent] = indegree[dependent]! - 1;
+          if (indegree[dependent] == 0) ready.add(dependent);
+        }
+      }
+      if (dependencyFirst.length != selected.length) {
+        throw StateError('Recovery batch dependency graph contains a cycle.');
+      }
+      orderedIds = request.action == PluginLifecycleRecoveryExecutionAction.resumeStartup
+          ? dependencyFirst
+          : dependencyFirst.reversed.toList(growable: false);
+    } catch (error, stackTrace) {
+      return PluginLifecycleRecoveryBatchReport(
+        succeeded: false,
+        orderedPluginIds: const [],
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    final operationIds = <String, String>{};
+    final uniqueOperationIds = <String>{};
+    try {
+      for (final id in orderedIds) {
+        final checkpoint = checkpoints[id]!;
+        final operationId = request.operationIdFactory(id).trim();
+        if (operationId.isEmpty || operationId == checkpoint.operationId) {
+          throw ArgumentError('Recovery operation ID for "$id" must be non-empty and differ from the checkpoint operation ID.');
+        }
+        if (!uniqueOperationIds.add(operationId)) {
+          throw ArgumentError('Recovery operation IDs must be unique within a batch.');
+        }
+        operationIds[id] = operationId;
+      }
+    } catch (error, stackTrace) {
+      return PluginLifecycleRecoveryBatchReport(
+        succeeded: false,
+        orderedPluginIds: orderedIds,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    final completed = <String>[];
+    for (var index = 0; index < orderedIds.length; index++) {
+      final id = orderedIds[index];
+      final checkpoint = checkpoints[id]!;
+      try {
+        final operationId = operationIds[id]!;
+        await _execute(
+          PluginLifecycleRecoveryExecutionRequest(
+            pluginId: id,
+            expectedOperationId: checkpoint.operationId,
+            expectedSequence: checkpoint.sequence,
+            newOperationId: operationId,
+            action: request.action,
+          ),
+          compiledPlugin: request.action == PluginLifecycleRecoveryExecutionAction.resumeStartup
+              ? request.compiledPlugins[id]
+              : null,
+        );
+        completed.add(id);
+      } catch (error, stackTrace) {
+        return PluginLifecycleRecoveryBatchReport(
+          succeeded: false,
+          orderedPluginIds: orderedIds,
+          completedPluginIds: completed,
+          skippedPluginIds: orderedIds.skip(index + 1),
+          failedPluginId: id,
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+
+    return PluginLifecycleRecoveryBatchReport(
+      succeeded: true,
+      orderedPluginIds: orderedIds,
+      completedPluginIds: completed,
     );
   }
 
