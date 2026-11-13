@@ -80,11 +80,11 @@ Dart/Flutter hosts, not web builds.
 
 - Appends are serialized within one store instance and flushed before return.
 - Appending an event whose `eventId` and payload already exist is an idempotent no-op; reusing an ID with a different payload throws `LifecycleEventIdentityConflictException`.
-- The JSONL log is authoritative. Identical duplicate IDs already present in older logs are collapsed in the query view; conflicting payloads for one ID are reported as corruption.
+- The JSONL log is authoritative. Query pages collapse repeated IDs within the selected page. When an append retries an existing ID, the adapter checks all Bloom-positive blocks and rejects conflicting payloads as corruption.
 - A companion `.sparse-index.json` sidecar stores one checkpoint per 128 complete JSONL records. Each checkpoint includes byte offsets, a composite timestamp/event-ID range, and a compact Bloom filter for event-ID lookup.
 - The sidecar is a rebuildable cache; JSONL remains authoritative. On reopen, the adapter validates the final indexed record and scans only the unindexed tail (at most 127 complete records after a clean checkpoint). Missing, malformed, or stale checkpoints trigger a rebuild.
 - Time-window and cursor queries skip blocks whose recorded ranges cannot match. Matching records are streamed block-by-block, and only the requested page is retained in memory. Queries filtered only by owner/correlation/operation/status may still need to inspect every block because this sparse index intentionally does not maintain unbounded per-value posting lists.
-- Event-ID Bloom filters have no false negatives; false positives only cause an extra block read. Reusing an ID with an identical payload is a no-op; conflicting payloads are rejected.
+- Event-ID Bloom filters have no false negatives; false positives only cause an extra block read. Reusing an ID with an identical payload is a no-op; conflicting payloads are rejected. The sparse checkpoint uses a checksum and validates its final indexed record before reuse.
 - Compaction invalidates the sidecar. The next operation rebuilds checkpoints from the compacted log. The sidecar format is private to this adapter and does not change the portable JSONL event format.
 - Query results are oldest-first, ordered by `(timestamp, eventId)`.
 - `CompositionLifecycleEventQuery.after` and `beforeCursor` provide exclusive keyset pagination; backward pages return the nearest preceding records in oldest-first order.
