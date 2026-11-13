@@ -54,10 +54,10 @@ Future<void> main(List<String> arguments) async {
     final checkpoint = store.checkpoint();
     stdout.writeln('SQLite lifecycle store benchmark');
     stdout.writeln('events: $count');
-    stdout.writeln('append_ms: ${appendWatch.elapsedMilliseconds}');
+    stdout.writeln('append_ms: ${(appendWatch.elapsedMicroseconds / 1000).toStringAsFixed(2)}');
     stdout.writeln('append_events_per_second: '
-        '${(count / appendWatch.elapsedMilliseconds * 1000).toStringAsFixed(1)}');
-    stdout.writeln('filtered_query_ms: ${queryWatch.elapsedMilliseconds}');
+        '${(count / appendWatch.elapsedMicroseconds * 1000000).toStringAsFixed(1)}');
+    stdout.writeln('filtered_query_ms: ${(queryWatch.elapsedMicroseconds / 1000).toStringAsFixed(2)}');
     stdout.writeln('filtered_query_results: ${page.length}');
     stdout.writeln('wal_busy: ${checkpoint.busy}');
     stdout.writeln('wal_log_frames: ${checkpoint.logFrames}');
