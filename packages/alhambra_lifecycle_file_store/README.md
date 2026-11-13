@@ -81,7 +81,7 @@ Dart/Flutter hosts, not web builds.
 - Appends are serialized within one store instance and flushed before return.
 - Appending an event whose `eventId` and payload already exist is an idempotent no-op; reusing an ID with a different payload throws `LifecycleEventIdentityConflictException`.
 - The JSONL log is authoritative. Identical duplicate IDs already present in older logs are collapsed in the query view; conflicting payloads for one ID are reported as corruption.
-- The first query or append in a store instance builds in-memory indexes from the JSONL log. Subsequent queries intersect correlation, owner, operation, and status indexes before applying time/cursor bounds.
+- The first query or append in a store instance builds in-memory indexes from the JSONL log. Appends inspect only the final byte on the normal path when checking for an interrupted trailing record. Subsequent queries intersect correlation, owner, operation, and status indexes before applying time/cursor bounds.
 - Indexes are rebuilt after compaction and when a store instance is reopened; the first operation after reopening still scans the retained log. The side index is process-local and does not alter the portable JSONL format.
 - Query results are oldest-first, ordered by `(timestamp, eventId)`.
 - `CompositionLifecycleEventQuery.after` and `beforeCursor` provide exclusive keyset pagination; backward pages return the nearest preceding records in oldest-first order.
