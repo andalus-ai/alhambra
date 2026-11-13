@@ -110,6 +110,58 @@ void main() {
     expect(secondRead.single.eventId, firstRead.single.eventId);
   });
 
+  test('treats identical event retries as idempotent', () async {
+    final event = _event(
+      'retry-me',
+      DateTime.utc(2026, 5, 1),
+      eventId: 'stable-event-id',
+    );
+
+    await store.append(event);
+    final lengthAfterFirstAppend = await file.length();
+    await store.append(event);
+
+    expect(await file.length(), lengthAfterFirstAppend);
+    expect(
+      (await store.query(CompositionLifecycleEventQuery())).map((e) => e.eventId),
+      ['stable-event-id'],
+    );
+  });
+
+  test('rejects reuse of an event id for a different payload', () async {
+    await store.append(_event(
+      'first-payload',
+      DateTime.utc(2026, 5, 1),
+      eventId: 'reused-id',
+    ));
+
+    expect(
+      () => store.append(_event(
+        'different-payload',
+        DateTime.utc(2026, 5, 2),
+        eventId: 'reused-id',
+      )),
+      throwsA(isA<LifecycleEventIdentityConflictException>()),
+    );
+    expect(
+      (await store.query(CompositionLifecycleEventQuery()))
+          .single.correlationId,
+      'first-payload',
+    );
+  });
+
+  test('rebuilds the in-memory query index after reopening', () async {
+    await store.append(_event('owner-one', DateTime.utc(2026, 5, 1)));
+    await store.append(_event('owner-two', DateTime.utc(2026, 5, 2)));
+
+    final reopened = JsonlCompositionLifecycleEventStore(file: file);
+    final result = await reopened.query(
+      CompositionLifecycleEventQuery(ownerId: 'owner-a', limit: 10),
+    );
+
+    expect(result.map((event) => event.correlationId), ['owner-one', 'owner-two']);
+  });
+
   test('returns immutable query results and applies limit', () async {
     await store.append(_event('one', DateTime.utc(2026, 1, 1)));
     await store.append(_event('two', DateTime.utc(2026, 1, 2)));
