@@ -116,11 +116,14 @@ void main() {
         store: store,
         manager: PluginManager(),
       );
-      await expectLater(
-        controller.apply(_request('plugin', PluginLifecycleRecoveryAction.acknowledgeStopped,
-            operationId: 'recovery-one')),
-        throwsStateError,
+      final stale = PluginLifecycleRecoveryActionRequest(
+        pluginId: 'plugin',
+        expectedOperationId: 'old-plugin',
+        expectedSequence: 3,
+        action: PluginLifecycleRecoveryAction.acknowledgeStopped,
+        newOperationId: 'recovery-stale',
       );
+      await expectLater(controller.apply(stale), throwsStateError);
       final changed = _request('plugin', PluginLifecycleRecoveryAction.acknowledgeStopped);
       await controller.apply(changed);
       await expectLater(
