@@ -179,7 +179,7 @@ void main() {
     final sidecar = File('${file.path}.sparse-index.json');
     expect(await sidecar.exists(), isTrue);
     final checkpoint = jsonDecode(await sidecar.readAsString()) as Map;
-    expect(checkpoint['schemaVersion'], 1);
+    expect(checkpoint['schemaVersion'], 2);
     expect((checkpoint['blocks'] as List), hasLength(1));
 
     final reopened = JsonlCompositionLifecycleEventStore(file: file);
