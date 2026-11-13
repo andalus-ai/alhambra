@@ -133,7 +133,10 @@ final class PluginLifecycleRecoveryJobPlanner {
 
     final dispositions = findings.map((f) => f.disposition).toSet();
     final PluginRecoveryJobDisposition overall;
-    if (job.status == PluginRecoveryJobStatus.cancelled) {
+    if (job.status == PluginRecoveryJobStatus.completed &&
+        !findings.every((f) => f.disposition == PluginRecoveryJobStepDisposition.completedAndVerified)) {
+      overall = PluginRecoveryJobDisposition.inconsistent;
+    } else if (job.status == PluginRecoveryJobStatus.cancelled) {
       overall = PluginRecoveryJobDisposition.cancelled;
     } else if (job.status == PluginRecoveryJobStatus.interrupted) {
       overall = PluginRecoveryJobDisposition.interruptedNeedsInspection;
