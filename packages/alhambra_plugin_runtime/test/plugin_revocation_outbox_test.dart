@@ -57,6 +57,36 @@ void main() {
     });
   });
 
+  test('coordinator commits outcome and outbox through one shared store', () async {
+    final store = InMemoryTransactionalPluginRevocationStore();
+    final coordinator = PluginRevocationCoordinator(
+      manager: PluginManager(),
+      executionStore: store,
+      auditSink: store,
+      approve: (_) => true,
+    );
+
+    final report = await coordinator.execute(
+      operationId: 'coordinated-op',
+      decisions: [
+        CapabilityImpactDecision(
+          pluginId: 'plugin',
+          providerOwnerId: 'provider',
+          providerState: CapabilityProviderHealthState.unavailable,
+          action: CapabilityImpactAction.notify,
+          reason: 'provider unavailable',
+        ),
+      ],
+    );
+
+    expect(report.records.single.status, PluginRevocationExecutionStatus.noOp);
+    final persisted = await store.read(report.records.single.idempotencyKey);
+    expect(persisted!.status, PluginRevocationExecutionStatus.noOp);
+    final messages = await store.snapshot();
+    expect(messages, hasLength(1));
+    expect(messages.single.event.outcome, PluginRevocationExecutionStatus.noOp.name);
+  });
+
   group('PluginRevocationOutboxDispatcher', () {
     test('delivers leased events and marks them delivered', () async {
       final store = InMemoryTransactionalPluginRevocationStore();
