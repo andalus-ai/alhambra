@@ -164,20 +164,24 @@ final class PluginLifecycleRecoveryJob {
     required DateTime at,
     String? initiatedBy,
     String? correlationId,
-  }) => PluginLifecycleRecoveryJob(
-    jobId: jobId,
-    idempotencyKey: idempotencyKey,
-    operationId: operationId,
-    action: action,
-    orderedPluginIds: orderedPluginIds,
-    steps: _pendingSteps(orderedPluginIds),
-    status: PluginRecoveryJobStatus.planned,
-    revision: 1,
-    createdAt: at.toUtc(),
-    updatedAt: at.toUtc(),
-    initiatedBy: initiatedBy,
-    correlationId: correlationId,
-  );
+  }) {
+    final ids = orderedPluginIds.toList(growable: false);
+    final timestamp = at.toUtc();
+    return PluginLifecycleRecoveryJob(
+      jobId: jobId,
+      idempotencyKey: idempotencyKey,
+      operationId: operationId,
+      action: action,
+      orderedPluginIds: ids,
+      steps: _pendingSteps(ids),
+      status: PluginRecoveryJobStatus.planned,
+      revision: 1,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      initiatedBy: initiatedBy,
+      correlationId: correlationId,
+    );
+  }
 
   PluginLifecycleRecoveryJob next({
     required PluginRecoveryJobStatus status,
@@ -273,4 +277,13 @@ final class InMemoryPluginLifecycleRecoveryJobStore
     _jobs[jobId] = replacement;
     return true;
   }
+}
+
+
+bool _samePluginIds(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var i = 0; i < left.length; i++) {
+    if (left[i] != right[i]) return false;
+  }
+  return true;
 }
