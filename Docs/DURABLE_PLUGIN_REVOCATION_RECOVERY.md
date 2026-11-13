@@ -15,9 +15,12 @@ Each entry is schema-versioned and carries:
 - monotonically increasing record revision.
 
 The store contract requires atomic `createIfAbsent` and revision-based
-`compareAndSet`. A database adapter should implement these with a unique
-constraint/conditional insert and a transaction or conditional update that
-checks the expected revision. The in-memory adapter is for tests only.
+`compareAndSet`. `JournalBackedPluginRevocationExecutionStore` adapts this
+journal to the existing `PluginRevocationCoordinator` execution-store contract
+and accepts a host correlation-ID resolver. A database adapter should implement
+these operations with a unique constraint/conditional insert and a transaction
+or conditional update that checks the expected revision. The in-memory adapter
+is for tests only.
 
 ## Recovery classifications
 
