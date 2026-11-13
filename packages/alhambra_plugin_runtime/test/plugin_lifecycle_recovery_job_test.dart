@@ -145,7 +145,7 @@ void main() {
             executionOperationId: 'exec-core',
             startedAt: now,
           ),
-          const PluginRecoveryJobStep(
+          PluginRecoveryJobStep(
             pluginId: 'app',
             ordinal: 1,
             expectedCheckpointOperationId: 'old-op',
