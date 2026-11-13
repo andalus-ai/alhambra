@@ -205,7 +205,12 @@ void main() {
     }
 
     final sidecar = File('${file.path}.sparse-index.json');
-    await sidecar.writeAsString('{not-json');
+    final checkpoint = jsonDecode(await sidecar.readAsString()) as Map<String, dynamic>;
+    final blocks = checkpoint['blocks'] as List;
+    final firstBlock = Map<String, dynamic>.from(blocks.first as Map);
+    firstBlock['bloom'] = base64Encode(List<int>.filled(256, 0));
+    blocks[0] = firstBlock;
+    await sidecar.writeAsString(jsonEncode(checkpoint));
     final reopened = JsonlCompositionLifecycleEventStore(file: file);
     final result = await reopened.query(
       CompositionLifecycleEventQuery(limit: 200),
