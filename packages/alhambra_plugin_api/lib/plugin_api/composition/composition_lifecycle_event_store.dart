@@ -5,7 +5,8 @@ import 'composition_contracts.dart';
 /// [from] and [to] are inclusive. [before] is a legacy exclusive timestamp
 /// bound. [after] and [beforeCursor] are exclusive composite bounds over
 /// `(timestamp, eventId)`, so pagination remains deterministic when several
-/// events share a timestamp. Results are always ordered oldest-first.
+/// events share a timestamp. Event IDs use Dart's `String.compareTo` ordering.
+/// Results are always ordered oldest-first.
 final class CompositionLifecycleEventCursor {
   final DateTime timestamp;
   final String eventId;
