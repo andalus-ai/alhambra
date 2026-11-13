@@ -64,6 +64,20 @@ final class JsonlSparseLifecycleIndex {
     }
   }
 
+  Future<CompositionLifecycleEvent?> findEventById(String eventId) async {
+    await ensureReady();
+    for (final block in _blocks) {
+      if (!block.mightContain(eventId)) continue;
+      for (final event in await _readBlock(block)) {
+        if (event.eventId == eventId) return event;
+      }
+    }
+    for (final event in _pending) {
+      if (event.eventId == eventId) return event;
+    }
+    return null;
+  }
+
   Future<bool> containsEventId(String eventId) async {
     await ensureReady();
     for (final block in _blocks) {
