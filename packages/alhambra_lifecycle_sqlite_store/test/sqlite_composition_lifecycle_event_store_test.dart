@@ -9,14 +9,14 @@ import 'package:test/test.dart';
 
 void main() {
   late Directory directory;
-  late SqliteCompositionLifecycleEventStore store;
+  SqliteCompositionLifecycleEventStore? store;
 
   setUp(() async {
     directory = await Directory.systemTemp.createTemp('alhambra-sqlite-events-');
   });
 
   tearDown(() async {
-    await store.close();
+    await store?.close();
     if (await directory.exists()) await directory.delete(recursive: true);
   });
 
@@ -26,7 +26,7 @@ void main() {
       store = SqliteCompositionLifecycleEventStore.open(
         path: '${directory.path}/lifecycle.sqlite',
       );
-      return store;
+      return store!;
     },
     disposeStore: (value) async {
       await (value as SqliteCompositionLifecycleEventStore).close();
@@ -37,7 +37,7 @@ void main() {
     store = SqliteCompositionLifecycleEventStore.open(
       path: '${directory.path}/schema.sqlite',
     );
-    final version = store.database.select('PRAGMA user_version').single['user_version'];
+    final version = store!.database.select('PRAGMA user_version').single['user_version'];
     expect(version, SqliteCompositionLifecycleEventStore.schemaVersion);
     expect(
       store.database.select(
@@ -62,7 +62,7 @@ void main() {
   test('does not close a host-owned database', () async {
     final database = sqlite3.openInMemory();
     store = SqliteCompositionLifecycleEventStore(database: database);
-    await store.close();
+    await store!.close();
 
     database.select('SELECT 1 AS still_open');
     database.dispose();
@@ -83,11 +83,11 @@ void main() {
       nodeIds: const ['command:reopen'],
       ownerIds: const ['owner-reopen'],
     );
-    await store.append(event);
+    await store!.append(event);
     await store.close();
 
     store = SqliteCompositionLifecycleEventStore.open(path: path);
-    final result = await store.query(CompositionLifecycleEventQuery());
+    final result = await store!.query(CompositionLifecycleEventQuery());
     expect(result.single.eventId, event.eventId);
     expect(codec.encode(result.single), codec.encode(event));
   });
