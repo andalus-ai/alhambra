@@ -12,11 +12,14 @@ import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 final class SqlitePluginRevocationStore
     implements
         TransactionalPluginRevocationStore,
-        PluginRevocationOutboxStore,
-        PluginRevocationJournalStore {
+        PluginRevocationOutboxStore {
   final sq.Database _db;
   final Random _random;
   bool _closed = false;
+
+  /// Journal view sharing this adapter's SQLite connection.
+  PluginRevocationJournalStore get journalStore =>
+      _SqlitePluginRevocationJournalStore(this);
 
   SqlitePluginRevocationStore(
     String path, {
@@ -364,7 +367,7 @@ final class SqlitePluginRevocationStore
       });
 
   @override
-  Future<PluginRevocationJournalEntry?> read(String idempotencyKey) async {
+  Future<PluginRevocationJournalEntry?> readJournal(String idempotencyKey) async {
     _assertOpen();
     final rows = _db.select(
       'SELECT * FROM plugin_revocation_journal WHERE idempotency_key = ?',
@@ -374,7 +377,7 @@ final class SqlitePluginRevocationStore
   }
 
   @override
-  Future<List<PluginRevocationJournalEntry>> readAll() async {
+  Future<List<PluginRevocationJournalEntry>> readAllJournal() async {
     _assertOpen();
     return List.unmodifiable(_db.select(
       'SELECT * FROM plugin_revocation_journal ORDER BY created_at, idempotency_key',
@@ -414,7 +417,7 @@ final class SqlitePluginRevocationStore
       ];
 
   @override
-  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry) async =>
+  Future<bool> insertJournalIfAbsent(PluginRevocationJournalEntry entry) async =>
       _transaction(() {
         _db.execute('''
           INSERT OR IGNORE INTO plugin_revocation_journal
@@ -427,7 +430,7 @@ final class SqlitePluginRevocationStore
       });
 
   @override
-  Future<bool> compareAndSet({
+  Future<bool> compareAndSetJournal({
     required String idempotencyKey,
     required int expectedRevision,
     required PluginRevocationJournalEntry replacement,
@@ -451,4 +454,37 @@ final class SqlitePluginRevocationStore
         ]);
         return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
       });
+}
+
+
+/// Journal contract adapter. Kept separate because the journal and execution
+/// contracts both define a read(key) method with different result types.
+final class _SqlitePluginRevocationJournalStore
+    implements PluginRevocationJournalStore {
+  final SqlitePluginRevocationStore _store;
+  _SqlitePluginRevocationJournalStore(this._store);
+
+  @override
+  Future<PluginRevocationJournalEntry?> read(String idempotencyKey) =>
+      _store.readJournal(idempotencyKey);
+
+  @override
+  Future<List<PluginRevocationJournalEntry>> readAll() =>
+      _store.readAllJournal();
+
+  @override
+  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry) =>
+      _store.insertJournalIfAbsent(entry);
+
+  @override
+  Future<bool> compareAndSet({
+    required String idempotencyKey,
+    required int expectedRevision,
+    required PluginRevocationJournalEntry replacement,
+  }) =>
+      _store.compareAndSetJournal(
+        idempotencyKey: idempotencyKey,
+        expectedRevision: expectedRevision,
+        replacement: replacement,
+      );
 }
