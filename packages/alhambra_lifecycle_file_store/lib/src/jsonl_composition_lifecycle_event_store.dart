@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'jsonl_sparse_lifecycle_index.dart';
+
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 
@@ -22,15 +24,8 @@ final class JsonlCompositionLifecycleEventStore
 
   Future<void> _writeTail = Future<void>.value();
 
-  // Rebuilt once from the authoritative JSONL log and maintained on append.
-  // These indexes avoid replaying the file for every query in this process.
-  bool _indexReady = false;
-  final Map<String, CompositionLifecycleEvent> _eventsById = {};
-  final List<CompositionLifecycleEvent> _orderedEvents = [];
-  final Map<String, Set<String>> _byCorrelation = {};
-  final Map<String, Set<String>> _byOwner = {};
-  final Map<String, Set<String>> _byOperation = {};
-  final Map<String, Set<String>> _byStatus = {};
+  late final JsonlSparseLifecycleIndex _sparseIndex =
+      JsonlSparseLifecycleIndex(logFile: file, codec: codec);
 
   JsonlCompositionLifecycleEventStore({
     required this.file,
@@ -52,23 +47,31 @@ final class JsonlCompositionLifecycleEventStore
   Future<void> _appendOne(CompositionLifecycleEvent event) async {
     await file.parent.create(recursive: true);
     await _discardIncompleteTail();
-    await _ensureIndex();
+    await _sparseIndex.ensureReady();
 
-    final existing = _eventsById[event.eventId];
+    final existing = await _sparseIndex.findEventById(event.eventId);
     if (existing != null) {
       if (_sameEvent(existing, event)) return;
       throw LifecycleEventIdentityConflictException(event.eventId);
     }
 
     final encoded = codec.encode(event);
+    final recordBytes = utf8.encode(encoded);
+    final offset = await file.exists() ? await file.length() : 0;
     final handle = await file.open(mode: FileMode.append);
     try {
-      await handle.writeString('$encoded\n', encoding: utf8);
+      await handle.writeFrom(recordBytes);
+      await handle.writeByte(0x0a);
       await handle.flush();
     } finally {
       await handle.close();
     }
-    _addToIndex(event);
+    await _sparseIndex.append(
+      event,
+      offset: offset,
+      endOffset: offset + recordBytes.length + 1,
+      recordLength: recordBytes.length,
+    );
   }
 
   /// Removes an unterminated tail left by an interrupted prior append before
@@ -185,7 +188,7 @@ final class JsonlCompositionLifecycleEventStore
         }
         rethrow;
       }
-      _clearIndex();
+      await _sparseIndex.invalidate();
       return removed;
     } finally {
       // If an unexpected failure happened after moving the original, make a
@@ -215,97 +218,7 @@ final class JsonlCompositionLifecycleEventStore
     await _writeTail;
     if (!await file.exists()) return const [];
 
-    await _ensureIndex();
-    final candidates = _candidateEvents(query);
-    final filtered = candidates.where((event) => _matches(event, query)).toList();
-    final hasIndexedFilters = query.correlationId != null ||
-        query.ownerId != null ||
-        query.operation != null ||
-        query.status != null;
-    final ordered = hasIndexedFilters ? _stableChronological(filtered) : filtered;
-    if (query.beforeCursor != null) {
-      final preceding = ordered
-          .where((event) => _compareEventToCursor(event, query.beforeCursor!) < 0)
-          .toList();
-      final start = preceding.length > query.limit
-          ? preceding.length - query.limit
-          : 0;
-      return List<CompositionLifecycleEvent>.unmodifiable(preceding.skip(start));
-    }
-    return List<CompositionLifecycleEvent>.unmodifiable(ordered.take(query.limit));
-  }
-
-  Future<void> _ensureIndex() async {
-    if (_indexReady) return;
-    _clearIndex();
-    final events = await _readAllCompleteEvents();
-    for (final event in events) {
-      final existing = _eventsById[event.eventId];
-      if (existing == null) {
-        _addToIndex(event);
-      } else if (!_sameEvent(existing, event)) {
-        throw FormatException(
-          'Conflicting lifecycle event ID "${event.eventId}" in JSONL history.',
-        );
-      }
-      // Identical historical duplicates are collapsed in the query index.
-    }
-    _indexReady = true;
-  }
-
-  void _clearIndex() {
-    _eventsById.clear();
-    _orderedEvents.clear();
-    _byCorrelation.clear();
-    _byOwner.clear();
-    _byOperation.clear();
-    _byStatus.clear();
-    _indexReady = false;
-  }
-
-  void _addToIndex(CompositionLifecycleEvent event) {
-    _eventsById[event.eventId] = event;
-    var low = 0;
-    var high = _orderedEvents.length;
-    while (low < high) {
-      final middle = low + ((high - low) >> 1);
-      if (_compareEvents(_orderedEvents[middle], event) <= 0) {
-        low = middle + 1;
-      } else {
-        high = middle;
-      }
-    }
-    _orderedEvents.insert(low, event);
-    _byCorrelation.putIfAbsent(event.correlationId, () => <String>{}).add(event.eventId);
-    for (final ownerId in event.ownerIds) {
-      _byOwner.putIfAbsent(ownerId, () => <String>{}).add(event.eventId);
-    }
-    _byOperation.putIfAbsent(event.operation.name, () => <String>{}).add(event.eventId);
-    _byStatus.putIfAbsent(event.status.name, () => <String>{}).add(event.eventId);
-    _indexReady = true;
-  }
-
-  List<CompositionLifecycleEvent> _candidateEvents(
-    CompositionLifecycleEventQuery query,
-  ) {
-    Set<String>? candidateIds;
-    void intersect(Set<String>? next) {
-      if (next == null) {
-        candidateIds = <String>{};
-      } else if (candidateIds == null) {
-        candidateIds = Set<String>.of(next);
-      } else {
-        candidateIds!.retainAll(next);
-      }
-    }
-
-    if (query.correlationId != null) intersect(_byCorrelation[query.correlationId]);
-    if (query.ownerId != null) intersect(_byOwner[query.ownerId]);
-    if (query.operation != null) intersect(_byOperation[query.operation!.name]);
-    if (query.status != null) intersect(_byStatus[query.status!.name]);
-
-    if (candidateIds == null) return List.of(_orderedEvents);
-    return candidateIds!.map((id) => _eventsById[id]!).toList(growable: false);
+    return _sparseIndex.query(query);
   }
 
   bool _sameEvent(
