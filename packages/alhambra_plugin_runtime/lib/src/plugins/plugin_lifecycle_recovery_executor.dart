@@ -185,8 +185,13 @@ class PluginLifecycleRecoveryRunner {
         for (final other in activeById.entries) {
           if (other.key == pluginId) continue;
           final dependentCheckpoint = await store.read(other.key);
-          if (dependentCheckpoint != null &&
-              dependentCheckpoint.dependencyIds.any((id) => id.trim() == pluginId)) {
+          if (dependentCheckpoint == null) {
+            throw StateError(
+              'Cannot establish dependency order for active plugin "${other.key}": '
+              'its checkpoint is missing.',
+            );
+          }
+          if (dependentCheckpoint.dependencyIds.any((id) => id.trim() == pluginId)) {
             throw StateError('Cannot compensate "$pluginId": active dependent "${other.key}" must stop first.');
           }
         }
