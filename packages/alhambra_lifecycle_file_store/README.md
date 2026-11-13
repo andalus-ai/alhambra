@@ -9,7 +9,7 @@ Use `JsonlCompositionLifecycleRuntime` when a native Dart/Flutter host wants
 a ready-wired composition runtime and durable lifecycle diagnostics:
 
 ```dart
-final diagnostics = JsonlCompositionLifecycleRuntime(
+final host = JsonlCompositionLifecycleRuntime(
   file: File('${supportDirectory.path}/alhambra/lifecycle.jsonl'),
   maxPendingEvents: 512,
   maxLifecycleEvents: 1000,
@@ -18,30 +18,46 @@ final diagnostics = JsonlCompositionLifecycleRuntime(
   },
 );
 
-final runtime = diagnostics.runtime;
+final runtime = host.runtime;
+final liveSubscription = runtime.subscribeLifecycleEvents((event) {
+  // Feed a host-owned health stream or diagnostics collector.
+});
 final transaction = runtime.beginTransaction(
   lifecycle: pluginLifecycle,
   correlationId: 'plugin-install-42',
 );
 // Stage contributions and commit as usual.
 
-final recentEvents = await diagnostics.query(
+final recentEvents = await host.query(
   CompositionLifecycleEventQuery(ownerId: 'editor-plugin', limit: 50),
 );
 
+// Durable history + the bounded live window, deduplicated by event content.
+final ownerSummary =
+    await host.lifecycleDiagnostics.ownerSummary('editor-plugin');
+final allOwnerSummaries =
+    await host.lifecycleDiagnostics.ownerSummaries();
+
 // On orderly application shutdown:
-await diagnostics.close();
+liveSubscription.cancel();
+await host.close();
 ```
 
 The runtime callback only enqueues events; it does not wait for file I/O.
+`lifecycleDiagnostics.query(...)` merges durable results with the live
+runtime window and removes duplicates. `ownerSummary(ownerId)` and
+`ownerSummaries()` aggregate durable event counts and failure details, then
+attach the current owner state from the runtime. Owner aggregates cover all
+records in the JSONL file plus the currently retained in-memory window.
+
 Monitor `pendingEventCount`, `rejectedEventCount`, and `lastWriteError`.
 If a write fails, the failed event remains queued: call
 `retryFailedWrites()`, then `flush()` or `close()` again. A failed close
 leaves intake stopped so the host can retry without accepting more events.
 
-Use `diagnostics.compact(...)` rather than calling `store.compact(...)`
+Use `host.compact(...)` rather than calling `store.compact(...)`
 directly while the runtime is active. The facade flushes accepted journal
-events before compaction. Likewise, `diagnostics.query(...)` flushes accepted
+events before compaction. Likewise, `host.query(...)` flushes accepted
 events before reading the durable store.
 
 ## Direct store usage
@@ -75,6 +91,8 @@ Dart/Flutter hosts, not web builds.
   explicit and counted rather than silently growing without limit.
 - The facade flushes before querying or compacting and exposes retry/close
   lifecycle operations.
+- Durable owner aggregation scans the full retained JSONL history and merges
+  the bounded live window, deduplicating events shared by both sources.
 - Compaction is serialized with appends submitted to the same store instance.
 - A complete replacement is written and flushed before the old file is moved
   aside; failed installation triggers a best-effort restore.
