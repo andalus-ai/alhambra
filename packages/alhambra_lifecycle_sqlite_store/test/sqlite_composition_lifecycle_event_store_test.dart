@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:alhambra_lifecycle_sqlite_store/alhambra_lifecycle_sqlite_store.dart';
+import 'package:alhambra_lifecycle_sqlite_store/alhambra_lifecycle_sqlite_store!.dart';
 import 'package:alhambra_lifecycle_store_test/alhambra_lifecycle_store_test.dart';
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
@@ -170,7 +170,7 @@ void main() {
     store = SqliteCompositionLifecycleEventStore.open(
       path: '${directory.path}/rollback.sqlite',
     );
-    store.database.execute('''
+    store!.database.execute('''
       CREATE TRIGGER reject_owner BEFORE INSERT ON lifecycle_event_owners
       BEGIN
         SELECT RAISE(ABORT, 'injected owner association failure');
@@ -187,7 +187,7 @@ void main() {
     );
 
     await expectLater(store!.append(event), throwsA(isA<Exception>()));
-    store.database.execute('DROP TRIGGER reject_owner');
+    store!.database.execute('DROP TRIGGER reject_owner');
     expect(await store!.query(CompositionLifecycleEventQuery()), isEmpty);
   });
 
@@ -203,8 +203,8 @@ void main() {
       nodeIds: const ['command:wal-recovery'],
       ownerIds: const ['owner-wal-recovery'],
     );
-    await store.append(event);
-    await store.close();
+    await store!.append(event);
+    await store!.close();
 
     store = SqliteCompositionLifecycleEventStore.open(path: path);
     final recovered = await store!.query(
