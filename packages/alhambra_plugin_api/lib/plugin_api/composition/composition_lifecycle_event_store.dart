@@ -64,7 +64,7 @@ final class CompositionLifecycleEventQuery {
 /// Query results must be ordered oldest-first and respect every [query] bound
 /// and its limit. Implementations should use `eventId` as an idempotency key:
 /// an identical retry should not create a second record, while reuse of an ID
-/// for a different payload should be rejected. Adapters must document their
+/// for a different payload should throw [CompositionLifecycleEventIdentityConflictException]. Adapters must document their
 /// durability and indexing strategy.
 ///
 /// The API deliberately does not prescribe an index format, query planner,
