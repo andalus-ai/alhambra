@@ -41,7 +41,7 @@ void defineCompositionLifecycleEventStoreContractTests({
         await store.append(event);
       }
 
-      final result = await store.query(const CompositionLifecycleEventQuery());
+      final result = await store.query(CompositionLifecycleEventQuery());
       expect(result.map((event) => event.eventId), ['a', 'b', 'c']);
     });
 
@@ -80,7 +80,7 @@ void defineCompositionLifecycleEventStoreContractTests({
       }
 
       final first = await store.query(
-        const CompositionLifecycleEventQuery(limit: 2),
+        CompositionLifecycleEventQuery(limit: 2),
       );
       expect(first.map((event) => event.eventId), ['a', 'b']);
 
