@@ -79,7 +79,10 @@ Dart/Flutter hosts, not web builds.
 ## Guarantees and limits
 
 - Appends are serialized within one store instance and flushed before return.
-- Query replays versioned records and supports the API query filters.
+- Appending an event whose `eventId` and payload already exist is an idempotent no-op; reusing an ID with a different payload throws `LifecycleEventIdentityConflictException`.
+- The JSONL log is authoritative. Identical duplicate IDs already present in older logs are collapsed in the query view; conflicting payloads for one ID are reported as corruption.
+- The first query or append in a store instance builds in-memory indexes from the JSONL log. Subsequent queries intersect correlation, owner, operation, and status indexes before applying time/cursor bounds.
+- Indexes are rebuilt after compaction and when a store instance is reopened; the first operation after reopening still scans the retained log. The side index is process-local and does not alter the portable JSONL format.
 - Query results are oldest-first, ordered by `(timestamp, eventId)`.
 - `CompositionLifecycleEventQuery.after` and `beforeCursor` provide exclusive keyset pagination; backward pages return the nearest preceding records in oldest-first order.
 - The legacy timestamp-only `before` filter remains supported for compatibility.
@@ -96,7 +99,7 @@ Dart/Flutter hosts, not web builds.
   lifecycle operations.
 - Durable owner aggregation scans the full retained JSONL history and merges
   the bounded live window, deduplicating events shared by both sources.
-- Compaction is serialized with appends submitted to the same store instance.
+- Compaction is serialized with appends submitted to the same store instance and invalidates the process-local indexes so the next query rebuilds them from the compacted log.
 - A complete replacement is written and flushed before the old file is moved
   aside; failed installation triggers a best-effort restore.
 - The adapter assumes one process writes the file. It does not provide
