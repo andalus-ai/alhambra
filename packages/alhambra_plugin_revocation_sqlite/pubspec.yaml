@@ -1,0 +1,16 @@
+name: alhambra_plugin_revocation_sqlite
+description: SQLite-backed durable journal and transactional audit outbox for Alhambra plugin revocation.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.13.2 <4.0.0"
+
+dependencies:
+  alhambra_plugin_runtime:
+    path: ../alhambra_plugin_runtime
+  sqlite3: ^2.4.0
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^3.0.0
