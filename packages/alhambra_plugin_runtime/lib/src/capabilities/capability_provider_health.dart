@@ -11,6 +11,7 @@ enum CapabilityProviderHealthState {
 final class CapabilityProviderHealth {
   final String ownerId;
   final CapabilityProviderHealthState state;
+  final CapabilityProviderHealthState? previousState;
   final int revision;
   final String? reason;
   final DateTime observedAt;
@@ -19,6 +20,7 @@ final class CapabilityProviderHealth {
     required this.ownerId,
     required this.state,
     required this.revision,
+    this.previousState,
     required this.observedAt,
     this.reason,
   });
@@ -80,6 +82,7 @@ class CapabilityProviderHealthMonitor {
     _providers[owner] = CapabilityProviderHealth(
       ownerId: owner,
       state: state,
+      previousState: _providers[owner]?.state,
       revision: _revision,
       reason: normalizedReason?.isEmpty == true ? null : normalizedReason,
       observedAt: observedAt ?? DateTime.now().toUtc(),
@@ -166,7 +169,18 @@ class CapabilityRevocationPlanner {
       owners.sort();
       for (final owner in owners) {
         final provider = health.providers[owner];
-        if (provider == null || provider.state == CapabilityProviderHealthState.healthy) {
+        if (provider == null) continue;
+        if (provider.state == CapabilityProviderHealthState.healthy) {
+          if (provider.previousState != null &&
+              provider.previousState != CapabilityProviderHealthState.healthy) {
+            decisions.add(CapabilityImpactDecision(
+              pluginId: pluginId,
+              providerOwnerId: owner,
+              providerState: provider.state,
+              action: CapabilityImpactAction.recovered,
+              reason: provider.reason,
+            ));
+          }
           continue;
         }
         decisions.add(CapabilityImpactDecision(
