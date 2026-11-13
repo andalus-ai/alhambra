@@ -1,4 +1,5 @@
 import '../capabilities/capability_provider_health.dart';
+import 'plugin_revocation_coordinator.dart';
 
 /// Durable state of one governed provider-impact action.
 enum PluginRevocationJournalStatus { pending, completed, rejected, unsupported, failed, reconciledApplied, retryAuthorized, manualReview }
@@ -88,5 +89,99 @@ class InMemoryPluginRevocationJournalStore implements PluginRevocationJournalSto
         replacement.idempotencyKey != idempotencyKey) return false;
     _entries[idempotencyKey] = replacement;
     return true;
+  }
+}
+
+
+/// Adapts the durable journal to the execution-store contract used by
+/// [PluginRevocationCoordinator]. Hosts can inject this into the coordinator
+/// so execution claims and terminal outcomes share the same journal.
+class JournalBackedPluginRevocationExecutionStore
+    implements PluginRevocationExecutionStore {
+  final PluginRevocationJournalStore journal;
+
+  JournalBackedPluginRevocationExecutionStore(this.journal);
+
+  @override
+  Future<PluginRevocationExecutionRecord?> read(String idempotencyKey) async {
+    final entry = await journal.read(idempotencyKey);
+    if (entry == null) return null;
+    return _toExecution(entry);
+  }
+
+  @override
+  Future<bool> writePending(PluginRevocationExecutionRecord record) =>
+      journal.insertIfAbsent(PluginRevocationJournalEntry(
+        idempotencyKey: record.idempotencyKey,
+        operationId: record.operationId,
+        pluginId: record.pluginId,
+        providerOwnerId: record.providerOwnerId,
+        action: record.action,
+        status: PluginRevocationJournalStatus.pending,
+        revision: 1,
+        createdAt: record.updatedAt,
+        updatedAt: record.updatedAt,
+        detail: record.detail,
+      ));
+
+  @override
+  Future<void> complete(PluginRevocationExecutionRecord record) async {
+    final current = await journal.read(record.idempotencyKey);
+    if (current == null) {
+      throw StateError('No journal entry for revocation operation.');
+    }
+    final replacement = current.next(
+      status: switch (record.status) {
+        PluginRevocationExecutionStatus.completed ||
+        PluginRevocationExecutionStatus.alreadyCompleted =>
+          PluginRevocationJournalStatus.completed,
+        PluginRevocationExecutionStatus.rejected =>
+          PluginRevocationJournalStatus.rejected,
+        PluginRevocationExecutionStatus.unsupported =>
+          PluginRevocationJournalStatus.unsupported,
+        PluginRevocationExecutionStatus.noOp =>
+          PluginRevocationJournalStatus.completed,
+        PluginRevocationExecutionStatus.failed =>
+          PluginRevocationJournalStatus.failed,
+        PluginRevocationExecutionStatus.requiresReconciliation =>
+          PluginRevocationJournalStatus.manualReview,
+      },
+      at: record.updatedAt,
+      detail: record.detail,
+    );
+    final saved = await journal.compareAndSet(
+      idempotencyKey: record.idempotencyKey,
+      expectedRevision: current.revision,
+      replacement: replacement,
+    );
+    if (!saved) throw StateError('Concurrent journal update; reload before writing.');
+  }
+
+  PluginRevocationExecutionRecord _toExecution(PluginRevocationJournalEntry entry) {
+    final status = switch (entry.status) {
+      PluginRevocationJournalStatus.pending ||
+      PluginRevocationJournalStatus.retryAuthorized ||
+      PluginRevocationJournalStatus.manualReview =>
+        PluginRevocationExecutionStatus.requiresReconciliation,
+      PluginRevocationJournalStatus.completed ||
+      PluginRevocationJournalStatus.reconciledApplied =>
+        PluginRevocationExecutionStatus.completed,
+      PluginRevocationJournalStatus.rejected =>
+        PluginRevocationExecutionStatus.rejected,
+      PluginRevocationJournalStatus.unsupported =>
+        PluginRevocationExecutionStatus.unsupported,
+      PluginRevocationJournalStatus.failed =>
+        PluginRevocationExecutionStatus.failed,
+    };
+    return PluginRevocationExecutionRecord(
+      idempotencyKey: entry.idempotencyKey,
+      operationId: entry.operationId,
+      pluginId: entry.pluginId,
+      providerOwnerId: entry.providerOwnerId,
+      action: entry.action,
+      status: status,
+      updatedAt: entry.updatedAt,
+      detail: entry.detail,
+    );
   }
 }
