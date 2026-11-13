@@ -28,6 +28,7 @@ void main() {
     final result = await reopened.query(CompositionLifecycleEventQuery());
 
     expect(result.map((event) => event.correlationId), ['c1', 'c2']);
+    expect(result.map((event) => event.eventId), [first.eventId, second.eventId]);
   });
 
   test('filters by owner, correlation, operation, and time range', () async {
