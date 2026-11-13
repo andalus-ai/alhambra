@@ -29,7 +29,18 @@ final class JsonlCompositionLifecycleDiagnostics {
     CompositionLifecycleEventQuery query,
   ) async {
     await journal.flush();
-    final durable = await store.query(query);
+    final durable = await store.query(CompositionLifecycleEventQuery(
+      correlationId: query.correlationId,
+      ownerId: query.ownerId,
+      operation: query.operation,
+      status: query.status,
+      from: query.from,
+      to: query.to,
+      before: query.before,
+      after: query.after,
+      beforeCursor: query.beforeCursor,
+      limit: 0x7fffffff,
+    ));
     final live = runtime.queryLifecycleEvents(
       correlationId: query.correlationId,
       ownerId: query.ownerId,
@@ -40,7 +51,14 @@ final class JsonlCompositionLifecycleDiagnostics {
       before: query.before,
       limit: runtime.lifecycleEvents.isEmpty ? 1 : runtime.lifecycleEvents.length,
     );
-    final merged = _merge(durable, live);
+    final merged = _merge(durable, live).where((event) {
+      if (query.after != null && _compareEventToCursor(event, query.after!) <= 0) return false;
+      if (query.beforeCursor != null && _compareEventToCursor(event, query.beforeCursor!) >= 0) return false;
+      return true;
+    }).toList(growable: false);
+    if (query.beforeCursor != null && merged.length > query.limit) {
+      return List.unmodifiable(merged.skip(merged.length - query.limit));
+    }
     return List.unmodifiable(merged.take(query.limit));
   }
 
@@ -141,22 +159,18 @@ final class JsonlCompositionLifecycleDiagnostics {
     final indexed = byIdentity.values.indexed.toList()
       ..sort((a, b) {
         final byTime = a.$2.timestamp.compareTo(b.$2.timestamp);
-        return byTime != 0 ? byTime : a.$1.compareTo(b.$1);
+        if (byTime != 0) return byTime;
+        final byId = a.$2.eventId.compareTo(b.$2.eventId);
+        return byId != 0 ? byId : a.$1.compareTo(b.$1);
       });
     return indexed.map((entry) => entry.$2).toList(growable: false);
   }
 
-  /// The event schema intentionally has no storage-specific identifier.
-  /// This deterministic value identifies equivalent decoded/in-memory records.
-  String _identity(CompositionLifecycleEvent event) => [
-        event.correlationId,
-        event.operation.name,
-        event.status.name,
-        event.timestamp.toUtc().microsecondsSinceEpoch,
-        event.nodeIds.join('\u001f'),
-        event.ownerIds.join('\u001f'),
-        event.duration?.inMicroseconds ?? '',
-        event.errorType ?? '',
-        event.errorMessage ?? '',
-      ].join('\u001e');
+  int _compareEventToCursor(CompositionLifecycleEvent event, CompositionLifecycleEventCursor cursor) {
+    final byTime = event.timestamp.compareTo(cursor.timestamp);
+    return byTime != 0 ? byTime : event.eventId.compareTo(cursor.eventId);
+  }
+
+  String _identity(CompositionLifecycleEvent event) => event.eventId;
+
 }
