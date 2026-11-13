@@ -46,6 +46,8 @@ export 'src/plugins/runtime_plugin_context.dart';
 export 'src/plugins/plugin_startup_pipeline.dart';
 export 'src/plugins/plugin_shutdown_coordinator.dart';
 export 'src/plugins/plugin_revocation_coordinator.dart';
+export 'src/plugins/plugin_revocation_journal.dart';
+export 'src/plugins/plugin_revocation_reconciler.dart';
 export 'src/plugins/plugin_startup_coordinator.dart';
 
 // Workbench & Layout
