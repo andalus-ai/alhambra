@@ -265,6 +265,32 @@ void main() {
     });
   });
 
+
+  test('fresh database applies schema v4 scope columns and indexes', () async {
+    final directory = await Directory.systemTemp.createTemp('alhambra-revocation-schema-');
+    final databasePath = '${directory.path}/revocations.sqlite';
+    final migrated = SqlitePluginRevocationStore(databasePath);
+    final inspection = sq.sqlite3.open(databasePath);
+    addTearDown(() async {
+      inspection.dispose();
+      migrated.close();
+      await directory.delete(recursive: true);
+    });
+
+    expect(
+      inspection.select('PRAGMA user_version').single['user_version'],
+      4,
+    );
+    for (final table in [
+      'plugin_revocation_execution',
+      'plugin_revocation_journal',
+      'plugin_revocation_outbox',
+    ]) {
+      final columns = inspection.select('PRAGMA table_info($table)');
+      expect(columns.any((column) => column['name'] == 'scope_id'), isTrue);
+    }
+  });
+
   test('completion rolls back when its journal row is missing', () async {
     final directory = await Directory.systemTemp.createTemp('alhambra-revocation-rollback-');
     final databasePath = '${directory.path}/revocations.sqlite';
