@@ -31,7 +31,7 @@ PluginLifecycleRecoveryJob _job({
     operationId: 'batch-op-1',
     action: PluginRecoveryJobAction.resumeStartup,
     orderedPluginIds: ['core', 'app'],
-    steps: steps ?? const [
+    steps: steps ?? [
       PluginRecoveryJobStep(
         pluginId: 'core',
         ordinal: 0,
