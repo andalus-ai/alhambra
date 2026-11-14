@@ -341,6 +341,70 @@ void main() {
       expect(fs.calls, ['inspect', 'inspect', 'finalize']);
     });
 
+
+    test('rolls back a proven operation-owned promotion after approval', () async {
+      final journal = _Journal()
+        ..entries['op-1'] = _entry(
+          status: PluginInstallJournalStatus.promoted,
+        );
+      final fs = _FileSystem()
+        ..destinationExists = true
+        ..destinationOwned = true
+        ..rollbackAvailable = true;
+      final store = InMemoryInstalledPluginStore();
+      final finding = (await PluginInstallRecoveryPlanner(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+      ).inspect()).findings.single;
+
+      expect(finding.action, PluginInstallRecoveryAction.rollbackPromotion);
+      final result = await PluginInstallRecoveryExecutor(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+      ).execute(
+        finding,
+        approvedBy: 'operator',
+        approvalId: 'approval-rollback',
+      );
+
+      expect(result.status, PluginInstallJournalStatus.rolledBack);
+      expect(fs.calls, ['inspect', 'inspect', 'rollback']);
+      expect(fs.destinationExists, isFalse);
+    });
+
+    test('closes a pre-staging operation as failed without filesystem mutation',
+        () async {
+      final journal = _Journal()
+        ..entries['op-1'] = _entry(
+          status: PluginInstallJournalStatus.verified,
+          stagingHandle: null,
+          promotedPath: null,
+        );
+      final fs = _FileSystem();
+      final store = InMemoryInstalledPluginStore();
+      final finding = (await PluginInstallRecoveryPlanner(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+      ).inspect()).findings.single;
+
+      expect(finding.action, PluginInstallRecoveryAction.markFailed);
+      final result = await PluginInstallRecoveryExecutor(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+      ).execute(
+        finding,
+        approvedBy: 'operator',
+        approvalId: 'approval-failed',
+      );
+
+      expect(result.status, PluginInstallJournalStatus.failed);
+      expect(fs.calls, ['inspect', 'inspect']);
+    });
+
     test('does not execute a manual-review finding', () async {
       final journal = _Journal()..entries['op-1'] = _entry();
       final fs = _FileSystem()
