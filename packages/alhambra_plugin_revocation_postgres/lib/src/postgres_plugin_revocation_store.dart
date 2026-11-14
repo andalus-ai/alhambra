@@ -384,739 +384,132 @@ final class PostgresPluginRevocationStore
   }
 
   @override
-  Future<PluginRevocationReplayResult?> replayDeadLetter(PluginRevocationReplayRequest request) async {
+  @override
+  Future<PluginRevocationReplayResult?> replayDeadLetter(
+    PluginRevocationReplayRequest request,
+  ) async {
     _assertOpen();
     return _pool.runTx((tx) async {
-      await tx.execute(r'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', parameters: [request.actionId]);
-      final priorRows = await tx.execute(r'SELECT * FROM alhambra_plugin_revocation_operator_action WHERE action_id = $1', parameters: [request.actionId]);
+      await tx.execute(
+        r'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        parameters: [request.actionId],
+      );
+      final priorRows = await tx.execute(
+        r'SELECT * FROM alhambra_plugin_revocation_operator_action WHERE action_id = $1',
+        parameters: [request.actionId],
+      );
       if (priorRows.isNotEmpty) {
         final row = priorRows.first.toColumnMap();
-        if (row['target_event_id'] != request.targetEventId || row['actor_id'] != request.actorId || row['reason'] != request.reason || row['approval_reference'] != request.approvalReference) throw StateError('Operator action ID was already used with different replay details.');
-        final replayRows = await tx.execute(r'SELECT * FROM alhambra_plugin_revocation_outbox WHERE event_id = $1', parameters: [row['replay_event_id']]);
-        if (replayRows.isEmpty) throw StateError('Recorded replay event is missing.');
-        final replayRow = replayRows.first.toColumnMap();
-        final audit = PluginRevocationOperatorAction(actionId: row['action_id'] as String, actorId: row['actor_id'] as String, reason: row['reason'] as String, approvalReference: row['approval_reference'] as String, targetEventId: row['target_event_id'] as String, replayEventId: row['replay_event_id'] as String, replayGeneration: row['replay_generation'] as int, occurredAt: _date(row['occurred_at']));
-        return PluginRevocationReplayResult(audit, _message(replayRow));
+        if (row['target_event_id'] != request.targetEventId ||
+            row['actor_id'] != request.actorId ||
+            row['reason'] != request.reason ||
+            row['approval_reference'] != request.approvalReference) {
+          throw StateError(
+            'Operator action ID was already used with different replay details.',
+          );
+        }
+        final replayRows = await tx.execute(
+          r'SELECT * FROM alhambra_plugin_revocation_outbox WHERE event_id = $1',
+          parameters: [row['replay_event_id']],
+        );
+        if (replayRows.isEmpty) {
+          throw StateError('Recorded replay event is missing.');
+        }
+        final audit = PluginRevocationOperatorAction(
+          actionId: row['action_id'] as String,
+          actorId: row['actor_id'] as String,
+          reason: row['reason'] as String,
+          approvalReference: row['approval_reference'] as String,
+          targetEventId: row['target_event_id'] as String,
+          replayEventId: row['replay_event_id'] as String,
+          replayGeneration: row['replay_generation'] as int,
+          occurredAt: _date(row['occurred_at']),
+        );
+        return PluginRevocationReplayResult(
+          audit,
+          _message(replayRows.first.toColumnMap()),
+        );
       }
-      final sourceRows = await tx.execute(r"SELECT * FROM alhambra_plugin_revocation_outbox WHERE event_id = $1 AND state = 'deadLetter' FOR UPDATE", parameters: [request.targetEventId]);
+      final sourceRows = await tx.execute(
+        r"SELECT * FROM alhambra_plugin_revocation_outbox "
+        r"WHERE event_id = $1 AND state = 'deadLetter' FOR UPDATE",
+        parameters: [request.targetEventId],
+      );
       if (sourceRows.isEmpty) return null;
       final source = sourceRows.first.toColumnMap();
-      final generationRows = await tx.execute(r'SELECT COALESCE(MAX(replay_generation), 0) AS generation FROM alhambra_plugin_revocation_operator_action WHERE target_event_id = $1', parameters: [request.targetEventId]);
-      final generation = (generationRows.first.toColumnMap()['generation'] as int) + 1;
+      final generationRows = await tx.execute(
+        r'SELECT COALESCE(MAX(replay_generation), 0) AS generation '
+        r'FROM alhambra_plugin_revocation_operator_action WHERE target_event_id = $1',
+        parameters: [request.targetEventId],
+      );
+      final generation =
+          (generationRows.first.toColumnMap()['generation'] as int) + 1;
       final sourceEventId = source['event_id'] as String;
-      final replayEventId = '
-    required String workerId,
-    required DateTime now,
-    required Duration leaseDuration,
-    required int limit,
-    required int maxAttempts,
-  }) async {
-    _assertOpen();
-    if (workerId.trim().isEmpty ||
-        leaseDuration <= Duration.zero ||
-        limit < 1 ||
-        maxAttempts < 1) {
-      throw ArgumentError('Invalid outbox claim parameters.');
-    }
-    final instant = now.toUtc();
-    return _pool.runTx((tx) async {
-      await tx.execute(
-        r'''
-          UPDATE alhambra_plugin_revocation_outbox
-          SET state = 'deadLetter', lease_owner = NULL, lease_token = NULL,
-              lease_until = NULL,
-              last_error_code = 'lease_expired_after_max_attempts'
-          WHERE state = 'leased' AND lease_until <= $1 AND attempts >= $2
-        ''',
-        parameters: [instant, maxAttempts],
-      );
-
-      final rows = await tx.execute(
-        r'''
-          WITH due AS (
-            SELECT event_id
-            FROM alhambra_plugin_revocation_outbox
-            WHERE attempts < $1 AND (
-              (state = 'pending' AND next_attempt_at <= $2) OR
-              (state = 'leased' AND lease_until <= $2)
-            )
-            ORDER BY occurred_at, event_id
-            LIMIT $3
-            FOR UPDATE SKIP LOCKED
-          )
-          UPDATE alhambra_plugin_revocation_outbox AS outbox
-          SET state = 'leased',
-              attempts = outbox.attempts + 1,
-              lease_owner = $4,
-              lease_token = $5 || ':' || outbox.event_id || ':' ||
-                (outbox.attempts + 1)::text || ':' || $6::text,
-              lease_until = $7
-          FROM due
-          WHERE outbox.event_id = due.event_id
-          RETURNING outbox.*
-        ''',
-        parameters: [
-          maxAttempts,
-          instant,
-          limit,
-          workerId,
-          workerId,
-          '${instant.microsecondsSinceEpoch}-${_random.nextInt(1 << 32)}',
-          instant.add(leaseDuration),
-        ],
-      );
-      final messages = rows
-          .map((row) => _message(row.toColumnMap()))
-          .toList(growable: false)
-        ..sort((a, b) => a.event.occurredAt.compareTo(b.event.occurredAt));
-      return List.unmodifiable(messages);
-    });
-  }
-
-  @override
-  Future<bool> markDelivered({
-    required String eventId,
-    required String leaseToken,
-    required DateTime deliveredAt,
-  }) async {
-    _assertOpen();
-    final result = await _pool.execute(
-      r'''
-        UPDATE alhambra_plugin_revocation_outbox
-        SET state = 'delivered', delivered_at = $1, lease_owner = NULL,
-            lease_token = NULL, lease_until = NULL, last_error_code = NULL
-        WHERE event_id = $2 AND state = 'leased' AND lease_token = $3
-      ''',
-      parameters: [deliveredAt.toUtc(), eventId, leaseToken],
-    );
-    return result.affectedRows == 1;
-  }
-
-  @override
-  Future<bool> reschedule({
-    required String eventId,
-    required String leaseToken,
-    required DateTime nextAttemptAt,
-    required String errorCode,
-    required int maxAttempts,
-  }) async {
-    _assertOpen();
-    final result = await _pool.execute(
-      r'''
-        UPDATE alhambra_plugin_revocation_outbox
-        SET state = CASE WHEN attempts >= $1 THEN 'deadLetter' ELSE 'pending' END,
-            next_attempt_at = $2, lease_owner = NULL, lease_token = NULL,
-            lease_until = NULL, last_error_code = $3
-        WHERE event_id = $4 AND state = 'leased' AND lease_token = $5
-      ''',
-      parameters: [
-        maxAttempts,
-        nextAttemptAt.toUtc(),
-        errorCode,
-        eventId,
-        leaseToken,
-      ],
-    );
-    return result.affectedRows == 1;
-  }
-
-  Future<PluginRevocationJournalEntry?> _readJournal(
-    String idempotencyKey,
-  ) async {
-    _assertOpen();
-    final rows = await _pool.execute(
-      r'SELECT * FROM alhambra_plugin_revocation_journal WHERE idempotency_key = $1',
-      parameters: [idempotencyKey],
-    );
-    return rows.isEmpty ? null : _journal(rows.first.toColumnMap());
-  }
-
-  Future<List<PluginRevocationJournalEntry>> _readAllJournal() async {
-    _assertOpen();
-    final rows = await _pool.execute(
-      'SELECT * FROM alhambra_plugin_revocation_journal ORDER BY created_at, idempotency_key',
-    );
-    return List.unmodifiable(rows.map((row) => _journal(row.toColumnMap())));
-  }
-
-  Future<bool> _insertJournalIfAbsent(
-    PluginRevocationJournalEntry entry,
-  ) async {
-    _assertOpen();
-    final rows = await _pool.execute(
-      r'''
-        INSERT INTO alhambra_plugin_revocation_journal
-          (idempotency_key, schema_version, operation_id, plugin_id,
-           provider_owner_id, action, status, revision, created_at,
-           updated_at, correlation_id, detail)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        ON CONFLICT (idempotency_key) DO NOTHING
-        RETURNING idempotency_key
-      ''',
-      parameters: [
-        entry.idempotencyKey,
-        entry.schemaVersion,
-        entry.operationId,
-        entry.pluginId,
-        entry.providerOwnerId,
-        entry.action.name,
-        entry.status.name,
-        entry.revision,
-        entry.createdAt.toUtc(),
-        entry.updatedAt.toUtc(),
-        entry.correlationId,
-        entry.detail,
-      ],
-    );
-    return rows.isNotEmpty;
-  }
-
-  Future<bool> _compareAndSetJournal({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) async {
-    _assertOpen();
-    if (replacement.idempotencyKey != idempotencyKey ||
-        replacement.revision != expectedRevision + 1) {
-      throw ArgumentError('Replacement must retain the key and increment revision once.');
-    }
-    final rows = await _pool.execute(
-      r'''
-        UPDATE alhambra_plugin_revocation_journal
-        SET schema_version = $1, operation_id = $2, plugin_id = $3,
-            provider_owner_id = $4, action = $5, status = $6, revision = $7,
-            created_at = $8, updated_at = $9, correlation_id = $10, detail = $11
-        WHERE idempotency_key = $12 AND revision = $13
-        RETURNING idempotency_key
-      ''',
-      parameters: [
-        replacement.schemaVersion,
-        replacement.operationId,
-        replacement.pluginId,
-        replacement.providerOwnerId,
-        replacement.action.name,
-        replacement.status.name,
-        replacement.revision,
-        replacement.createdAt.toUtc(),
-        replacement.updatedAt.toUtc(),
-        replacement.correlationId,
-        replacement.detail,
-        idempotencyKey,
-        expectedRevision,
-      ],
-    );
-    return rows.isNotEmpty;
-  }
-}
-
-final class _PostgresPluginRevocationJournalStore
-    implements PluginRevocationJournalStore {
-  final PostgresPluginRevocationStore _store;
-  _PostgresPluginRevocationJournalStore(this._store);
-
-  @override
-  Future<PluginRevocationJournalEntry?> read(String idempotencyKey) =>
-      _store._readJournal(idempotencyKey);
-
-  @override
-  Future<List<PluginRevocationJournalEntry>> readAll() =>
-      _store._readAllJournal();
-
-  @override
-  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry) =>
-      _store._insertJournalIfAbsent(entry);
-
-  @override
-  Future<bool> compareAndSet({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) =>
-      _store._compareAndSetJournal(
-        idempotencyKey: idempotencyKey,
-        expectedRevision: expectedRevision,
-        replacement: replacement,
-      );
-}
- + sourceEventId + ':replay:
-    required String workerId,
-    required DateTime now,
-    required Duration leaseDuration,
-    required int limit,
-    required int maxAttempts,
-  }) async {
-    _assertOpen();
-    if (workerId.trim().isEmpty ||
-        leaseDuration <= Duration.zero ||
-        limit < 1 ||
-        maxAttempts < 1) {
-      throw ArgumentError('Invalid outbox claim parameters.');
-    }
-    final instant = now.toUtc();
-    return _pool.runTx((tx) async {
-      await tx.execute(
-        r'''
-          UPDATE alhambra_plugin_revocation_outbox
-          SET state = 'deadLetter', lease_owner = NULL, lease_token = NULL,
-              lease_until = NULL,
-              last_error_code = 'lease_expired_after_max_attempts'
-          WHERE state = 'leased' AND lease_until <= $1 AND attempts >= $2
-        ''',
-        parameters: [instant, maxAttempts],
-      );
-
-      final rows = await tx.execute(
-        r'''
-          WITH due AS (
-            SELECT event_id
-            FROM alhambra_plugin_revocation_outbox
-            WHERE attempts < $1 AND (
-              (state = 'pending' AND next_attempt_at <= $2) OR
-              (state = 'leased' AND lease_until <= $2)
-            )
-            ORDER BY occurred_at, event_id
-            LIMIT $3
-            FOR UPDATE SKIP LOCKED
-          )
-          UPDATE alhambra_plugin_revocation_outbox AS outbox
-          SET state = 'leased',
-              attempts = outbox.attempts + 1,
-              lease_owner = $4,
-              lease_token = $5 || ':' || outbox.event_id || ':' ||
-                (outbox.attempts + 1)::text || ':' || $6::text,
-              lease_until = $7
-          FROM due
-          WHERE outbox.event_id = due.event_id
-          RETURNING outbox.*
-        ''',
-        parameters: [
-          maxAttempts,
-          instant,
-          limit,
-          workerId,
-          workerId,
-          '${instant.microsecondsSinceEpoch}-${_random.nextInt(1 << 32)}',
-          instant.add(leaseDuration),
-        ],
-      );
-      final messages = rows
-          .map((row) => _message(row.toColumnMap()))
-          .toList(growable: false)
-        ..sort((a, b) => a.event.occurredAt.compareTo(b.event.occurredAt));
-      return List.unmodifiable(messages);
-    });
-  }
-
-  @override
-  Future<bool> markDelivered({
-    required String eventId,
-    required String leaseToken,
-    required DateTime deliveredAt,
-  }) async {
-    _assertOpen();
-    final result = await _pool.execute(
-      r'''
-        UPDATE alhambra_plugin_revocation_outbox
-        SET state = 'delivered', delivered_at = $1, lease_owner = NULL,
-            lease_token = NULL, lease_until = NULL, last_error_code = NULL
-        WHERE event_id = $2 AND state = 'leased' AND lease_token = $3
-      ''',
-      parameters: [deliveredAt.toUtc(), eventId, leaseToken],
-    );
-    return result.affectedRows == 1;
-  }
-
-  @override
-  Future<bool> reschedule({
-    required String eventId,
-    required String leaseToken,
-    required DateTime nextAttemptAt,
-    required String errorCode,
-    required int maxAttempts,
-  }) async {
-    _assertOpen();
-    final result = await _pool.execute(
-      r'''
-        UPDATE alhambra_plugin_revocation_outbox
-        SET state = CASE WHEN attempts >= $1 THEN 'deadLetter' ELSE 'pending' END,
-            next_attempt_at = $2, lease_owner = NULL, lease_token = NULL,
-            lease_until = NULL, last_error_code = $3
-        WHERE event_id = $4 AND state = 'leased' AND lease_token = $5
-      ''',
-      parameters: [
-        maxAttempts,
-        nextAttemptAt.toUtc(),
-        errorCode,
-        eventId,
-        leaseToken,
-      ],
-    );
-    return result.affectedRows == 1;
-  }
-
-  Future<PluginRevocationJournalEntry?> _readJournal(
-    String idempotencyKey,
-  ) async {
-    _assertOpen();
-    final rows = await _pool.execute(
-      r'SELECT * FROM alhambra_plugin_revocation_journal WHERE idempotency_key = $1',
-      parameters: [idempotencyKey],
-    );
-    return rows.isEmpty ? null : _journal(rows.first.toColumnMap());
-  }
-
-  Future<List<PluginRevocationJournalEntry>> _readAllJournal() async {
-    _assertOpen();
-    final rows = await _pool.execute(
-      'SELECT * FROM alhambra_plugin_revocation_journal ORDER BY created_at, idempotency_key',
-    );
-    return List.unmodifiable(rows.map((row) => _journal(row.toColumnMap())));
-  }
-
-  Future<bool> _insertJournalIfAbsent(
-    PluginRevocationJournalEntry entry,
-  ) async {
-    _assertOpen();
-    final rows = await _pool.execute(
-      r'''
-        INSERT INTO alhambra_plugin_revocation_journal
-          (idempotency_key, schema_version, operation_id, plugin_id,
-           provider_owner_id, action, status, revision, created_at,
-           updated_at, correlation_id, detail)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        ON CONFLICT (idempotency_key) DO NOTHING
-        RETURNING idempotency_key
-      ''',
-      parameters: [
-        entry.idempotencyKey,
-        entry.schemaVersion,
-        entry.operationId,
-        entry.pluginId,
-        entry.providerOwnerId,
-        entry.action.name,
-        entry.status.name,
-        entry.revision,
-        entry.createdAt.toUtc(),
-        entry.updatedAt.toUtc(),
-        entry.correlationId,
-        entry.detail,
-      ],
-    );
-    return rows.isNotEmpty;
-  }
-
-  Future<bool> _compareAndSetJournal({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) async {
-    _assertOpen();
-    if (replacement.idempotencyKey != idempotencyKey ||
-        replacement.revision != expectedRevision + 1) {
-      throw ArgumentError('Replacement must retain the key and increment revision once.');
-    }
-    final rows = await _pool.execute(
-      r'''
-        UPDATE alhambra_plugin_revocation_journal
-        SET schema_version = $1, operation_id = $2, plugin_id = $3,
-            provider_owner_id = $4, action = $5, status = $6, revision = $7,
-            created_at = $8, updated_at = $9, correlation_id = $10, detail = $11
-        WHERE idempotency_key = $12 AND revision = $13
-        RETURNING idempotency_key
-      ''',
-      parameters: [
-        replacement.schemaVersion,
-        replacement.operationId,
-        replacement.pluginId,
-        replacement.providerOwnerId,
-        replacement.action.name,
-        replacement.status.name,
-        replacement.revision,
-        replacement.createdAt.toUtc(),
-        replacement.updatedAt.toUtc(),
-        replacement.correlationId,
-        replacement.detail,
-        idempotencyKey,
-        expectedRevision,
-      ],
-    );
-    return rows.isNotEmpty;
-  }
-}
-
-final class _PostgresPluginRevocationJournalStore
-    implements PluginRevocationJournalStore {
-  final PostgresPluginRevocationStore _store;
-  _PostgresPluginRevocationJournalStore(this._store);
-
-  @override
-  Future<PluginRevocationJournalEntry?> read(String idempotencyKey) =>
-      _store._readJournal(idempotencyKey);
-
-  @override
-  Future<List<PluginRevocationJournalEntry>> readAll() =>
-      _store._readAllJournal();
-
-  @override
-  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry) =>
-      _store._insertJournalIfAbsent(entry);
-
-  @override
-  Future<bool> compareAndSet({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) =>
-      _store._compareAndSetJournal(
-        idempotencyKey: idempotencyKey,
-        expectedRevision: expectedRevision,
-        replacement: replacement,
-      );
-}
- + generation.toString();
-      final replayKey = (source['idempotency_key'] as String) + ':replay:
-    required String workerId,
-    required DateTime now,
-    required Duration leaseDuration,
-    required int limit,
-    required int maxAttempts,
-  }) async {
-    _assertOpen();
-    if (workerId.trim().isEmpty ||
-        leaseDuration <= Duration.zero ||
-        limit < 1 ||
-        maxAttempts < 1) {
-      throw ArgumentError('Invalid outbox claim parameters.');
-    }
-    final instant = now.toUtc();
-    return _pool.runTx((tx) async {
-      await tx.execute(
-        r'''
-          UPDATE alhambra_plugin_revocation_outbox
-          SET state = 'deadLetter', lease_owner = NULL, lease_token = NULL,
-              lease_until = NULL,
-              last_error_code = 'lease_expired_after_max_attempts'
-          WHERE state = 'leased' AND lease_until <= $1 AND attempts >= $2
-        ''',
-        parameters: [instant, maxAttempts],
-      );
-
-      final rows = await tx.execute(
-        r'''
-          WITH due AS (
-            SELECT event_id
-            FROM alhambra_plugin_revocation_outbox
-            WHERE attempts < $1 AND (
-              (state = 'pending' AND next_attempt_at <= $2) OR
-              (state = 'leased' AND lease_until <= $2)
-            )
-            ORDER BY occurred_at, event_id
-            LIMIT $3
-            FOR UPDATE SKIP LOCKED
-          )
-          UPDATE alhambra_plugin_revocation_outbox AS outbox
-          SET state = 'leased',
-              attempts = outbox.attempts + 1,
-              lease_owner = $4,
-              lease_token = $5 || ':' || outbox.event_id || ':' ||
-                (outbox.attempts + 1)::text || ':' || $6::text,
-              lease_until = $7
-          FROM due
-          WHERE outbox.event_id = due.event_id
-          RETURNING outbox.*
-        ''',
-        parameters: [
-          maxAttempts,
-          instant,
-          limit,
-          workerId,
-          workerId,
-          '${instant.microsecondsSinceEpoch}-${_random.nextInt(1 << 32)}',
-          instant.add(leaseDuration),
-        ],
-      );
-      final messages = rows
-          .map((row) => _message(row.toColumnMap()))
-          .toList(growable: false)
-        ..sort((a, b) => a.event.occurredAt.compareTo(b.event.occurredAt));
-      return List.unmodifiable(messages);
-    });
-  }
-
-  @override
-  Future<bool> markDelivered({
-    required String eventId,
-    required String leaseToken,
-    required DateTime deliveredAt,
-  }) async {
-    _assertOpen();
-    final result = await _pool.execute(
-      r'''
-        UPDATE alhambra_plugin_revocation_outbox
-        SET state = 'delivered', delivered_at = $1, lease_owner = NULL,
-            lease_token = NULL, lease_until = NULL, last_error_code = NULL
-        WHERE event_id = $2 AND state = 'leased' AND lease_token = $3
-      ''',
-      parameters: [deliveredAt.toUtc(), eventId, leaseToken],
-    );
-    return result.affectedRows == 1;
-  }
-
-  @override
-  Future<bool> reschedule({
-    required String eventId,
-    required String leaseToken,
-    required DateTime nextAttemptAt,
-    required String errorCode,
-    required int maxAttempts,
-  }) async {
-    _assertOpen();
-    final result = await _pool.execute(
-      r'''
-        UPDATE alhambra_plugin_revocation_outbox
-        SET state = CASE WHEN attempts >= $1 THEN 'deadLetter' ELSE 'pending' END,
-            next_attempt_at = $2, lease_owner = NULL, lease_token = NULL,
-            lease_until = NULL, last_error_code = $3
-        WHERE event_id = $4 AND state = 'leased' AND lease_token = $5
-      ''',
-      parameters: [
-        maxAttempts,
-        nextAttemptAt.toUtc(),
-        errorCode,
-        eventId,
-        leaseToken,
-      ],
-    );
-    return result.affectedRows == 1;
-  }
-
-  Future<PluginRevocationJournalEntry?> _readJournal(
-    String idempotencyKey,
-  ) async {
-    _assertOpen();
-    final rows = await _pool.execute(
-      r'SELECT * FROM alhambra_plugin_revocation_journal WHERE idempotency_key = $1',
-      parameters: [idempotencyKey],
-    );
-    return rows.isEmpty ? null : _journal(rows.first.toColumnMap());
-  }
-
-  Future<List<PluginRevocationJournalEntry>> _readAllJournal() async {
-    _assertOpen();
-    final rows = await _pool.execute(
-      'SELECT * FROM alhambra_plugin_revocation_journal ORDER BY created_at, idempotency_key',
-    );
-    return List.unmodifiable(rows.map((row) => _journal(row.toColumnMap())));
-  }
-
-  Future<bool> _insertJournalIfAbsent(
-    PluginRevocationJournalEntry entry,
-  ) async {
-    _assertOpen();
-    final rows = await _pool.execute(
-      r'''
-        INSERT INTO alhambra_plugin_revocation_journal
-          (idempotency_key, schema_version, operation_id, plugin_id,
-           provider_owner_id, action, status, revision, created_at,
-           updated_at, correlation_id, detail)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        ON CONFLICT (idempotency_key) DO NOTHING
-        RETURNING idempotency_key
-      ''',
-      parameters: [
-        entry.idempotencyKey,
-        entry.schemaVersion,
-        entry.operationId,
-        entry.pluginId,
-        entry.providerOwnerId,
-        entry.action.name,
-        entry.status.name,
-        entry.revision,
-        entry.createdAt.toUtc(),
-        entry.updatedAt.toUtc(),
-        entry.correlationId,
-        entry.detail,
-      ],
-    );
-    return rows.isNotEmpty;
-  }
-
-  Future<bool> _compareAndSetJournal({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) async {
-    _assertOpen();
-    if (replacement.idempotencyKey != idempotencyKey ||
-        replacement.revision != expectedRevision + 1) {
-      throw ArgumentError('Replacement must retain the key and increment revision once.');
-    }
-    final rows = await _pool.execute(
-      r'''
-        UPDATE alhambra_plugin_revocation_journal
-        SET schema_version = $1, operation_id = $2, plugin_id = $3,
-            provider_owner_id = $4, action = $5, status = $6, revision = $7,
-            created_at = $8, updated_at = $9, correlation_id = $10, detail = $11
-        WHERE idempotency_key = $12 AND revision = $13
-        RETURNING idempotency_key
-      ''',
-      parameters: [
-        replacement.schemaVersion,
-        replacement.operationId,
-        replacement.pluginId,
-        replacement.providerOwnerId,
-        replacement.action.name,
-        replacement.status.name,
-        replacement.revision,
-        replacement.createdAt.toUtc(),
-        replacement.updatedAt.toUtc(),
-        replacement.correlationId,
-        replacement.detail,
-        idempotencyKey,
-        expectedRevision,
-      ],
-    );
-    return rows.isNotEmpty;
-  }
-}
-
-final class _PostgresPluginRevocationJournalStore
-    implements PluginRevocationJournalStore {
-  final PostgresPluginRevocationStore _store;
-  _PostgresPluginRevocationJournalStore(this._store);
-
-  @override
-  Future<PluginRevocationJournalEntry?> read(String idempotencyKey) =>
-      _store._readJournal(idempotencyKey);
-
-  @override
-  Future<List<PluginRevocationJournalEntry>> readAll() =>
-      _store._readAllJournal();
-
-  @override
-  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry) =>
-      _store._insertJournalIfAbsent(entry);
-
-  @override
-  Future<bool> compareAndSet({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) =>
-      _store._compareAndSetJournal(
-        idempotencyKey: idempotencyKey,
-        expectedRevision: expectedRevision,
-        replacement: replacement,
-      );
-}
- + generation.toString();
+      final replayEventId = '$sourceEventId:replay:$generation';
+      final replayKey = '${source['idempotency_key']}:replay:$generation';
       final at = request.occurredAt.toUtc();
-      final inserted = await tx.execute(r'''INSERT INTO alhambra_plugin_revocation_outbox (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id, action, outcome, occurred_at, detail, state, attempts, next_attempt_at, replay_of_event_id, replay_generation) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',0,$8,$10,$11) RETURNING *''', parameters: [replayEventId, replayKey, source['operation_id'], source['plugin_id'], source['provider_owner_id'], source['action'], source['outcome'], at, source['detail'], sourceEventId, generation]);
-      await tx.execute(r'''INSERT INTO alhambra_plugin_revocation_operator_action (action_id, actor_id, reason, approval_reference, target_event_id, replay_event_id, replay_generation, occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)''', parameters: [request.actionId, request.actorId, request.reason, request.approvalReference, sourceEventId, replayEventId, generation, at]);
-      final audit = PluginRevocationOperatorAction(actionId: request.actionId, actorId: request.actorId, reason: request.reason, approvalReference: request.approvalReference, targetEventId: sourceEventId, replayEventId: replayEventId, replayGeneration: generation, occurredAt: at);
-      return PluginRevocationReplayResult(audit, _message(inserted.first.toColumnMap()));
+      final inserted = await tx.execute(
+        r'''
+          INSERT INTO alhambra_plugin_revocation_outbox
+          (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
+           action, outcome, occurred_at, detail, state, attempts, next_attempt_at,
+           replay_of_event_id, replay_generation)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 0, $8, $10, $11)
+          RETURNING *
+        ''',
+        parameters: [
+          replayEventId, replayKey, source['operation_id'], source['plugin_id'],
+          source['provider_owner_id'], source['action'], source['outcome'],
+          at, source['detail'], sourceEventId, generation,
+        ],
+      );
+      await tx.execute(
+        r'''
+          INSERT INTO alhambra_plugin_revocation_operator_action
+          (action_id, actor_id, reason, approval_reference, target_event_id,
+           replay_event_id, replay_generation, occurred_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ''',
+        parameters: [
+          request.actionId, request.actorId, request.reason,
+          request.approvalReference, sourceEventId, replayEventId, generation, at,
+        ],
+      );
+      final audit = PluginRevocationOperatorAction(
+        actionId: request.actionId,
+        actorId: request.actorId,
+        reason: request.reason,
+        approvalReference: request.approvalReference,
+        targetEventId: sourceEventId,
+        replayEventId: replayEventId,
+        replayGeneration: generation,
+        occurredAt: at,
+      );
+      return PluginRevocationReplayResult(
+        audit,
+        _message(inserted.first.toColumnMap()),
+      );
     });
+  }
+
+  Future<List<PluginRevocationOperatorAction>> readOperatorActions() async {
+    _assertOpen();
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_operator_action ORDER BY occurred_at, action_id',
+    );
+    return List.unmodifiable(rows.map((row) {
+      final value = row.toColumnMap();
+      return PluginRevocationOperatorAction(
+        actionId: value['action_id'] as String,
+        actorId: value['actor_id'] as String,
+        reason: value['reason'] as String,
+        approvalReference: value['approval_reference'] as String,
+        targetEventId: value['target_event_id'] as String,
+        replayEventId: value['replay_event_id'] as String,
+        replayGeneration: value['replay_generation'] as int,
+        occurredAt: _date(value['occurred_at']),
+      );
+    }));
   }
 
   @override
