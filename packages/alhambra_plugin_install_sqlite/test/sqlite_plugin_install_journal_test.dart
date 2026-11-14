@@ -133,6 +133,13 @@ void main() {
       addTearDown(journal.close);
       await journal.write(_entry(status: PluginInstallJournalStatus.committed));
       expect(await journal.unresolved(), isEmpty);
+      await expectLater(
+        journal.write(_entry(
+          status: PluginInstallJournalStatus.verified,
+          at: DateTime.utc(2026, 1, 1, 0, 1),
+        )),
+        throwsStateError,
+      );
     });
 
     test('CAS rejects stale timestamp and non-advancing replacement time', () async {
