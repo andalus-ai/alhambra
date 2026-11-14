@@ -105,3 +105,8 @@ The 100K and 1M profiles are intended for local scale characterization and
 should not be treated as CI thresholds. Compare runs only when Dart/SQLite
 versions, machine, filesystem, and event count are recorded. The adapter tests
 also inspect `EXPLAIN QUERY PLAN` for the combined status/operation query path.
+
+
+## Health and diagnostics
+
+Both `SqliteCompositionLifecycleEventStore` and `SqliteLifecycleEventStoreWorker` implement `CompositionLifecycleStorageHealthProvider`. Their `inspectHealth()` snapshots report the record count, SQLite page-count footprint, freelist pages, and WAL byte size when the database path is available. The last successful write and last append error are scoped to the current adapter instance. The worker obtains the snapshot inside its isolate and transfers only primitive values to the host. A null WAL size means that the adapter could not determine a WAL file size; it does not mean the WAL is guaranteed absent. The health query is observational and does not run an integrity check, checkpoint, or `VACUUM`.
