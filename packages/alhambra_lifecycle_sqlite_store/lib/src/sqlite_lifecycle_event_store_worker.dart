@@ -13,7 +13,10 @@ import 'sqlite_composition_lifecycle_event_store.dart';
 /// serialized through one command port, preserving append order and ensuring
 /// that a single SQLite connection is never used concurrently.
 final class SqliteLifecycleEventStoreWorker
-    implements CompositionLifecycleEventStore, CompositionLifecycleStorageHealthProvider {
+    implements
+        CompositionLifecycleEventStore,
+        CompositionLifecycleStorageHealthProvider,
+        CompositionLifecycleStorageMaintenanceProvider {
   final ReceivePort _responses;
   final ReceivePort _errors;
   final ReceivePort _exits;
@@ -198,6 +201,26 @@ final class SqliteLifecycleEventStoreWorker
     );
   }
 
+  @override
+  Future<CompositionLifecycleStorageMaintenanceResult> maintain(
+    CompositionLifecycleStorageMaintenanceRequest request,
+  ) async {
+    final response = await _request('maintain', {
+      'retainFrom': request.retainFrom?.toUtc().toIso8601String(),
+      'maxEvents': request.maxEvents,
+      'checkpoint': request.checkpoint,
+    });
+    return CompositionLifecycleStorageMaintenanceResult(
+      startedAt: DateTime.parse(response['startedAt'] as String),
+      completedAt: DateTime.parse(response['completedAt'] as String),
+      recordsRemoved: response['recordsRemoved'] as int?,
+      checkpointRequested: response['checkpointRequested'] as bool,
+      checkpointCompleted: response['checkpointCompleted'] as bool?,
+      warnings: (response['warnings'] as List<Object?>).cast<String>(),
+      metrics: Map<String, Object?>.from(response['metrics'] as Map),
+    );
+  }
+
   /// Requests a WAL checkpoint without closing the worker.
   Future<SqliteWalCheckpointResult> checkpoint({
     SqliteWalCheckpointMode mode = SqliteWalCheckpointMode.passive,
@@ -340,6 +363,30 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
             'id': id,
             'ok': true,
             'events': events.map(codec.encode).toList(growable: false),
+          });
+          break;
+        case 'maintain':
+          final retainFrom = payload['retainFrom'] == null
+              ? null
+              : DateTime.parse(payload['retainFrom'] as String);
+          final maxEvents = payload['maxEvents'] as int?;
+          final result = await store.maintain(
+            CompositionLifecycleStorageMaintenanceRequest(
+              retainFrom: retainFrom,
+              maxEvents: maxEvents,
+              checkpoint: payload['checkpoint'] as bool? ?? false,
+            ),
+          );
+          host.send({
+            'id': id,
+            'ok': true,
+            'startedAt': result.startedAt.toIso8601String(),
+            'completedAt': result.completedAt.toIso8601String(),
+            'recordsRemoved': result.recordsRemoved,
+            'checkpointRequested': result.checkpointRequested,
+            'checkpointCompleted': result.checkpointCompleted,
+            'warnings': result.warnings,
+            'metrics': result.metrics,
           });
           break;
         case 'compact':
