@@ -66,6 +66,7 @@ export 'plugin_api/workbench/layout_repair.dart';
 export 'plugin_api/shell/shell_region_contracts.dart';
 export 'plugin_api/composition/composition_contracts.dart';
 export 'plugin_api/composition/composition_lifecycle_event_store.dart';
+export 'plugin_api/composition/composition_lifecycle_storage_maintenance.dart';
 export 'plugin_api/composition/composition_lifecycle_storage_health.dart';
 export 'plugin_api/composition/composition_lifecycle_observability.dart';
 export 'plugin_api/runtime_scope/runtime_scope_contracts.dart';
