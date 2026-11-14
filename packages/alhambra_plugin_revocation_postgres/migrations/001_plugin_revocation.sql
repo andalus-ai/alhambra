@@ -56,3 +56,6 @@ CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_outbox_due
 CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_outbox_expired_lease
   ON alhambra_plugin_revocation_outbox (lease_until, occurred_at, event_id)
   WHERE state = 'leased';
+
+INSERT INTO alhambra_plugin_revocation_schema (version)
+VALUES (1) ON CONFLICT (version) DO NOTHING;
