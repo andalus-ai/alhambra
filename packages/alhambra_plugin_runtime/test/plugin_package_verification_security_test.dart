@@ -93,6 +93,7 @@ void main() {
           keyId: 'key-1',
           algorithm: 'ed25519',
           publicKey: 'public-key',
+          publisherId: 'publisher.example',
         ));
       final result = await DefaultPluginPackageVerifier(
         trustStore: trust,
@@ -198,6 +199,7 @@ void main() {
         keyId: 'runtime-key',
         algorithm: 'ed25519',
         publicKey: 'runtime-public-key',
+        publisherId: 'publisher.example',
       ));
       final result = await runtime.pluginPackageVerifier.verify(
         _Package(signature: const PluginPackageSignature(
