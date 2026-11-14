@@ -1,3 +1,8 @@
+CREATE TABLE IF NOT EXISTS alhambra_plugin_revocation_schema (
+  version INTEGER PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS alhambra_plugin_revocation_execution (
   idempotency_key TEXT PRIMARY KEY,
   operation_id TEXT NOT NULL,
