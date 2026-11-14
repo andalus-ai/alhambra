@@ -34,6 +34,7 @@ Start here:
 - [Transactional revocation audit outbox](TRANSACTIONAL_REVOCATION_AUDIT_OUTBOX.md) — atomic outcome/audit boundary and at-least-once dispatch.
 - [PostgreSQL plugin revocation persistence](POSTGRES_PLUGIN_REVOCATION_PERSISTENCE.md) — multi-worker durable journal and SKIP LOCKED outbox claims.
 - [Revocation persistence adapter conformance](REVOCATION_PERSISTENCE_ADAPTER_CONFORMANCE.md) — shared behavioral invariants for SQLite and PostgreSQL stores.
+- [Revocation operations and inspection](REVOCATION_OPERATIONS_AND_INSPECTION.md) — read-only operational snapshots, metrics and safety boundaries.
 
 ## Composition persistence and compatibility
 - [Composition persistence and recovery](COMPOSITION_PERSISTENCE_AND_RECOVERY.md) — persistence boundaries and interrupted composition.
