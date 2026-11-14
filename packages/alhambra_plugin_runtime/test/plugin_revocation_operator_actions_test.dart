@@ -107,7 +107,7 @@ void main() {
     expect(second!.replay.event.eventId, first!.replay.event.eventId);
     expect(await store.readOperatorActions(), hasLength(1));
 
-    expect(() => store.replayDeadLetter(PluginRevocationReplayRequest(
+    await expectLater(store.replayDeadLetter(PluginRevocationReplayRequest(
       actionId: 'same-action',
       actorId: 'different-operator',
       reason: 'different reason',
