@@ -226,7 +226,7 @@ final class PluginRecoveryArchivePurgeAuditEvent {
   final String authorizedBy;
   final String approvalReference;
   final DateTime approvedAt;
-  final DateTime purgedAt;
+  final DateTime purgeRequestedAt;
 
   const PluginRecoveryArchivePurgeAuditEvent({
     required this.jobId,
@@ -234,7 +234,7 @@ final class PluginRecoveryArchivePurgeAuditEvent {
     required this.authorizedBy,
     required this.approvalReference,
     required this.approvedAt,
-    required this.purgedAt,
+    required this.purgeRequestedAt,
   });
 }
 
@@ -251,12 +251,14 @@ final class PluginLifecycleRecoveryJobArchivePurger {
   final PluginLifecycleRecoveryJobArchivePurgeStore archive;
   final PluginLifecycleRecoveryJobRetentionInspector inspector;
   final PluginRecoveryArchivePurgeAuditSink auditSink;
+  final PluginLifecycleRecoveryJobArchiveVerifier verifier;
   final DateTime Function() _clock;
 
   PluginLifecycleRecoveryJobArchivePurger({
     required this.archive,
     required this.inspector,
     required this.auditSink,
+    required this.verifier,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
@@ -277,14 +279,21 @@ final class PluginLifecycleRecoveryJobArchivePurger {
     if (report.archiveDigest != expectedDigest) {
       throw StateError('Archive digest changed; refresh and re-authorize purge.');
     }
-    final purgedAt = (at ?? _clock()).toUtc();
+    final requestedAt = (at ?? _clock()).toUtc();
+    if (authorization.approvedAt.isAfter(requestedAt)) {
+      throw StateError('Purge approval timestamp cannot be in the future.');
+    }
+    final verification = await verifier.verify(jobId);
+    if (!verification.isValid || verification.expectedDigest != expectedDigest) {
+      throw StateError('Archive integrity verification failed; purge is blocked.');
+    }
     await auditSink.record(PluginRecoveryArchivePurgeAuditEvent(
       jobId: jobId,
       archiveDigest: expectedDigest,
       authorizedBy: authorization.authorizedBy,
       approvalReference: authorization.approvalReference,
       approvedAt: authorization.approvedAt,
-      purgedAt: purgedAt,
+      purgeRequestedAt: requestedAt,
     ));
     if (!await archive.deleteIfDigestMatches(
       jobId: jobId,
