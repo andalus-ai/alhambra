@@ -9,7 +9,7 @@ import 'package:postgres/postgres.dart';
 /// runs in a database transaction. Outbox claims use SKIP LOCKED so separate
 /// workers do not claim the same row.
 final class PostgresPluginRevocationStore
-    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore {
+    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore {
   final Pool<dynamic> _pool;
   final Random _random;
   bool _closed = false;
@@ -356,6 +356,17 @@ final class PostgresPluginRevocationStore
       }
       await _enqueue(tx, record);
     });
+  }
+
+  @override
+  Future<List<PluginRevocationOutboxMessage>> readAllOutbox() async {
+    _assertOpen();
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_outbox ORDER BY occurred_at, event_id',
+    );
+    return List.unmodifiable(
+      rows.map((row) => _message(row.toColumnMap())),
+    );
   }
 
   @override
