@@ -116,8 +116,8 @@ enum PluginInstallJournalStatus {
   recovered,
 }
 
-/// Append/update semantics are adapter-defined but writes must be durable
-/// before the installer performs the corresponding external side effect.
+/// [unresolved] returns exactly the latest non-terminal entry per operation ID.
+/// Writes must be durable before the corresponding external side effect.
 final class PluginInstallJournalEntry {
   final String operationId;
   final String pluginId;
@@ -214,12 +214,14 @@ final class PluginInstallRecoverySnapshot {
 /// Journal adapter that supports stale-safe recovery claims.
 ///
 /// The compare-and-set must be atomic and durable. It must update only when
-/// the latest entry for [operationId] still has [expectedStatus].
+/// the latest entry for [operationId] still has both [expectedStatus] and
+/// [expectedUpdatedAt].
 abstract interface class PluginInstallRecoveryJournal
     implements PluginInstallJournal {
   Future<bool> compareAndSet({
     required String operationId,
     required PluginInstallJournalStatus expectedStatus,
+    required DateTime expectedUpdatedAt,
     required PluginInstallJournalEntry replacement,
   });
 }
