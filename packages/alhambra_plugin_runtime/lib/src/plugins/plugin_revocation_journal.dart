@@ -86,7 +86,8 @@ class InMemoryPluginRevocationJournalStore implements PluginRevocationJournalSto
     final current = _entries[idempotencyKey];
     if (current == null || current.revision != expectedRevision ||
         replacement.revision != expectedRevision + 1 ||
-        replacement.idempotencyKey != idempotencyKey) return false;
+        replacement.idempotencyKey != idempotencyKey ||
+        replacement.scopeId != current.scopeId) return false;
     _entries[idempotencyKey] = replacement;
     return true;
   }
