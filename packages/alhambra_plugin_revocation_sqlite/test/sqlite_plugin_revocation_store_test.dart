@@ -334,6 +334,7 @@ void main() {
     final request = PluginRevocationReplayRequest(
       actionId: 'sqlite-action-1',
       actorId: 'operator-1',
+      scopeId: 'tenant-blue',
       reason: 'Approved after sink recovery',
       approvalReference: 'change-101',
       targetEventId: claimed.event.eventId,
@@ -343,6 +344,7 @@ void main() {
     final repeated = (await store.replayDeadLetter(request))!;
     expect(repeated.replay.event.eventId, first.replay.event.eventId);
     expect(first.audit.replayGeneration, 1);
+    expect(first.audit.scopeId, 'tenant-blue');
     expect(first.replay.event.replayOfEventId, claimed.event.eventId);
     expect(first.replay.event.replayGeneration, 1);
     expect(first.replay.state, PluginRevocationOutboxState.pending);
@@ -356,6 +358,7 @@ void main() {
     final second = await store.replayDeadLetter(PluginRevocationReplayRequest(
       actionId: 'sqlite-action-2',
       actorId: 'operator-2',
+      scopeId: 'tenant-blue',
       reason: 'Second approved replay generation',
       approvalReference: 'change-102',
       targetEventId: claimed.event.eventId,
