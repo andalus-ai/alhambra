@@ -210,7 +210,7 @@ final class PluginInstallRecoveryExecutor {
     final normalized = value.trim();
     if (normalized.isEmpty ||
         normalized.length > maxLength ||
-        normalized.contains(RegExp(r'[\\x00-\\x1f\\x7f]'))) {
+        normalized.contains(RegExp(r'[\x00-\x1f\x7f]'))) {
       throw ArgumentError.value(
         value,
         name,
