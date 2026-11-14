@@ -194,6 +194,9 @@ class PluginRevocationCoordinator {
     final key = _key(operationId, pluginId, providerId, decision.action);
     final existing = await executionStore.read(key);
     if (existing != null) {
+      if (existing.scopeId != scopeId) {
+        throw StateError('Revocation idempotency key is already owned by another scope.');
+      }
       if (existing.status == PluginRevocationExecutionStatus.completed ||
           existing.status == PluginRevocationExecutionStatus.noOp ||
           existing.status == PluginRevocationExecutionStatus.rejected ||
@@ -225,6 +228,7 @@ class PluginRevocationCoordinator {
     if (!await executionStore.writePending(pending)) {
       return _record(
         operationId,
+        scopeId,
         key,
         decision,
         PluginRevocationExecutionStatus.requiresReconciliation,
@@ -238,6 +242,7 @@ class PluginRevocationCoordinator {
       if (!approved) {
         outcome = _record(
           operationId,
+          scopeId,
           key,
           decision,
           PluginRevocationExecutionStatus.rejected,
@@ -249,6 +254,7 @@ class PluginRevocationCoordinator {
     } catch (error) {
       outcome = _record(
         operationId,
+        scopeId,
         key,
         decision,
         PluginRevocationExecutionStatus.failed,
