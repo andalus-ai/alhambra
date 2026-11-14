@@ -382,7 +382,7 @@ void main() {
       final restorer = PluginLifecycleRecoveryJobArchiveRestorer(
         archive: archive,
         jobStore: restoredStore,
-        verifier: verifier,
+        digestProvider: digests,
       );
       final result = await restorer.restore(jobId: cancelled.jobId);
       expect(result.disposition, PluginLifecycleRecoveryJobRestoreDisposition.restored);
@@ -528,10 +528,7 @@ void main() {
         inspector: inspector,
         auditSink: _TestPurgeAuditSink((_) => auditWritten = true),
         authorizer: _AllowPurgeAuthorizer(),
-        verifier: PluginLifecycleRecoveryJobArchiveVerifier(
-          archive: archive,
-          digestProvider: digests,
-        ),
+        digestProvider: digests,
         clock: () => DateTime.utc(2027),
       );
 
