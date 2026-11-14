@@ -413,6 +413,26 @@ final class PostgresPluginRevocationStore
     });
   }
 
+  Future<List<PluginRevocationOperatorAction>> readOperatorActions() async {
+    _assertOpen();
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_operator_action ORDER BY occurred_at, action_id',
+    );
+    return List.unmodifiable(rows.map((row) {
+      final value = row.toColumnMap();
+      return PluginRevocationOperatorAction(
+        actionId: value['action_id'] as String,
+        actorId: value['actor_id'] as String,
+        reason: value['reason'] as String,
+        approvalReference: value['approval_reference'] as String,
+        targetEventId: value['target_event_id'] as String,
+        replayEventId: value['replay_event_id'] as String,
+        replayGeneration: value['replay_generation'] as int,
+        occurredAt: _date(value['occurred_at']),
+      );
+    }));
+  }
+
   @override
   Future<List<PluginRevocationOutboxMessage>> claim({
     required String workerId,
