@@ -193,9 +193,7 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
         ),
       ]);
     }
-    if (publisher != null &&
-        key.publisherId != null &&
-        key.publisherId != publisher.id) {
+    if (publisher != null && key.publisherId != publisher.id) {
       return PackageVerificationFailed(const [
         VerificationIssue(
           code: 'SIGNING_KEY_PUBLISHER_MISMATCH',
