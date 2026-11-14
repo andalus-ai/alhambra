@@ -252,6 +252,38 @@ void main() {
   });
 
   group('PluginInstallRecoveryExecutor', () {
+
+    test('records recovery fencing token before executing filesystem action',
+        () async {
+      final journal = _Journal()..entries['op-1'] = _entry();
+      final fs = _FileSystem()..stagingExists = true;
+      final store = InMemoryInstalledPluginStore();
+      final finding = (await PluginInstallRecoveryPlanner(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+      ).inspect()).findings.single;
+      final leases = InMemoryPluginInstallOperationLeaseStore();
+
+      final result = await PluginInstallRecoveryExecutor(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+        leaseStore: leases,
+        workerId: 'recovery-worker',
+        clock: () => DateTime.utc(2026, 1, 1),
+      ).execute(
+        finding,
+        approvedBy: 'operator',
+        approvalId: 'approval-fenced-recovery',
+      );
+
+      expect(result.status, PluginInstallJournalStatus.rolledBack);
+      expect(result.fencingToken, 1);
+      expect(journal.entries['op-1']!.fencingToken, 1);
+      expect(fs.calls, ['inspect', 'inspect', 'discard']);
+    });
+
     test('recovery cannot claim an operation leased by an installer', () async {
       final journal = _Journal()..entries['op-1'] = _entry();
       final fs = _FileSystem()..stagingExists = true;
