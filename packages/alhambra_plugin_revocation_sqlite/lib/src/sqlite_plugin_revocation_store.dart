@@ -205,7 +205,6 @@ final class SqlitePluginRevocationStore
         eventId: row['event_id']! as String,
         scopeId: row['scope_id']! as String,
         idempotencyKey: row['idempotency_key']! as String,
-        scopeId: row['scope_id']! as String,
         operationId: row['operation_id']! as String,
         pluginId: row['plugin_id']! as String,
         providerOwnerId: row['provider_owner_id']! as String,
@@ -434,6 +433,9 @@ final class SqlitePluginRevocationStore
         );
         if (sourceRows.isEmpty) return null;
         final source = Map<String, Object?>.from(sourceRows.first);
+        if (source['scope_id'] != request.scopeId) {
+          throw StateError('Dead-letter event is outside the requested scope.');
+        }
         final generation = (_db.select(
           'SELECT COALESCE(MAX(replay_generation), 0) AS generation '
           'FROM plugin_revocation_operator_action WHERE target_event_id = ?',
@@ -656,6 +658,7 @@ final class SqlitePluginRevocationStore
       PluginRevocationJournalEntry(
         schemaVersion: row['schema_version']! as int,
         idempotencyKey: row['idempotency_key']! as String,
+        scopeId: row['scope_id']! as String,
         operationId: row['operation_id']! as String,
         pluginId: row['plugin_id']! as String,
         providerOwnerId: row['provider_owner_id']! as String,
@@ -715,7 +718,7 @@ final class SqlitePluginRevocationStore
               created_at = ?, updated_at = ?, correlation_id = ?, detail = ?
           WHERE idempotency_key = ? AND revision = ?
         ''', [
-          ...values.skip(1),
+          ...values,
           idempotencyKey,
           expectedRevision,
         ]);
