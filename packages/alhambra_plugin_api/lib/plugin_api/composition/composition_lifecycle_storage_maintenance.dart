@@ -7,7 +7,7 @@ final class CompositionLifecycleStorageMaintenanceRequest {
   final int? maxEvents;
   final bool checkpoint;
 
-  const CompositionLifecycleStorageMaintenanceRequest({
+  CompositionLifecycleStorageMaintenanceRequest({
     this.retainFrom,
     this.maxEvents,
     this.checkpoint = false,
