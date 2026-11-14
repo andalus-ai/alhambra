@@ -428,6 +428,7 @@ final class PostgresPluginRevocationStore
         final row = priorRows.first.toColumnMap();
         if (row['target_event_id'] != request.targetEventId ||
             row['actor_id'] != request.actorId ||
+            row['scope_id'] != request.scopeId ||
             row['reason'] != request.reason ||
             row['approval_reference'] != request.approvalReference) {
           throw StateError(
@@ -464,6 +465,9 @@ final class PostgresPluginRevocationStore
       );
       if (sourceRows.isEmpty) return null;
       final source = sourceRows.first.toColumnMap();
+      if (source['scope_id'] != request.scopeId) {
+        throw StateError('Dead-letter event is outside the requested scope.');
+      }
       final generationRows = await tx.execute(
         r'SELECT COALESCE(MAX(replay_generation), 0) AS generation '
         r'FROM alhambra_plugin_revocation_operator_action WHERE target_event_id = $1',
