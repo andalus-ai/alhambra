@@ -145,18 +145,24 @@ final class PluginLifecycleRecoveryJobArchiveVerifier {
 final class PluginLifecycleRecoveryJobArchiveRestorer {
   final PluginLifecycleRecoveryJobArchive archive;
   final PluginLifecycleRecoveryJobStore jobStore;
-  final PluginLifecycleRecoveryJobArchiveVerifier verifier;
+  final PluginLifecycleRecoveryJobDigestProvider digestProvider;
+  final PluginLifecycleRecoveryJobSnapshotCodec codec;
 
   const PluginLifecycleRecoveryJobArchiveRestorer({
     required this.archive,
     required this.jobStore,
-    required this.verifier,
+    required this.digestProvider,
+    this.codec = const PluginLifecycleRecoveryJobSnapshotCodec(),
   });
 
   Future<PluginLifecycleRecoveryJobRestoreResult> restore({
     required String jobId,
   }) async {
-    final verification = await verifier.verify(jobId);
+    final verification = await PluginLifecycleRecoveryJobArchiveVerifier(
+      archive: archive,
+      digestProvider: digestProvider,
+      codec: codec,
+    ).verify(jobId);
     if (!verification.isValid) {
       throw StateError('Archive verification failed: ${verification.disposition.name}.');
     }
