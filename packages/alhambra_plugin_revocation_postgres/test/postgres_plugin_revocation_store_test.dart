@@ -38,6 +38,9 @@ void main() {
     final pending = _record(key);
     expect(await store.writePending(pending), isTrue);
     expect(await store.writePending(pending), isFalse);
+    final initialJournal = await store.journalStore.read(key);
+    expect(initialJournal?.status, PluginRevocationJournalStatus.pending);
+    expect(initialJournal?.revision, 1);
 
     final terminal = _record(
       key,
