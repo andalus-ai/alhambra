@@ -160,6 +160,23 @@ final class TransactionalPluginInstaller {
     }
 
     try {
+      if (operationLease != null) {
+        await ensureLease();
+        final token = operationLease!.fencingToken;
+        final journalReady = await (journal as FencedPluginInstallJournal)
+            .advanceFence(operationId: operationId, fencingToken: token);
+        final filesystemReady = await (fileSystem as FencedPluginInstallFileSystem)
+            .advanceFence(operationId: operationId, fencingToken: token);
+        final storeReady = await (installedStore as FencedTransactionalInstalledPluginStore)
+            .advanceFence(operationId: operationId, fencingToken: token);
+        if (!journalReady || !filesystemReady || !storeReady) {
+          throw const PluginInstallException(
+            'INSTALL_FENCE_REJECTED',
+            'A host adapter has already accepted a newer fencing token.',
+            reconciliationRequired: true,
+          );
+        }
+      }
       try {
       await record(PluginInstallJournalStatus.verificationStarted);
       final verification = await verifier.verify(package);
