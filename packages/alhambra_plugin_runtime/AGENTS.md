@@ -38,3 +38,7 @@ alhambra_plugin_api.
 - Keep payload canonicalization explicit and consistent between packagers and verifiers.
 - A valid signature does not by itself imply publisher trust; enforce publisher/key binding and host trust policy.
 - Treat the in-memory trust store as a reference implementation, not production key management.
+
+- Transactional installation requires an atomic create-only installed-record store; do not use an upsert-only store for install commits.
+- Rollback must compare the candidate install record before removal so it cannot delete another concurrent installation.
+- The default operation ID is instance-scoped; production hosts should inject globally unique operation IDs and enforce journal uniqueness.
