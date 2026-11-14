@@ -295,13 +295,17 @@ final class TransactionalPluginInstaller {
       try {
         await record(PluginInstallJournalStatus.rollingBack,
             failureCode: failure.code);
-        if (promotionAttempted && promotedPath != null && staging != null) {
+        final rollbackPath = promotedPath;
+        final rollbackStaging = staging;
+        if (promotionAttempted &&
+            rollbackPath != null &&
+            rollbackStaging != null) {
           await fileSystem.rollbackPromotion(
-            staging,
-            promotedPath: promotedPath,
+            rollbackStaging,
+            promotedPath: rollbackPath,
           );
-        } else if (staging != null) {
-          await fileSystem.discardStaging(staging);
+        } else if (rollbackStaging != null) {
+          await fileSystem.discardStaging(rollbackStaging);
         }
         if (recordCreateAttempted && candidateRecord != null) {
           await installedStore.removeIfMatches(candidateRecord);
