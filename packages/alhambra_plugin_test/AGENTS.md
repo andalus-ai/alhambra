@@ -1,24 +1,12 @@
 # Instructions for alhambra_plugin_test
 
-This package provides test-only utilities for Alhambra plugin authors.
-
-## Boundaries
-- Keep this package suitable for dev_dependencies; never add it as a runtime
-  dependency of production packages.
-- Exercise the real public plugin API and runtime rather than reimplementing
-  lifecycle semantics in mocks.
+- Keep this package suitable for dev_dependencies, never a production runtime dependency.
+- Exercise the real public plugin API and runtime rather than reimplementing lifecycle semantics in mocks.
 - Keep helpers generic and product-neutral.
-- Do not imply that in-process tests provide code sandboxing or process isolation.
-
-## API design
-- Prefer small helpers that expose the underlying runtime for precise tests.
-- Keep snapshots immutable and clearly describe whether counts are aggregate or
-  owner-specific.
-- Do not silently swallow activation, deactivation, or cleanup failures.
-- Avoid importing flutter_test from the package's public library.
-
-## Validation
-- Test successful activation/deactivation, partial activation failure, failed
-  deactivation cleanup, and host close behavior.
-- Keep fixtures deterministic and avoid network, clock, or filesystem dependencies.
-- Update the package README and central documentation index when public helpers change.
+- Metadata checks must be side-effect free.
+- Lifecycle execution must be explicitly opt-in and documented as executing trusted plugin code.
+- Keep results immutable and machine-readable with stable issue codes.
+- Do not silently swallow lifecycle or cleanup failures.
+- Do not impose version or capability semantics absent from the public API.
+- Cover valid/invalid metadata, duplicate plugin IDs, lifecycle success, activation failure and deactivation failure.
+- Update package docs and the central documentation index when public helpers change.
