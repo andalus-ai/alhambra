@@ -41,9 +41,8 @@ final class PluginInstallRecoveryExecutor {
     required String approvedBy,
     required String approvalId,
   }) async {
-    if (approvedBy.trim().isEmpty || approvalId.trim().isEmpty) {
-      throw ArgumentError('Recovery requires an operator identity and approval ID.');
-    }
+    _validateAuditValue(approvedBy, 'approvedBy', 256);
+    _validateAuditValue(approvalId, 'approvalId', 128);
     if (finding.action == PluginInstallRecoveryAction.manualReview) {
       throw const PluginInstallRecoveryException(
         'MANUAL_REVIEW_REQUIRED',
@@ -202,6 +201,20 @@ final class PluginInstallRecoveryExecutor {
         'RECOVERY_SIDE_EFFECT_FAILED',
         'An approved recovery operation failed; manual reconciliation is required.',
         reconciliationRequired: true,
+      );
+    }
+  }
+
+
+  void _validateAuditValue(String value, String name, int maxLength) {
+    final normalized = value.trim();
+    if (normalized.isEmpty ||
+        normalized.length > maxLength ||
+        normalized.contains(RegExp(r'[\\x00-\\x1f\\x7f]'))) {
+      throw ArgumentError.value(
+        value,
+        name,
+        'Must be non-empty, at most $maxLength characters, and contain no control characters.',
       );
     }
   }
