@@ -11,7 +11,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// UI hosts should use the isolate worker adapter to move database work
 /// to a dedicated isolate.
 final class SqliteCompositionLifecycleEventStore
-    implements CompositionLifecycleEventStore {
+    implements CompositionLifecycleEventStore, CompositionLifecycleStorageMaintenanceProvider {
   static const int schemaVersion = 2;
 
   static final List<_SqliteSchemaMigration> _migrations = [
@@ -305,6 +305,48 @@ final class SqliteCompositionLifecycleEventStore
       database.execute('ROLLBACK');
       rethrow;
     }
+  }
+
+  @override
+  Future<CompositionLifecycleStorageMaintenanceResult> maintain(
+    CompositionLifecycleStorageMaintenanceRequest request,
+  ) async {
+    final startedAt = DateTime.now().toUtc();
+    int? removed;
+    if (request.retainFrom != null || request.maxEvents != null) {
+      removed = await compact(
+        retainFrom: request.retainFrom,
+        maxEvents: request.maxEvents,
+      );
+    }
+
+    SqliteWalCheckpointResult? checkpointResult;
+    if (request.checkpoint) {
+      checkpointResult = checkpoint();
+    }
+    final warnings = <String>[];
+    if (checkpointResult != null && !checkpointResult.fullyCheckpointed) {
+      warnings.add(
+        'SQLite checkpoint was incomplete: busy=${checkpointResult.busy}, '
+        'checkpointed=${checkpointResult.checkpointedFrames}/'
+        '${checkpointResult.logFrames} frames.',
+      );
+    }
+    return CompositionLifecycleStorageMaintenanceResult(
+      startedAt: startedAt,
+      completedAt: DateTime.now().toUtc(),
+      recordsRemoved: removed,
+      checkpointRequested: request.checkpoint,
+      checkpointCompleted: checkpointResult?.fullyCheckpointed,
+      warnings: warnings,
+      metrics: {
+        'adapter': 'sqlite',
+        'checkpointMode': checkpointResult?.mode.name,
+        'checkpointBusy': checkpointResult?.busy,
+        'checkpointLogFrames': checkpointResult?.logFrames,
+        'checkpointedFrames': checkpointResult?.checkpointedFrames,
+      },
+    );
   }
 
   /// Runs a SQLite WAL checkpoint and returns SQLite's checkpoint counters.
