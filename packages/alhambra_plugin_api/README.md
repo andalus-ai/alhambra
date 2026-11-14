@@ -25,3 +25,8 @@ from composition correctness and make event loss/backpressure observable.
 ## Lifecycle storage health
 
 `CompositionLifecycleStorageHealthProvider` is an optional capability for adapters that can report storage health. Its immutable snapshot distinguishes healthy, degraded, unavailable, and unknown states. Unsupported measurements remain null rather than being reported as zero. The common model can carry write-queue counts, record count, primary/auxiliary byte footprints, last successful write time, and backend-specific metrics without requiring every `CompositionLifecycleEventStore` implementation to support them.
+
+## Lifecycle storage maintenance
+
+`CompositionLifecycleStorageMaintenanceProvider` is an optional capability for explicit retention and maintenance operations. Hosts provide a request with an inclusive retention timestamp, a maximum retained event count, and/or a checkpoint request. Maintenance is never scheduled implicitly. Results report records removed, checkpoint outcome when supported, warnings for unsupported or incomplete work, and backend-specific metrics. A partial result does not mean the requested operation was rolled back; inspect the reported actions and warnings.
+
