@@ -152,7 +152,7 @@ final class JsonlCompositionLifecycleEventStore
       completedAt: DateTime.now().toUtc(),
       recordsRemoved: removed,
       checkpointRequested: request.checkpoint,
-      checkpointCompleted: request.checkpoint ? null : null,
+      checkpointCompleted: null,
       warnings: warnings,
       metrics: const {
         'adapter': 'jsonl',
