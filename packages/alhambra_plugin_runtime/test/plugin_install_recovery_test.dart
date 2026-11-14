@@ -107,7 +107,9 @@ class _FileSystem implements FencedPluginInstallFileSystem {
   Future<void> createDirectory(
     PluginInstallStaging staging,
     String relativePath,
-  ) async {}
+  ) async {
+    _assertFence(staging);
+  }
 
   @override
   Future<void> writeFile({
@@ -115,7 +117,9 @@ class _FileSystem implements FencedPluginInstallFileSystem {
     required String relativePath,
     required Stream<List<int>> bytes,
     required int maxBytes,
-  }) async {}
+  }) async {
+    _assertFence(staging);
+  }
 
   @override
   Future<String> destinationPathFor({
@@ -127,13 +131,16 @@ class _FileSystem implements FencedPluginInstallFileSystem {
   Future<void> promote(
     PluginInstallStaging staging, {
     required String destinationPath,
-  }) async {}
+  }) async {
+    _assertFence(staging);
+  }
 
   @override
   Future<void> rollbackPromotion(
     PluginInstallStaging staging, {
     required String promotedPath,
   }) async {
+    _assertFence(staging);
     calls.add('rollback');
     destinationExists = false;
     destinationOwned = false;
@@ -145,6 +152,7 @@ class _FileSystem implements FencedPluginInstallFileSystem {
     PluginInstallStaging staging, {
     required String promotedPath,
   }) async {
+    _assertFence(staging);
     calls.add('finalize');
     rollbackAvailable = false;
     stagingExists = false;
