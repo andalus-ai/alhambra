@@ -7,6 +7,7 @@ enum PluginRecoveryJobExpirationDisposition {
   eligible,
   alreadyExpired,
   notPlanned,
+  hasStarted,
 }
 
 final class PluginRecoveryJobExpirationReport {
@@ -52,6 +53,8 @@ final class PluginLifecycleRecoveryJobExpirationController {
       disposition = PluginRecoveryJobExpirationDisposition.alreadyExpired;
     } else if (job.status != PluginRecoveryJobStatus.planned) {
       disposition = PluginRecoveryJobExpirationDisposition.notPlanned;
+    } else if (job.steps.any((step) => step.status != PluginRecoveryJobStepStatus.pending)) {
+      disposition = PluginRecoveryJobExpirationDisposition.hasStarted;
     } else if (job.expiresAt == null) {
       disposition = PluginRecoveryJobExpirationDisposition.notConfigured;
     } else if (instant.isBefore(job.expiresAt!)) {
@@ -87,6 +90,9 @@ final class PluginLifecycleRecoveryJobExpirationController {
     }
     if (current.status != PluginRecoveryJobStatus.planned) {
       throw StateError('Only a planned recovery job may expire.');
+    }
+    if (current.steps.any((step) => step.status != PluginRecoveryJobStepStatus.pending)) {
+      throw StateError('A recovery job with a started step cannot expire.');
     }
     final expiresAt = current.expiresAt;
     if (expiresAt == null) {
