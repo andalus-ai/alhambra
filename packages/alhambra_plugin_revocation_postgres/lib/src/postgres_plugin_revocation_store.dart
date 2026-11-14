@@ -137,6 +137,16 @@ final class PostgresPluginRevocationStore
         await tx.execute('CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_operator_target ON alhambra_plugin_revocation_operator_action(target_event_id, replay_generation)');
         await tx.execute('INSERT INTO alhambra_plugin_revocation_schema (version) VALUES (2) ON CONFLICT (version) DO NOTHING');
       }
+      if (currentVersion < 3) {
+        await tx.execute(
+          "ALTER TABLE alhambra_plugin_revocation_operator_action "
+          "ADD COLUMN IF NOT EXISTS scope_id TEXT NOT NULL DEFAULT 'default'",
+        );
+        await tx.execute(
+          'INSERT INTO alhambra_plugin_revocation_schema (version) '
+          'VALUES (3) ON CONFLICT (version) DO NOTHING',
+        );
+      }
     });
   }
 
@@ -417,6 +427,7 @@ final class PostgresPluginRevocationStore
         final audit = PluginRevocationOperatorAction(
           actionId: row['action_id'] as String,
           actorId: row['actor_id'] as String,
+          scopeId: row['scope_id'] as String,
           reason: row['reason'] as String,
           approvalReference: row['approval_reference'] as String,
           targetEventId: row['target_event_id'] as String,
@@ -465,18 +476,19 @@ final class PostgresPluginRevocationStore
       await tx.execute(
         r'''
           INSERT INTO alhambra_plugin_revocation_operator_action
-          (action_id, actor_id, reason, approval_reference, target_event_id,
+          (action_id, actor_id, scope_id, reason, approval_reference, target_event_id,
            replay_event_id, replay_generation, occurred_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ''',
         parameters: [
-          request.actionId, request.actorId, request.reason,
+          request.actionId, request.actorId, request.scopeId, request.reason,
           request.approvalReference, sourceEventId, replayEventId, generation, at,
         ],
       );
       final audit = PluginRevocationOperatorAction(
         actionId: request.actionId,
         actorId: request.actorId,
+        scopeId: request.scopeId,
         reason: request.reason,
         approvalReference: request.approvalReference,
         targetEventId: sourceEventId,
@@ -501,6 +513,7 @@ final class PostgresPluginRevocationStore
       return PluginRevocationOperatorAction(
         actionId: value['action_id'] as String,
         actorId: value['actor_id'] as String,
+        scopeId: value['scope_id'] as String,
         reason: value['reason'] as String,
         approvalReference: value['approval_reference'] as String,
         targetEventId: value['target_event_id'] as String,
