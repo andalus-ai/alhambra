@@ -54,20 +54,12 @@ void main() {
       revision: 2,
     ));
 
-    final pending = _record('event-pending');
-    await outbox.writePending(pending);
-    await outbox.completeAndEnqueue(_record(
-      'event-pending',
-      status: PluginRevocationExecutionStatus.completed,
-      at: DateTime.utc(2026, 1, 1, 0, 1),
-    ));
-
     final leased = _record('event-leased');
     await outbox.writePending(leased);
     await outbox.completeAndEnqueue(_record(
       'event-leased',
       status: PluginRevocationExecutionStatus.completed,
-      at: DateTime.utc(2026, 1, 1, 0, 2),
+      at: DateTime.utc(2026, 1, 1, 0, 0),
     ));
     final lease = (await outbox.claim(
       workerId: 'worker-a',
@@ -82,7 +74,7 @@ void main() {
     await outbox.completeAndEnqueue(_record(
       'event-dead',
       status: PluginRevocationExecutionStatus.completed,
-      at: DateTime.utc(2026, 1, 1, 0, 3),
+      at: DateTime.utc(2026, 1, 1, 0, 1),
     ));
     final deadLease = (await outbox.claim(
       workerId: 'worker-b',
@@ -98,6 +90,14 @@ void main() {
       errorCode: 'publisher_unavailable',
       maxAttempts: 1,
     );
+
+    final pending = _record('event-pending');
+    await outbox.writePending(pending);
+    await outbox.completeAndEnqueue(_record(
+      'event-pending',
+      status: PluginRevocationExecutionStatus.completed,
+      at: DateTime.utc(2026, 1, 1, 0, 2),
+    ));
 
     final before = await outbox.readAllOutbox();
     final service = PluginRevocationOperationsService(
