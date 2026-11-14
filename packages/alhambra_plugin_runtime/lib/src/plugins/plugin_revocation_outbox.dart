@@ -121,8 +121,12 @@ class InMemoryTransactionalPluginRevocationStore
 
   @override
   Future<void> completeAndEnqueue(PluginRevocationExecutionRecord record) async {
-    if (!_executions.containsKey(record.idempotencyKey)) {
+    final current = _executions[record.idempotencyKey];
+    if (current == null) {
       throw StateError('Cannot complete an unclaimed revocation operation.');
+    }
+    if (current.scopeId != record.scopeId) {
+      throw StateError('Revocation scope cannot change after the execution claim.');
     }
     // No await between these map writes: atomic within this single isolate.
     _executions[record.idempotencyKey] = record;
