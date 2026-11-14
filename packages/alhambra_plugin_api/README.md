@@ -20,3 +20,8 @@ The composition API defines:
 Hosts may implement these contracts with in-memory, JSONL, database, or remote
 telemetry adapters. Runtime implementations should isolate observer failures
 from composition correctness and make event loss/backpressure observable.
+
+## Lifecycle storage maintenance
+
+`CompositionLifecycleStorageMaintenanceProvider` is an optional capability for explicit retention and maintenance operations. Hosts provide a request with an inclusive retention timestamp, a maximum retained event count, and/or a checkpoint request. Maintenance is never scheduled implicitly. Results report records removed, checkpoint outcome when supported, warnings for unsupported or incomplete work, and backend-specific metrics. A partial result does not mean the requested operation was rolled back; inspect the reported actions and warnings.
+
