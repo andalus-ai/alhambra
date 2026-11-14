@@ -7,6 +7,8 @@ environment:
   sdk: ">=3.13.2 <4.0.0"
 
 dependencies:
+  alhambra_plugin_api:
+    path: ../alhambra_plugin_api
   alhambra_plugin_runtime:
     path: ../alhambra_plugin_runtime
   sqlite3: ^2.4.0
