@@ -139,7 +139,8 @@ final class PluginLifecycleRecoveryJobPlanner {
     } else if (job.status == PluginRecoveryJobStatus.cancelled) {
       overall = PluginRecoveryJobDisposition.cancelled;
     } else if (job.status == PluginRecoveryJobStatus.interrupted ||
-        job.status == PluginRecoveryJobStatus.running) {
+        job.status == PluginRecoveryJobStatus.running ||
+        job.status == PluginRecoveryJobStatus.cancellationRequested) {
       overall = PluginRecoveryJobDisposition.interruptedNeedsInspection;
     } else if (job.status == PluginRecoveryJobStatus.failed ||
         job.status == PluginRecoveryJobStatus.manualReview) {

@@ -50,6 +50,7 @@ export 'src/plugins/plugin_revocation_outbox.dart';
 export 'src/plugins/plugin_revocation_operator_actions.dart';
 export 'src/plugins/plugin_revocation_replay_service.dart';
 export 'src/plugins/plugin_revocation_operations.dart';
+export 'src/plugins/plugin_revocation_admin_operations.dart';
 export 'src/plugins/plugin_revocation_journal.dart';
 export 'src/plugins/plugin_revocation_recovery_planner.dart';
 export 'src/plugins/plugin_revocation_reconciler.dart';

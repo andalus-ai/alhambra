@@ -92,7 +92,7 @@ abstract interface class PluginRevocationOutboxStore {
 /// Single-isolate reference implementation for tests only. A real adapter
 /// needs database transactions, uniqueness constraints and row-level claims.
 class InMemoryTransactionalPluginRevocationStore
-    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore, PluginRevocationDeadLetterReplayStore {
+    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore, PluginRevocationDeadLetterReplayStore, PluginRevocationOperatorActionInspectionStore {
   final Map<String, PluginRevocationExecutionRecord> _executions = {};
   final Map<String, PluginRevocationOutboxMessage> _messages = {};
   final Map<String, PluginRevocationOperatorAction> _operatorActions = {};
@@ -332,6 +332,7 @@ class InMemoryTransactionalPluginRevocationStore
     return PluginRevocationReplayResult(audit, replay);
   }
 
+  @override
   Future<List<PluginRevocationOperatorAction>> readOperatorActions() async =>
       List.unmodifiable(_operatorActions.values.toList()
         ..sort((a, b) => a.occurredAt.compareTo(b.occurredAt)));

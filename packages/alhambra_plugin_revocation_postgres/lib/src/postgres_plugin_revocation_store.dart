@@ -13,7 +13,8 @@ final class PostgresPluginRevocationStore
         TransactionalPluginRevocationStore,
         PluginRevocationOutboxStore,
         PluginRevocationOutboxInspectionStore,
-        PluginRevocationDeadLetterReplayStore {
+        PluginRevocationDeadLetterReplayStore,
+        PluginRevocationOperatorActionInspectionStore {
   final Pool<dynamic> _pool;
   final Random _random;
   bool _closed = false;
@@ -503,6 +504,7 @@ final class PostgresPluginRevocationStore
     });
   }
 
+  @override
   Future<List<PluginRevocationOperatorAction>> readOperatorActions() async {
     _assertOpen();
     final rows = await _pool.execute(
@@ -513,6 +515,7 @@ final class PostgresPluginRevocationStore
       return PluginRevocationOperatorAction(
         actionId: value['action_id'] as String,
         actorId: value['actor_id'] as String,
+        scopeId: value['scope_id'] as String,
         reason: value['reason'] as String,
         approvalReference: value['approval_reference'] as String,
         targetEventId: value['target_event_id'] as String,
