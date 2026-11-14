@@ -75,6 +75,11 @@ class _FileSystem implements FencedPluginInstallFileSystem {
   final List<String> calls = [];
   final Map<String, int> _highestFence = {};
 
+  void _assertFence(PluginInstallStaging staging) {
+    final highest = _highestFence[staging.operationId] ?? 0;
+    if (staging.fencingToken < highest) throw StateError('Stale filesystem fencing token.');
+  }
+
   @override
   Future<bool> advanceFence({
     required String operationId,
