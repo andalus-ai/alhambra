@@ -135,6 +135,46 @@ void main() {
           PluginRecoveryJobStatus.running);
     });
 
+    test('refuses expiry when a planned job contains a started step', () async {
+      final store = InMemoryPluginLifecycleRecoveryJobStore();
+      final now = DateTime.utc(2026, 11, 14);
+      final job = PluginLifecycleRecoveryJob.planned(
+        jobId: 'job-started-step',
+        idempotencyKey: 'idem-started-step',
+        operationId: 'operation-started-step',
+        action: PluginRecoveryJobAction.resumeStartup,
+        orderedPluginIds: ['core', 'app'],
+        at: now,
+        expiresAt: now.add(const Duration(minutes: 1)),
+        steps: [
+          PluginRecoveryJobStep(
+            pluginId: 'core',
+            ordinal: 0,
+            status: PluginRecoveryJobStepStatus.running,
+            startedAt: now,
+          ),
+          PluginRecoveryJobStep(pluginId: 'app', ordinal: 1),
+        ],
+      );
+      await store.insertIfAbsent(job);
+      final controller = PluginLifecycleRecoveryJobExpirationController(
+        store: store,
+        clock: () => now.add(const Duration(days: 1)),
+      );
+
+      expect((await controller.inspect(jobId: job.jobId)).disposition,
+          PluginRecoveryJobExpirationDisposition.hasStarted);
+      await expectLater(
+        controller.expire(
+          jobId: job.jobId,
+          expectedRevision: job.revision,
+        ),
+        throwsStateError,
+      );
+      expect((await store.read(job.jobId))!.status,
+          PluginRecoveryJobStatus.planned);
+    });
+
     test('rejects stale revisions and repeated expiry', () async {
       final store = InMemoryPluginLifecycleRecoveryJobStore();
       final expiresAt = DateTime.utc(2026, 11, 15);
