@@ -7,12 +7,17 @@ import 'package:sqlite3/sqlite3.dart';
 /// SQLite-backed lifecycle event store with transactional idempotent writes.
 ///
 /// The adapter accepts a host-owned [Database] or can open and own one using
-/// [SqliteCompositionLifecycleEventStore.open]. SQLite calls are synchronous;
-/// applications with latency-sensitive UI threads should host the database
-/// on a dedicated isolate and communicate with it through their own adapter.
+/// [SqliteCompositionLifecycleEventStore.open]. SQLite calls are synchronous.
+/// UI hosts should use the isolate worker adapter to move database work
+/// to a dedicated isolate.
 final class SqliteCompositionLifecycleEventStore
     implements CompositionLifecycleEventStore {
-  static const int schemaVersion = 1;
+  static const int schemaVersion = 2;
+
+  static final List<_SqliteSchemaMigration> _migrations = [
+    _SqliteSchemaMigration(version: 1, apply: _createInitialSchema),
+    _SqliteSchemaMigration(version: 2, apply: _addCombinedStatusOperationIndex),
+  ];
 
   final Database database;
   final CompositionLifecycleEventJsonCodec codec;
@@ -58,64 +63,77 @@ final class SqliteCompositionLifecycleEventStore
     database.execute('PRAGMA busy_timeout = 5000');
     database.execute('PRAGMA journal_mode = WAL');
 
-    final version = database.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > schemaVersion) {
+    final currentVersion =
+        database.select('PRAGMA user_version').first['user_version'] as int;
+    if (currentVersion > schemaVersion) {
       throw StateError(
-        'Lifecycle database schema $version is newer than supported $schemaVersion.',
+        'Lifecycle database schema $currentVersion is newer than supported $schemaVersion.',
       );
     }
-    if (version == 0) _createSchema();
+
+    for (final migration in _migrations) {
+      if (migration.version <= currentVersion) continue;
+      database.execute('BEGIN IMMEDIATE');
+      try {
+        migration.apply(database);
+        database.execute('PRAGMA user_version = ${migration.version}');
+        database.execute('COMMIT');
+      } on Object {
+        database.execute('ROLLBACK');
+        rethrow;
+      }
+    }
   }
 
-  void _createSchema() {
-    database.execute('BEGIN IMMEDIATE');
-    try {
-      database.execute('''
-        CREATE TABLE IF NOT EXISTS lifecycle_events (
-          event_id TEXT PRIMARY KEY NOT NULL,
-          event_id_sort_key TEXT NOT NULL,
-          correlation_id TEXT NOT NULL,
-          operation TEXT NOT NULL,
-          status TEXT NOT NULL,
-          timestamp_micros INTEGER NOT NULL,
-          payload TEXT NOT NULL
-        )
-      ''');
-      database.execute('''
-        CREATE TABLE IF NOT EXISTS lifecycle_event_owners (
-          event_id TEXT NOT NULL,
-          owner_id TEXT NOT NULL,
-          PRIMARY KEY (event_id, owner_id),
-          FOREIGN KEY (event_id) REFERENCES lifecycle_events(event_id)
-            ON DELETE CASCADE
-        )
-      ''');
-      database.execute(
-        'CREATE INDEX IF NOT EXISTS idx_lifecycle_time '
-        'ON lifecycle_events(timestamp_micros, event_id_sort_key)',
-      );
-      database.execute(
-        'CREATE INDEX IF NOT EXISTS idx_lifecycle_correlation_time '
-        'ON lifecycle_events(correlation_id, timestamp_micros, event_id_sort_key)',
-      );
-      database.execute(
-        'CREATE INDEX IF NOT EXISTS idx_lifecycle_operation_time '
-        'ON lifecycle_events(operation, timestamp_micros, event_id_sort_key)',
-      );
-      database.execute(
-        'CREATE INDEX IF NOT EXISTS idx_lifecycle_status_time '
-        'ON lifecycle_events(status, timestamp_micros, event_id_sort_key)',
-      );
-      database.execute(
-        'CREATE INDEX IF NOT EXISTS idx_lifecycle_owner_time '
-        'ON lifecycle_event_owners(owner_id, event_id)',
-      );
-      database.execute('PRAGMA user_version = $schemaVersion');
-      database.execute('COMMIT');
-    } on Object {
-      database.execute('ROLLBACK');
-      rethrow;
-    }
+  static void _createInitialSchema(Database database) {
+    database.execute('''
+      CREATE TABLE IF NOT EXISTS lifecycle_events (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        event_id_sort_key TEXT NOT NULL,
+        correlation_id TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        status TEXT NOT NULL,
+        timestamp_micros INTEGER NOT NULL,
+        payload TEXT NOT NULL
+      )
+    ''');
+    database.execute('''
+      CREATE TABLE IF NOT EXISTS lifecycle_event_owners (
+        event_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        PRIMARY KEY (event_id, owner_id),
+        FOREIGN KEY (event_id) REFERENCES lifecycle_events(event_id)
+          ON DELETE CASCADE
+      )
+    ''');
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_time '
+      'ON lifecycle_events(timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_correlation_time '
+      'ON lifecycle_events(correlation_id, timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_operation_time '
+      'ON lifecycle_events(operation, timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_status_time '
+      'ON lifecycle_events(status, timestamp_micros, event_id_sort_key)',
+    );
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_owner_time '
+      'ON lifecycle_event_owners(owner_id, event_id)',
+    );
+  }
+
+  /// Adds an index for the common status + operation + chronological query.
+  static void _addCombinedStatusOperationIndex(Database database) {
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_lifecycle_status_operation_time '
+      'ON lifecycle_events(status, operation, timestamp_micros, event_id_sort_key)',
+    );
   }
 
   @override
@@ -236,6 +254,73 @@ final class SqliteCompositionLifecycleEventStore
     );
   }
 
+  /// Removes events older than [retainFrom] and/or keeps only the newest
+  /// [maxEvents] records.
+  ///
+  /// [retainFrom] is inclusive. When both policies are supplied, the time
+  /// filter is applied first and [maxEvents] then caps the remaining newest
+  /// records, ordered by (timestamp, event ID). Returns the number removed.
+  ///
+  /// Deletion and owner-association cleanup are atomic. This does not shrink
+  /// the database file; use [checkpoint] for WAL maintenance and schedule
+  /// VACUUM separately when reclaiming database-file space is necessary.
+  Future<int> compact({
+    DateTime? retainFrom,
+    int? maxEvents,
+  }) async {
+    _ensureOpen();
+    if (retainFrom == null && maxEvents == null) {
+      throw ArgumentError('Provide retainFrom, maxEvents, or both.');
+    }
+    if (maxEvents != null && maxEvents < 1) {
+      throw ArgumentError.value(maxEvents, 'maxEvents', 'Must be greater than zero.');
+    }
+
+    database.execute('BEGIN IMMEDIATE');
+    try {
+      final before = database.select(
+        'SELECT COUNT(*) AS count FROM lifecycle_events',
+      ).single['count'] as int;
+      if (retainFrom != null) {
+        database.execute(
+          'DELETE FROM lifecycle_events WHERE timestamp_micros < ?',
+          [retainFrom.toUtc().microsecondsSinceEpoch],
+        );
+      }
+      if (maxEvents != null) {
+        database.execute(
+          'DELETE FROM lifecycle_events WHERE event_id NOT IN ('
+          'SELECT event_id FROM lifecycle_events '
+          'ORDER BY timestamp_micros DESC, event_id_sort_key DESC LIMIT ?'
+          ')',
+          [maxEvents],
+        );
+      }
+      final after = database.select(
+        'SELECT COUNT(*) AS count FROM lifecycle_events',
+      ).single['count'] as int;
+      database.execute('COMMIT');
+      return before - after;
+    } on Object {
+      database.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  /// Runs a SQLite WAL checkpoint and returns SQLite's checkpoint counters.
+  SqliteWalCheckpointResult checkpoint({
+    SqliteWalCheckpointMode mode = SqliteWalCheckpointMode.passive,
+  }) {
+    _ensureOpen();
+    final row = database.select('PRAGMA wal_checkpoint(${mode.name.toUpperCase()})').single;
+    return SqliteWalCheckpointResult(
+      busy: row['busy'] as int,
+      logFrames: row['log'] as int,
+      checkpointedFrames: row['checkpointed'] as int,
+      mode: mode,
+    );
+  }
+
   /// Closes the database only when this store opened and owns it.
   Future<void> close() async {
     if (_closed) return;
@@ -252,3 +337,47 @@ final class SqliteCompositionLifecycleEventStore
 String _eventIdSortKey(String value) => value.codeUnits
     .map((unit) => unit.toRadixString(16).padLeft(4, '0'))
     .join();
+
+/// Supported SQLite WAL checkpoint strategies.
+enum SqliteWalCheckpointMode {
+  /// Checkpoint without waiting for readers or writers.
+  passive,
+
+  /// Wait for readers to finish; allow writers to continue.
+  full,
+
+  /// Wait for readers and writers, then restart the WAL.
+  restart,
+
+  /// Truncate the WAL after checkpointing all possible frames.
+  truncate,
+}
+
+/// Raw checkpoint counters returned by SQLite.
+final class SqliteWalCheckpointResult {
+  final int busy;
+  final int logFrames;
+  final int checkpointedFrames;
+  final SqliteWalCheckpointMode mode;
+
+  const SqliteWalCheckpointResult({
+    required this.busy,
+    required this.logFrames,
+    required this.checkpointedFrames,
+    required this.mode,
+  });
+
+  bool get fullyCheckpointed =>
+      busy == 0 && logFrames >= 0 && checkpointedFrames == logFrames;
+}
+
+/// One ordered, transactional SQLite schema migration.
+final class _SqliteSchemaMigration {
+  final int version;
+  final void Function(Database database) apply;
+
+  const _SqliteSchemaMigration({
+    required this.version,
+    required this.apply,
+  });
+}

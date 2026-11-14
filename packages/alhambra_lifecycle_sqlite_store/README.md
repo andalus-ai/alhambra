@@ -37,16 +37,27 @@ host retains ownership and `store.close()` does not dispose the database.
   Unicode characters.
 - The event codec payload is retained as the canonical source of event fields;
   indexed columns are query projections, not a replacement event schema.
-- Schema version is tracked with `PRAGMA user_version`. The adapter rejects
-  databases created by a newer schema version.
+- Schema version is tracked with `PRAGMA user_version`. Ordered migrations run
+  one at a time inside transactions; a failed migration rolls back without
+  advancing the version. Databases created by a newer schema are rejected.
+- Version 2 adds a composite status/operation/time index for combined filtered
+  history queries; version 1 databases upgrade automatically.
 - File-backed databases use WAL mode and a 5-second busy timeout.
 
 ## Operational considerations
 
-The `sqlite3` Dart API is synchronous. This adapter wraps operations in the
-asynchronous store interface, but it does not move database work off the
-calling isolate. Applications with latency-sensitive UI threads should own
-the database on a dedicated isolate and expose a message-based adapter.
+The `sqlite3` Dart API is synchronous. The direct adapter preserves a
+simple host-owned connection model and does not move work off the calling
+isolate. Flutter/UI hosts should use `SqliteLifecycleEventStoreWorker.open`:
+it starts a long-lived isolate, opens the database there, and transfers only
+JSON event payloads and primitive query values across the message boundary.
+SQLite connections and statements never cross isolates. The worker serializes
+commands and exposes explicit `close()` and `checkpoint()` operations.
+
+Both adapters expose explicit WAL checkpointing. PASSIVE is recommended for
+routine maintenance; FULL, RESTART, and TRUNCATE are available for controlled
+maintenance. Results include SQLite's busy, log-frame, and checkpointed-frame
+counters so callers can detect incomplete checkpoints.
 
 The adapter does not own databases passed to its constructor. Only instances
 created with `SqliteCompositionLifecycleEventStore.open()` close their
@@ -54,3 +65,35 @@ database when `close()` is called.
 
 Run the shared behavioral contract and adapter-specific tests with
 `dart test` from this package.
+
+## Retention and compaction
+
+The direct SQLite adapter and isolate worker expose `compact`, matching the
+JSONL adapter's retention policy:
+
+- `retainFrom` is an inclusive UTC boundary; older events are deleted.
+- `maxEvents` keeps the newest N events ordered by timestamp and event ID.
+- When both are supplied, the time filter is applied first, then the count cap.
+- At least one policy is required and `maxEvents` must be greater than zero.
+- Event deletion and owner-association cleanup run in one transaction; the
+  method returns the number of deleted events.
+
+SQLite compaction deletes rows but does not automatically run `VACUUM` or
+truncate the WAL. This avoids surprising long-running maintenance work during
+retention. Use the explicit WAL checkpoint API for checkpointing; schedule
+`VACUUM` separately during a controlled maintenance window if reclaiming the
+main database file's disk space is required.
+
+## Performance checks
+
+Run the local smoke benchmark from this package:
+
+```sh
+dart run benchmark/sqlite_lifecycle_store_benchmark.dart 10000
+```
+
+The harness reports append throughput, a filtered owner/status query, and WAL
+checkpoint counters. It is intentionally not a CI threshold: compare runs only
+when Dart/SQLite versions, machine, filesystem, and event count are recorded.
+The adapter tests also inspect `EXPLAIN QUERY PLAN` for the combined
+status/operation query path.
