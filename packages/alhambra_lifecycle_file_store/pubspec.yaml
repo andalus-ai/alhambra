@@ -13,4 +13,6 @@ dependencies:
     path: ../alhambra_plugin_runtime
 
 dev_dependencies:
+  alhambra_lifecycle_store_test:
+    path: ../alhambra_lifecycle_store_test
   test: ^1.25.0

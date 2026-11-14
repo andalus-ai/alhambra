@@ -22,6 +22,7 @@ Start here:
 
 ## Plugin contracts and lifecycle
 - [Plugin developer guide](PLUGIN_DEVELOPER_GUIDE.md) — implement, compose, test and operate a plugin.
+- [Plugin test utilities](../packages/alhambra_plugin_test/README.md) — in-process test host, lifecycle failure checks, metadata validation and conformance checks.
 - [Plugin capability negotiation](PLUGIN_CAPABILITY_NEGOTIATION.md) — version compatibility and required/optional resolution.
 - [Dynamic capability activation](DYNAMIC_CAPABILITY_ACTIVATION.md) — runtime capability activation boundaries.
 - [Plugin startup capability gate](PLUGIN_STARTUP_CAPABILITY_GATE.md) — startup preconditions and capability checks.
@@ -31,6 +32,8 @@ Start here:
 - [Governed plugin revocation execution](GOVERNED_PLUGIN_REVOCATION_EXECUTION.md) — approval and execution semantics.
 - [Durable plugin revocation recovery](DURABLE_PLUGIN_REVOCATION_RECOVERY.md) — journal, reconciliation and recovery decisions.
 - [Transactional revocation audit outbox](TRANSACTIONAL_REVOCATION_AUDIT_OUTBOX.md) — atomic outcome/audit boundary and at-least-once dispatch.
+- [PostgreSQL plugin revocation persistence](POSTGRES_PLUGIN_REVOCATION_PERSISTENCE.md) — multi-worker durable journal and SKIP LOCKED outbox claims.
+- [Revocation persistence adapter conformance](REVOCATION_PERSISTENCE_ADAPTER_CONFORMANCE.md) — shared behavioral invariants for SQLite and PostgreSQL stores.
 
 ## Composition persistence and compatibility
 - [Composition persistence and recovery](COMPOSITION_PERSISTENCE_AND_RECOVERY.md) — persistence boundaries and interrupted composition.

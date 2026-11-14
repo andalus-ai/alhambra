@@ -1,0 +1,19 @@
+name: alhambra_lifecycle_sqlite_store
+description: SQLite-backed composition lifecycle event store for Alhambra.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  alhambra_plugin_api:
+    path: ../alhambra_plugin_api
+  alhambra_plugin_runtime:
+    path: ../alhambra_plugin_runtime
+  sqlite3: ^2.7.5
+
+dev_dependencies:
+  alhambra_lifecycle_store_test:
+    path: ../alhambra_lifecycle_store_test
+  test: ^1.25.0

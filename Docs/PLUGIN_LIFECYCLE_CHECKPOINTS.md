@@ -190,3 +190,91 @@ This integration records lifecycle progress and provides a read-only recovery
 planner. It does not execute recovery actions, reconstruct plugin instances,
 or guarantee distributed exactly-once behavior. Those remain host-level
 responsibilities.
+
+
+## Durable recovery jobs
+
+`PluginLifecycleRecoveryJob` records the host's durable intent for a dependency-ordered recovery batch. It has a stable job ID, idempotency key, operation ID, action, immutable ordered target list, revision, timestamps, optional initiating-actor/correlation metadata, and one progress step per plugin. Step records carry the checkpoint version observed during planning, the execution operation ID, timestamps, and sanitized outcome metadata.
+
+`PluginLifecycleRecoveryJobStore` is an aggregate persistence boundary. Hosts must implement `insertIfAbsent` and revision-based `compareAndSet` atomically across every process that can update a job. The in-memory implementation is for tests and single-isolate development only. The job record must be committed before plugin side effects begin; a production host should update the step to running before invoking the recovery runner and persist the outcome immediately after it returns.
+
+The job aggregate intentionally does not duplicate plugin checkpoint state. Per-plugin checkpoints remain authoritative for lifecycle progress; the job records intent, ordering, and the host's execution history. A job's expected checkpoint operation ID and sequence allow the host to detect stale plans.
+
+### Restart inspection
+
+`PluginLifecycleRecoveryJobPlanner.inspect()` is read-only. It compares the persisted job steps with current per-plugin checkpoints and the live active plugin IDs supplied by the host. It reports completed-and-verified, pending, running-needs-inspection, failed-needs-decision, skipped-needs-decision, missing-checkpoint, changed-checkpoint, and active-state-mismatch findings.
+
+A running step after restart is always ambiguous. The planner never retries it, marks it complete, mutates either store, or invokes plugin hooks. Hosts must inspect external side effects and issue a fresh authorized decision. Likewise, failed or skipped steps require a new decision rather than silently continuing the old request.
+
+This increment defines the durable job aggregate and restart inspection contract; it does not yet wire job writes into `executeBatch()`. That integration must preserve the ordering: persist job intent, persist a step's running claim, execute exactly one plugin recovery, persist the step outcome, then advance. If the process stops between any two writes, the planner exposes the ambiguity rather than assuming exactly-once behavior.
+
+
+## Journaled recovery batch execution
+
+`PluginLifecycleRecoveryRunner.executeBatchWithJob()` connects the recovery
+runner to a pre-authorized `PluginLifecycleRecoveryJob`. Before execution it
+re-runs dependency/checkpoint preflight and verifies that the job's ordered
+plugin IDs, action, expected checkpoint operation IDs/sequences, and reserved
+execution operation IDs match the fresh batch request. Only a `planned` job
+can be claimed; an already-running, failed, completed, or otherwise changed
+job is rejected.
+
+The runner then transitions the job to running and, for each plugin:
+
+1. Compare-and-set the step to running before invoking plugin code.
+2. Execute the existing controlled single-plugin recovery path.
+3. Compare-and-set the step to completed before advancing.
+
+On an execution failure, the runner records a sanitized failed-step summary
+and stops. Later steps remain pending. If writing the failed outcome itself
+fails, the running claim remains as an explicit ambiguous state.
+
+Critically, a successful plugin side effect followed by a failed journal
+outcome write is not converted into a failed step and is never retried. The
+step remains running so restart inspection requires host review. The same
+applies if the process stops after claiming a step but before recording its
+outcome. A completed job is written only after every completed step has been
+persisted.
+
+The job must be created with the exact dependency order, expected checkpoint
+operation ID/sequence for each plugin, and a reserved unique execution
+operation ID per step. The host should persist that planned job before
+calling `executeBatchWithJob()`. The supplied request's operation ID factory
+must return those reserved IDs. This API does not yet provide a standalone
+read-only `planBatch()` builder; that is the next planning/approval surface.
+
+The job store's compare-and-set implementation must be atomic across processes.
+The in-memory implementation is not a distributed lock or durable store. The
+runner's lifecycle gate serializes work only within its `PluginManager`
+instance. No automatic replay, exactly-once guarantee, or external side-effect
+verification is provided.
+
+
+## Read-only recovery batch planning and approval
+
+`PluginLifecycleRecoveryBatchPlanner.planBatch()` builds an immutable, read-only
+snapshot before a host creates a durable recovery job. The plan includes the
+recovery action, stable dependency order, each target's expected checkpoint
+operation ID and sequence, and one reserved execution operation ID per step.
+It also reports blockers and warnings. Startup is ordered prerequisite-first;
+shutdown compensation is ordered dependent-first.
+
+Planning runs under the manager's local lifecycle batch gate so its view of
+active plugins cannot interleave with another lifecycle batch on that same
+manager. It does not write checkpoints or jobs, mutate the manager or health
+registry, or invoke plugin hooks. It does not reserve identifiers in a
+distributed allocator; the host's operation ID factory must provide IDs with
+the required uniqueness scope.
+
+After review and explicit host authorization, call `plan.toJob(...)` to
+materialize the exact `PluginLifecycleRecoveryJob` intent. Persist that job
+with `insertIfAbsent` before calling `executeBatchWithJob()`. The plan-to-job
+conversion is pure and preserves the exact dependency order, checkpoint
+snapshots, and execution operation IDs.
+
+A plan is a point-in-time review artifact, not a lock, approval token, or
+execution guarantee. Checkpoints or external conditions can change after
+planning. `executeBatchWithJob()` independently repeats preflight and rejects
+a job whose action, ordered targets, checkpoint snapshots, or reserved
+operation IDs no longer match. The host owns authorization, persistence,
+idempotency-key policy, and any approval audit trail.
