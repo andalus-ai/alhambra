@@ -130,3 +130,8 @@ The 100K and 1M profiles are intended for local scale characterization and
 should not be treated as CI thresholds. Compare runs only when Dart/SQLite
 versions, machine, filesystem, and event count are recorded. The adapter tests
 also inspect `EXPLAIN QUERY PLAN` for the combined status/operation query path.
+
+## Explicit maintenance API
+
+`SqliteCompositionLifecycleEventStore` and `SqliteLifecycleEventStoreWorker` implement `CompositionLifecycleStorageMaintenanceProvider`. Use `maintain()` to apply retention and optionally run a passive WAL checkpoint. The result includes deleted-record count, checkpoint completion, busy/log/checkpointed frame counters, and warnings when SQLite cannot checkpoint every frame. A successful checkpoint does not shrink the main database file; `VACUUM` remains a separate, potentially expensive operation and is intentionally not automated. The host owns scheduling, policy, and maintenance windows.
+
