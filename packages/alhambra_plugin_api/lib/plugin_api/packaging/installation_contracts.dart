@@ -85,7 +85,9 @@ abstract interface class PluginInstallFileSystem {
 
   Future<void> discardStaging(PluginInstallStaging staging);
 
-  /// Read-only inspection. Must not repair, delete, promote or mutate files.
+  /// Read-only, operation-scoped inspection. The adapter must prove staging
+  /// ownership from the opaque handle or operation marker, not from path
+  /// similarity. Must not repair, delete, promote or mutate files.
   Future<PluginInstallRecoverySnapshot> inspectOperation({
     required String operationId,
     required String pluginId,
@@ -178,8 +180,9 @@ abstract interface class TransactionalInstalledPluginStore
 
 /// Read-only facts returned by a host filesystem adapter during reconciliation.
 ///
-/// [destinationOwnedByOperation] must be based on adapter-owned provenance
-/// (for example an operation marker), not merely on a matching path name.
+/// Both staging and destination facts must be based on adapter-owned
+/// operation provenance (for example a durable operation marker), not merely
+/// on matching path names.
 final class PluginInstallRecoverySnapshot {
   final bool stagingExists;
   final bool destinationExists;
@@ -214,7 +217,8 @@ final class PluginInstallRecoverySnapshot {
 ///
 /// The compare-and-set must be atomic and durable. It must update only when
 /// the latest entry for [operationId] still has both [expectedStatus] and
-/// [expectedUpdatedAt].
+/// [expectedUpdatedAt]. The host must fence the original installer worker or
+/// prove its operation lease has expired before allowing a recovery claim.
 abstract interface class PluginInstallRecoveryJournal
     implements PluginInstallJournal {
   Future<bool> compareAndSet({
