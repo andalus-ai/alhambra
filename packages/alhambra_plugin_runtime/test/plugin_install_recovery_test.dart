@@ -5,11 +5,18 @@ import 'package:flutter_test/flutter_test.dart';
 const _hash =
     'sha256:0000000000000000000000000000000000000000000000000000000000000000';
 
-class _Journal implements PluginInstallRecoveryJournal {
+class _Journal implements FencedPluginInstallRecoveryJournal {
   final Map<String, PluginInstallJournalEntry> entries = {};
+  final Map<String, int> _highestFence = {};
 
   @override
   Future<void> write(PluginInstallJournalEntry entry) async {
+    final token = entry.fencingToken;
+    if (token != null) {
+      final highest = _highestFence[entry.operationId] ?? 0;
+      if (token < highest) throw StateError('Stale install fencing token.');
+      _highestFence[entry.operationId] = token;
+    }
     entries[entry.operationId] = entry;
   }
 
@@ -33,12 +40,18 @@ class _Journal implements PluginInstallRecoveryJournal {
     if (current == null ||
         current.status != expectedStatus ||
         current.updatedAt != expectedUpdatedAt) return false;
+    final token = replacement.fencingToken;
+    if (token != null) {
+      final highest = _highestFence[operationId] ?? 0;
+      if (token < highest) return false;
+      _highestFence[operationId] = token;
+    }
     entries[operationId] = replacement;
     return true;
   }
 }
 
-class _FileSystem implements PluginInstallFileSystem {
+class _FileSystem implements FencedPluginInstallFileSystem {
   bool stagingExists = false;
   bool destinationExists = false;
   bool destinationOwned = false;
@@ -50,10 +63,12 @@ class _FileSystem implements PluginInstallFileSystem {
     required String operationId,
     required String pluginId,
     required String version,
+    int fencingToken = 0,
   }) async => PluginInstallStaging(
         operationId: operationId,
         pluginId: pluginId,
         opaqueHandle: 'stage-$operationId',
+        fencingToken: fencingToken,
       );
 
   @override
