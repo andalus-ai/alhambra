@@ -81,6 +81,18 @@ class _FileSystem implements FencedPluginInstallFileSystem {
   final List<String> calls = [];
   final List<String> files = [];
   bool failPromote = false;
+  final Map<String, int> _highestFence = {};
+
+  @override
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  }) async {
+    final highest = _highestFence[operationId] ?? 0;
+    if (fencingToken < highest) return false;
+    _highestFence[operationId] = fencingToken;
+    return true;
+  }
 
   @override
   Future<PluginInstallStaging> createStaging({
@@ -174,6 +186,17 @@ class _FileSystem implements FencedPluginInstallFileSystem {
 class _Journal implements FencedPluginInstallJournal {
   final List<PluginInstallJournalEntry> entries = [];
   final Map<String, int> _highestFence = {};
+
+  @override
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  }) async {
+    final highest = _highestFence[operationId] ?? 0;
+    if (fencingToken < highest) return false;
+    _highestFence[operationId] = fencingToken;
+    return true;
+  }
 
   @override
   Future<void> write(PluginInstallJournalEntry entry) async {
