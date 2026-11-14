@@ -127,7 +127,7 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
     final PluginPayloadDigest digest;
     try {
       digest = await integrity.digest(package);
-    } catch (error) {
+    } catch (_) {
       return PackageVerificationFailed([
         VerificationIssue(
           code: 'INTEGRITY_CHECK_FAILED',
@@ -183,7 +183,17 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
         ),
       ]);
     }
-    if (key.notBefore != null &&\n        key.notAfter != null &&\n        !key.notAfter!.isAfter(key.notBefore!)) {\n      return PackageVerificationFailed(const [\n        VerificationIssue(\n          code: 'INVALID_SIGNING_KEY_VALIDITY',\n          message: 'Signing key validity interval is invalid.',\n        ),\n      ]);\n    }\n    if (key.notAfter != null && !now.isBefore(key.notAfter!)) {
+    if (key.notBefore != null &&
+        key.notAfter != null &&
+        !key.notAfter!.isAfter(key.notBefore!)) {
+      return PackageVerificationFailed(const [
+        VerificationIssue(
+          code: 'INVALID_SIGNING_KEY_VALIDITY',
+          message: 'Signing key validity interval is invalid.',
+        ),
+      ]);
+    }
+    if (key.notAfter != null && !now.isBefore(key.notAfter!)) {
       return PackageVerificationFailed(const [
         VerificationIssue(
           code: 'SIGNING_KEY_EXPIRED',
@@ -191,7 +201,8 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
         ),
       ]);
     }
-    if ((publisher != null || key.publisherId != null) &&\n        key.publisherId != publisher?.id) {
+    if ((publisher != null || key.publisherId != null) &&
+        key.publisherId != publisher?.id) {
       return PackageVerificationFailed(const [
         VerificationIssue(
           code: 'SIGNING_KEY_PUBLISHER_MISMATCH',
