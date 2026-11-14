@@ -48,3 +48,7 @@ alhambra_plugin_api.
 - Recovery execution requires explicit operator identity, approval ID, fresh evidence and an atomic journal compare-and-set claim.
 - If recovery side effects or outcome persistence are ambiguous, leave the operation unresolved for manual reconciliation; do not automatically repeat it.
 - Recovery adapters must document and integration-test crash-safe idempotency for discard, rollback and finalization.
+
+- Recovery journal adapters must return one latest non-terminal entry per operation and atomically compare-and-set both status and observed update timestamp/revision.
+- Persist operator and approval identifiers before recovery side effects; enforce approval-ID uniqueness within the host audit scope and apply bounded, control-character-free validation.
+- Treat an interrupted rollback or recovery claim as manual review, not as permission to switch from rollback to commit.
