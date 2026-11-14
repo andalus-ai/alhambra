@@ -320,6 +320,8 @@ void main() {
       final archiver = PluginLifecycleRecoveryJobArchiver(
         jobStore: store,
         archive: archive,
+        digestProvider: _TestDigestProvider(),
+        digestAlgorithm: 'test-fnv32',
       );
 
       await expectLater(
@@ -331,6 +333,7 @@ void main() {
       );
       expect(archive.records, isEmpty);
     });
+  });
 
   group('PluginLifecycleRecoveryJobArchiveVerifier and Restorer', () {
     test('verifies and restores an archived terminal snapshot without execution', () async {
@@ -580,7 +583,5 @@ void main() {
       );
       expect(archive.records, hasLength(1));
     });
-  });
-
   });
 }
