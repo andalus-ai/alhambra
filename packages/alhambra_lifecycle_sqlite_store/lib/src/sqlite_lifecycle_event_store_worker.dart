@@ -13,7 +13,9 @@ import 'sqlite_composition_lifecycle_event_store.dart';
 /// serialized through one command port, preserving append order and ensuring
 /// that a single SQLite connection is never used concurrently.
 final class SqliteLifecycleEventStoreWorker
-    implements CompositionLifecycleEventStore, CompositionLifecycleStorageMaintenanceProvider {
+    implements
+        CompositionLifecycleEventStore,
+        CompositionLifecycleStorageMaintenanceProvider {
   final ReceivePort _responses;
   final ReceivePort _errors;
   final ReceivePort _exits;
