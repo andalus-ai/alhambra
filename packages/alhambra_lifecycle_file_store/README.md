@@ -116,3 +116,8 @@ atomicity guarantees beyond the host filesystem's documented behavior.
   cross-process locking.
 - Rename guarantees depend on the host filesystem and do not claim
   transactional durability against power loss or device failure.
+
+## Explicit maintenance API
+
+`JsonlCompositionLifecycleEventStore` implements `CompositionLifecycleStorageMaintenanceProvider`. Use `maintain()` to apply the existing inclusive time/count retention rules. The operation is serialized with appends through the store's write queue. JSONL has no WAL, so a requested checkpoint is reported as unsupported in the result warnings rather than silently treated as success. Scheduling and maintenance windows remain the host's responsibility.
+
