@@ -16,6 +16,13 @@ class _Plugin implements AlhambraPlugin {
   Future<void> deactivate(PluginContext context) async {}
 }
 
+class _Executor implements PluginLifecycleRecoveryExecutor {
+  @override
+  Future<void> execute(PluginLifecycleRecoveryExecutionContext context) async {
+    await context.resumeStartup();
+  }
+}
+
 PluginLifecycleCheckpoint _checkpoint(
   String id, {
   List<String> dependencies = const [],
@@ -147,6 +154,113 @@ void main() {
       expect(plan.isBlocked, isTrue);
       expect(plan.steps, isEmpty);
       expect(plan.blockers, contains('Recovery operation IDs must be unique within a batch.'));
+    });
+
+    test('blocks blank and duplicate target IDs', () async {
+      final store = InMemoryPluginLifecycleCheckpointStore();
+      await store.write(_checkpoint('a'));
+      final planner = PluginLifecycleRecoveryBatchPlanner(store: store, manager: PluginManager());
+
+      final blank = await planner.planBatch(PluginLifecycleRecoveryBatchRequest(
+        pluginIds: [' '],
+        action: PluginLifecycleRecoveryExecutionAction.resumeStartup,
+        operationIdFactory: (id) => 'new-$id',
+      ));
+      expect(blank.isBlocked, isTrue);
+      expect(blank.blockers, contains('Plugin IDs must not be blank.'));
+      expect(blank.blockers, contains('Select at least one plugin.'));
+
+      final duplicate = await planner.planBatch(PluginLifecycleRecoveryBatchRequest(
+        pluginIds: ['a', ' a '],
+        action: PluginLifecycleRecoveryExecutionAction.resumeStartup,
+        compiledPlugins: {'a': _Plugin('a')},
+        operationIdFactory: (id) => 'new-$id',
+      ));
+      expect(duplicate.isBlocked, isTrue);
+      expect(duplicate.blockers, contains('Duplicate plugin ID "a".'));
+    });
+
+    test('blocks inactive dependencies outside a startup batch', () async {
+      final store = InMemoryPluginLifecycleCheckpointStore();
+      await store.write(_checkpoint('app', dependencies: ['database']));
+      final planner = PluginLifecycleRecoveryBatchPlanner(store: store, manager: PluginManager());
+
+      final plan = await planner.planBatch(PluginLifecycleRecoveryBatchRequest(
+        pluginIds: ['app'],
+        action: PluginLifecycleRecoveryExecutionAction.resumeStartup,
+        compiledPlugins: {'app': _Plugin('app')},
+        operationIdFactory: (id) => 'new-$id',
+      ));
+
+      expect(plan.isBlocked, isTrue);
+      expect(plan.blockers, contains(
+        'Startup recovery for "app" requires inactive dependency "database" outside this batch.',
+      ));
+    });
+
+    test('rejects operation IDs that reuse the checkpoint operation ID', () async {
+      final store = InMemoryPluginLifecycleCheckpointStore();
+      await store.write(_checkpoint('a'));
+      final planner = PluginLifecycleRecoveryBatchPlanner(store: store, manager: PluginManager());
+
+      final plan = await planner.planBatch(PluginLifecycleRecoveryBatchRequest(
+        pluginIds: ['a'],
+        action: PluginLifecycleRecoveryExecutionAction.resumeStartup,
+        compiledPlugins: {'a': _Plugin('a')},
+        operationIdFactory: (_) => 'old-a',
+      ));
+
+      expect(plan.isBlocked, isTrue);
+      expect(plan.steps, isEmpty);
+      expect(plan.blockers.single, contains('must be non-empty and differ'));
+    });
+
+    test('approved plan becomes a persisted job executable by the journaled runner', () async {
+      final store = InMemoryPluginLifecycleCheckpointStore();
+      await store.write(_checkpoint('core'));
+      await store.write(_checkpoint('app', dependencies: ['core']));
+      final manager = PluginManager();
+      final core = _Plugin('core');
+      final app = _Plugin('app');
+      final planner = PluginLifecycleRecoveryBatchPlanner(store: store, manager: manager);
+      final request = PluginLifecycleRecoveryBatchRequest(
+        pluginIds: ['app', 'core'],
+        action: PluginLifecycleRecoveryExecutionAction.resumeStartup,
+        compiledPlugins: {'core': core, 'app': app},
+        operationIdFactory: (id) => 'reserved-$id',
+      );
+      final plan = await planner.planBatch(request);
+      expect(plan.isExecutable, isTrue);
+
+      final jobs = InMemoryPluginLifecycleRecoveryJobStore();
+      final job = plan.toJob(
+        jobId: 'approved-job',
+        idempotencyKey: 'approved-job-idempotency',
+        operationId: 'approved-batch-operation',
+        initiatedBy: 'operator',
+      );
+      expect(await jobs.insertIfAbsent(job), isTrue);
+
+      final runner = PluginLifecycleRecoveryRunner(
+        store: store,
+        manager: manager,
+        executor: _Executor(),
+      );
+      final report = await runner.executeBatchWithJob(
+        request: PluginLifecycleRecoveryBatchRequest(
+          pluginIds: ['app', 'core'],
+          action: PluginLifecycleRecoveryExecutionAction.resumeStartup,
+          compiledPlugins: {'core': core, 'app': app},
+          operationIdFactory: (id) => 'reserved-$id',
+        ),
+        jobStore: jobs,
+        jobId: 'approved-job',
+      );
+
+      expect(report.succeeded, isTrue);
+      expect(report.orderedPluginIds, ['core', 'app']);
+      expect((await jobs.read('approved-job'))!.status, PluginRecoveryJobStatus.completed);
+      expect(manager.activePlugins.map((plugin) => plugin.metadata.id), ['core', 'app']);
     });
 
     test('blocks stale or ineligible checkpoints without creating a job', () async {
