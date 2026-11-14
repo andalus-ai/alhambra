@@ -215,6 +215,8 @@ TransactionalPluginInstaller _installer({
   _Journal? journal,
   PluginInstallPreflight? preflight,
   PluginInstallLimits limits = const PluginInstallLimits(),
+  PluginInstallOperationLeaseStore? leaseStore,
+  String? workerId,
 }) {
   return TransactionalPluginInstaller(
     verifier: const _Verifier(),
@@ -223,6 +225,8 @@ TransactionalPluginInstaller _installer({
     installedStore: store ?? InMemoryInstalledPluginStore(),
     journal: journal ?? _Journal(),
     limits: limits,
+    leaseStore: leaseStore,
+    workerId: workerId,
     operationIdFactory: () => 'op-1',
     clock: () => DateTime.utc(2026, 1, 1),
   );
@@ -230,6 +234,53 @@ TransactionalPluginInstaller _installer({
 
 void main() {
   group('TransactionalPluginInstaller', () {
+    test('acquires and releases a worker lease around installation', () async {
+      final leases = InMemoryPluginInstallOperationLeaseStore();
+      final journal = _Journal();
+      final result = await _installer(
+        leaseStore: leases,
+        workerId: 'installer-a',
+        journal: journal,
+      ).install(_Package());
+      expect(result, isA<PluginInstalled>());
+
+      final nextOwner = await leases.acquire(
+        operationId: 'op-1',
+        ownerId: 'installer-b',
+        now: DateTime.utc(2026, 1, 1),
+        leaseDuration: const Duration(seconds: 30),
+      );
+      expect(nextOwner, isNotNull);
+      expect(nextOwner!.fencingToken, 2);
+    });
+
+    test('refuses an operation already leased by another worker', () async {
+      final leases = InMemoryPluginInstallOperationLeaseStore();
+      await leases.acquire(
+        operationId: 'op-1',
+        ownerId: 'installer-a',
+        now: DateTime.utc(2026, 1, 1),
+        leaseDuration: const Duration(seconds: 30),
+      );
+      final fs = _FileSystem();
+      final journal = _Journal();
+      await expectLater(
+        _installer(
+          leaseStore: leases,
+          workerId: 'installer-b',
+          fileSystem: fs,
+          journal: journal,
+        ).install(_Package()),
+        throwsA(isA<PluginInstallException>().having(
+          (error) => error.code,
+          'code',
+          'INSTALL_OPERATION_BUSY',
+        )),
+      );
+      expect(fs.calls, isEmpty);
+      expect(journal.entries, isEmpty);
+    });
+
     test('verifies, extracts, promotes and records before returning installed', () async {
       final fs = _FileSystem();
       final journal = _Journal();
