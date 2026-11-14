@@ -369,6 +369,49 @@ void main() {
     );
   });
 
+  test('PASSIVE checkpoint respects a concurrent reader snapshot', () async {
+    final path = '${directory.path}/wal-reader.sqlite';
+    store = SqliteCompositionLifecycleEventStore.open(path: path);
+    store!.database.execute('PRAGMA wal_autocheckpoint = 0');
+
+    final reader = sqlite3.open(path);
+    addTearDown(reader.dispose);
+    reader.execute('BEGIN');
+    reader.select('SELECT COUNT(*) FROM lifecycle_events');
+
+    for (var i = 0; i < 12; i++) {
+      await store!.append(CompositionLifecycleEvent(
+        eventId: 'reader-pinned-$i',
+        correlationId: 'reader-pinned-correlation',
+        operation: CompositionLifecycleOperation.activate,
+        status: CompositionLifecycleStatus.succeeded,
+        timestamp: DateTime.utc(2026, 9, 1).add(Duration(microseconds: i)),
+        nodeIds: const ['command:reader-pinned'],
+        ownerIds: const ['owner-reader-pinned'],
+      ));
+    }
+
+    final whileReaderOpen = store!.checkpoint(
+      mode: SqliteWalCheckpointMode.passive,
+    );
+    expect(whileReaderOpen.logFrames, greaterThan(0));
+    expect(
+      whileReaderOpen.checkpointedFrames,
+      lessThan(whileReaderOpen.logFrames),
+    );
+
+    reader.execute('COMMIT');
+    final afterReaderRelease = store!.checkpoint(
+      mode: SqliteWalCheckpointMode.full,
+    );
+    expect(afterReaderRelease.busy, 0);
+    expect(afterReaderRelease.fullyCheckpointed, isTrue);
+    expect(
+      await store!.query(CompositionLifecycleEventQuery()),
+      hasLength(12),
+    );
+  });
+
   test('worker exposes WAL checkpoint counters', () async {
     final worker = await SqliteLifecycleEventStoreWorker.open(
       path: '${directory.path}/worker-checkpoint.sqlite',
@@ -382,6 +425,42 @@ void main() {
     expect(result.logFrames, greaterThanOrEqualTo(-1));
     expect(result.checkpointedFrames, greaterThanOrEqualTo(-1));
   });
+  test('worker checkpoint reports reader-pinned WAL frames', () async {
+    final path = '${directory.path}/worker-wal-reader.sqlite';
+    final worker = await SqliteLifecycleEventStoreWorker.open(path: path);
+    addTearDown(worker.close);
+
+    final reader = sqlite3.open(path);
+    addTearDown(reader.dispose);
+    reader.execute('BEGIN');
+    reader.select('SELECT COUNT(*) FROM lifecycle_events');
+
+    for (var i = 0; i < 8; i++) {
+      await worker.append(CompositionLifecycleEvent(
+        eventId: 'worker-reader-pinned-$i',
+        correlationId: 'worker-reader-pinned-correlation',
+        operation: CompositionLifecycleOperation.activate,
+        status: CompositionLifecycleStatus.succeeded,
+        timestamp: DateTime.utc(2026, 9, 2).add(Duration(microseconds: i)),
+        nodeIds: const ['command:worker-reader-pinned'],
+        ownerIds: const ['owner-worker-reader-pinned'],
+      ));
+    }
+
+    final pinned = await worker.checkpoint(
+      mode: SqliteWalCheckpointMode.passive,
+    );
+    expect(pinned.logFrames, greaterThan(0));
+    expect(pinned.checkpointedFrames, lessThan(pinned.logFrames));
+
+    reader.execute('COMMIT');
+    final released = await worker.checkpoint(
+      mode: SqliteWalCheckpointMode.full,
+    );
+    expect(released.busy, 0);
+    expect(released.fullyCheckpointed, isTrue);
+  });
+
   test('rolls back the event row when owner association insertion fails', () async {
     store = SqliteCompositionLifecycleEventStore.open(
       path: '${directory.path}/rollback.sqlite',
