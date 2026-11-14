@@ -104,6 +104,21 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
         message: 'Publisher ${publisher.id} is blocked by policy.',
       ));
     }
+    if (publisher != null && publisher.id.trim().isEmpty) {
+      issues.add(const VerificationIssue(
+        code: 'INVALID_PUBLISHER_ID',
+        message: 'Publisher ID must not be empty.',
+      ));
+    }
+    if (signature != null &&
+        (signature.algorithm.trim().isEmpty ||
+            signature.keyId.trim().isEmpty ||
+            signature.signature.trim().isEmpty)) {
+      issues.add(const VerificationIssue(
+        code: 'INVALID_SIGNATURE_METADATA',
+        message: 'Signature algorithm, key ID and signature must be non-empty.',
+      ));
+    }
     if (signature == null &&
         (securityPolicy.requireSignature(package) ||
             !securityPolicy.allowUnsigned(package))) {
