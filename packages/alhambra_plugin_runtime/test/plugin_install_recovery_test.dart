@@ -10,6 +10,17 @@ class _Journal implements FencedPluginInstallRecoveryJournal {
   final Map<String, int> _highestFence = {};
 
   @override
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  }) async {
+    final highest = _highestFence[operationId] ?? 0;
+    if (fencingToken < highest) return false;
+    _highestFence[operationId] = fencingToken;
+    return true;
+  }
+
+  @override
   Future<void> write(PluginInstallJournalEntry entry) async {
     final token = entry.fencingToken;
     if (token != null) {
@@ -57,6 +68,18 @@ class _FileSystem implements FencedPluginInstallFileSystem {
   bool destinationOwned = false;
   bool rollbackAvailable = false;
   final List<String> calls = [];
+  final Map<String, int> _highestFence = {};
+
+  @override
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  }) async {
+    final highest = _highestFence[operationId] ?? 0;
+    if (fencingToken < highest) return false;
+    _highestFence[operationId] = fencingToken;
+    return true;
+  }
 
   @override
   Future<PluginInstallStaging> createStaging({
