@@ -362,6 +362,23 @@ final class SqlitePluginRevocationStore
         return PluginRevocationReplayResult(audit, PluginRevocationOutboxMessage(event: event, state: PluginRevocationOutboxState.pending, attempts: 0, nextAttemptAt: request.occurredAt.toUtc()));
       });
 
+  Future<List<PluginRevocationOperatorAction>> readOperatorActions() async {
+    _assertOpen();
+    final rows = _db.select(
+      'SELECT * FROM plugin_revocation_operator_action ORDER BY occurred_at, action_id',
+    );
+    return List.unmodifiable(rows.map((row) => PluginRevocationOperatorAction(
+      actionId: row['action_id']! as String,
+      actorId: row['actor_id']! as String,
+      reason: row['reason']! as String,
+      approvalReference: row['approval_reference']! as String,
+      targetEventId: row['target_event_id']! as String,
+      replayEventId: row['replay_event_id']! as String,
+      replayGeneration: row['replay_generation']! as int,
+      occurredAt: _parseDate(row['occurred_at']),
+    )));
+  }
+
   @override
   Future<List<PluginRevocationOutboxMessage>> claim({
     required String workerId,
