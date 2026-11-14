@@ -88,7 +88,11 @@ void main() {
 
     setUp(() {
       trustStore = DefaultPluginTrustStore();
-      verifier = DefaultPluginPackageVerifier(\n        trustStore: trustStore,\n        integrityVerifier: _FakeIntegrityVerifier(),\n        signatureVerifier: const _FakeSignatureVerifier(),\n      );
+      verifier = DefaultPluginPackageVerifier(
+        trustStore: trustStore,
+        integrityVerifier: _FakeIntegrityVerifier(),
+        signatureVerifier: const _FakeSignatureVerifier(),
+      );
     });
 
     test('verifies unsigned package under default community policy', () async {
@@ -180,7 +184,9 @@ void main() {
       resolver = DefaultPluginDependencyResolver(catalog: catalog);
       store = InMemoryInstalledPluginStore();
       manager = DefaultPluginLifecycleManager(
-        verifier: DefaultPluginPackageVerifier(\n          integrityVerifier: _FakeIntegrityVerifier(),\n        ),
+        verifier: DefaultPluginPackageVerifier(
+          integrityVerifier: _FakeIntegrityVerifier(),
+        ),
         dependencyResolver: resolver,
         store: store,
       );
