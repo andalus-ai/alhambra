@@ -544,7 +544,7 @@ void main() {
     ));
 
     final result = await store!.maintain(
-      const CompositionLifecycleStorageMaintenanceRequest(
+      CompositionLifecycleStorageMaintenanceRequest(
         maxEvents: 1,
         checkpoint: true,
       ),
