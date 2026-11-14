@@ -1,26 +1,40 @@
 import 'dart:async';
 
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
+
+import '../capabilities/capability_provider_registry.dart';
 import '../capabilities/plugin_capability_negotiator.dart';
 import '../extensions/extension_runtime.dart';
 import 'runtime_plugin_context.dart';
 
-typedef PluginCapabilityRequirementsResolver = Iterable<PluginCapabilityRequirement>
-    Function(AlhambraPlugin plugin);
+typedef PluginCapabilityRequirementsResolver =
+    Iterable<PluginCapabilityRequirement> Function(AlhambraPlugin plugin);
+
+final class PluginCapabilityNegotiationRecord {
+  final CapabilityNegotiationResult result;
+  final int? providerRevision;
+
+  const PluginCapabilityNegotiationRecord({
+    required this.result,
+    required this.providerRevision,
+  });
+}
 
 class PluginCapabilityNegotiationException implements Exception {
   final String pluginId;
   final CapabilityNegotiationResult result;
+  final int? providerRevision;
 
   const PluginCapabilityNegotiationException({
     required this.pluginId,
     required this.result,
+    this.providerRevision,
   });
 
   @override
   String toString() =>
       'PluginCapabilityNegotiationException: required capabilities for '
-      '"$pluginId" are incompatible.';
+      '"$pluginId" are incompatible (provider revision: $providerRevision).';
 }
 
 /// Manages compiled, application-selected plugins. Hosts construct plugin
@@ -28,27 +42,38 @@ class PluginCapabilityNegotiationException implements Exception {
 class PluginManager {
   final Map<String, AlhambraPlugin> _activePlugins = {};
   final Map<String, RuntimePluginContext> _contexts = {};
-  final Map<String, CapabilityNegotiationResult> _capabilityNegotiations = {};
+  final Map<String, PluginCapabilityNegotiationRecord>
+      _capabilityNegotiationRecords = {};
   final Map<String, Future<void>> _operationTails = {};
   Future<void> _lifecycleBatchTail = Future<void>.value();
 
   final ExtensionRuntime runtime;
   final PluginCapabilityNegotiator? capabilityNegotiator;
+  final CapabilityProviderRegistry? capabilityProviderRegistry;
   final List<PluginCapabilityDeclaration> capabilityDeclarations;
   final PluginCapabilityRequirementsResolver? capabilityRequirementsResolver;
 
   PluginManager({
     ExtensionRuntime? runtime,
     this.capabilityNegotiator,
+    this.capabilityProviderRegistry,
     Iterable<PluginCapabilityDeclaration> capabilityDeclarations = const [],
     this.capabilityRequirementsResolver,
   })  : runtime = runtime ?? ExtensionRuntime(),
         capabilityDeclarations =
-            List<PluginCapabilityDeclaration>.unmodifiable(capabilityDeclarations) {
+            List<PluginCapabilityDeclaration>.unmodifiable(
+          capabilityDeclarations,
+        ) {
     if ((capabilityNegotiator == null) !=
         (capabilityRequirementsResolver == null)) {
       throw ArgumentError(
         'capabilityNegotiator and capabilityRequirementsResolver must be provided together.',
+      );
+    }
+    if (capabilityProviderRegistry != null &&
+        this.capabilityDeclarations.isNotEmpty) {
+      throw ArgumentError(
+        'Use capabilityProviderRegistry or static capabilityDeclarations, not both.',
       );
     }
   }
@@ -58,7 +83,9 @@ class PluginManager {
   /// Startup and shutdown coordinators share this FIFO gate so their
   /// dependency plans, rollback, and health projections cannot interleave.
   /// Individual plugin operations remain serialized by [_serialize].
-  Future<T> runExclusiveLifecycleBatch<T>(Future<T> Function() operation) async {
+  Future<T> runExclusiveLifecycleBatch<T>(
+    Future<T> Function() operation,
+  ) async {
     final previous = _lifecycleBatchTail;
     final release = Completer<void>();
     _lifecycleBatchTail = release.future;
@@ -106,24 +133,42 @@ class PluginManager {
     final resolver = capabilityRequirementsResolver;
     if (negotiator == null || resolver == null) return;
 
+    // Capture exactly one immutable provider view for this activation decision.
+    final providerSnapshot = capabilityProviderRegistry?.snapshot();
+    final declarations =
+        providerSnapshot?.declarations ?? capabilityDeclarations;
     final result = negotiator.negotiate(
       requirements: resolver(plugin),
-      declarations: capabilityDeclarations,
+      declarations: declarations,
     );
-    _capabilityNegotiations[plugin.metadata.id] = result;
+    final record = PluginCapabilityNegotiationRecord(
+      result: result,
+      providerRevision: providerSnapshot?.revision,
+    );
+    _capabilityNegotiationRecords[plugin.metadata.id] = record;
+
     if (!result.canActivate) {
       throw PluginCapabilityNegotiationException(
         pluginId: plugin.metadata.id,
         result: result,
+        providerRevision: providerSnapshot?.revision,
       );
     }
   }
 
   /// Most recent negotiation outcomes, including failed pre-activation checks.
   Map<String, CapabilityNegotiationResult> get capabilityNegotiations =>
-      Map<String, CapabilityNegotiationResult>.unmodifiable(
-        _capabilityNegotiations,
-      );
+      Map<String, CapabilityNegotiationResult>.unmodifiable({
+        for (final entry in _capabilityNegotiationRecords.entries)
+          entry.key: entry.value.result,
+      });
+
+  /// Negotiation outcomes with the provider revision used for each decision.
+  Map<String, PluginCapabilityNegotiationRecord>
+      get capabilityNegotiationRecords =>
+          Map<String, PluginCapabilityNegotiationRecord>.unmodifiable(
+            _capabilityNegotiationRecords,
+          );
 
   /// Deactivates a plugin and always releases host-owned resources.
   Future<void> deactivate(String pluginId) {

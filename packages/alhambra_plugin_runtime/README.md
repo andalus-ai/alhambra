@@ -1,39 +1,77 @@
-<!--
-This README describes the package. If you publish this package to pub.dev,
-this README's contents appear on the landing page for your package.
+# Alhambra Plugin Runtime
 
-For information about how to write a good package README, see the guide for
-[writing package pages](https://dart.dev/tools/pub/writing-package-pages).
+Host-side runtime for registering, composing, reconciling, and observing plugin
+contributions. This package depends on the framework-neutral
+`alhambra_plugin_api` contracts and does not depend on a product UI.
 
-For general information about developing packages, see the Dart guide for
-[creating packages](https://dart.dev/guides/libraries/create-packages)
-and the Flutter guide for
-[developing packages and plugins](https://flutter.dev/to/develop-packages).
--->
+## Composition lifecycle observability
 
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
-
-## Features
-
-TODO: List what your package can do. Maybe include images, gifs, or videos.
-
-## Getting started
-
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
-
-## Usage
-
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder.
+`DefaultCompositionRuntime` implements
+`CompositionLifecycleObservability`. It retains a bounded event history,
+provides correlation and owner projections, and offers bounded asynchronous
+event subscriptions.
 
 ```dart
-const like = 'sample';
+final runtime = DefaultCompositionRuntime(
+  maxLifecycleEvents: 2000,
+  maxLifecycleEventSubscribers: 32,
+  maxPendingLifecycleEventsPerSubscriber: 256,
+);
+
+final subscription = runtime.subscribeLifecycleEvents((event) {
+  // Keep observers fast. Delivery is asynchronous and isolated from lifecycle
+  // callbacks, but callback work should still be handed off to a worker.
+  print('${event.correlationId}: ${event.operation.name} ${event.status.name}');
+});
+
+final transaction = runtime.beginTransaction(
+  correlationId: 'install-editor',
+  lifecycle: editorLifecycle,
+)..stage(CommandNode(commandId: 'save', ownerId: 'editor'));
+
+transaction.commit();
+
+final timeline = runtime.timelineForCorrelation('install-editor');
+final owner = runtime.ownerLifecycleSummary('editor');
+final recentFailures = runtime.queryLifecycleEvents(
+  status: CompositionLifecycleStatus.failed,
+  limit: 50,
+);
+
+subscription.cancel();
 ```
 
-## Additional information
+### Delivery and backpressure
 
-TODO: Tell users more about the package: where to find more information, how to
-contribute to the package, how to file issues, what response they can expect
-from the package authors, and more.
+- Lifecycle events are added to in-memory history synchronously.
+- Subscriber callbacks run in microtasks, never inline in a composition callback.
+- Each subscriber has its own bounded pending queue. The default capacity is
+  128 events; the newest event is dropped for that subscriber when full.
+- The default subscriber limit is 64. Exceeding it throws `StateError` rather
+  than silently creating unbounded fan-out.
+- `droppedLifecycleEventCount` reports aggregate subscriber drops;
+  `subscription.droppedEventCount` reports drops for one subscriber.
+- Listener exceptions are isolated. They do not change composition results.
+- Cancellation removes the subscriber and clears its queued events.
+- The event history defaults to 1,000 events and is a rolling in-memory window.
+  Query and timeline results are therefore limited to retained history.
+
+### Queries and projections
+
+`queryLifecycleEvents` supports correlation ID, owner ID, operation, status,
+inclusive `from`/`to` bounds, exclusive `before` pagination, and a result
+limit. Results retain event order (oldest first). `timelineForCorrelation`
+is a convenience projection. Owner summaries include current runtime state,
+retained event/failure counts, last event time, and last retained failure.
+
+The observability contracts live in `alhambra_plugin_api`; implementations
+can be replaced without coupling consumers to JSONL, a database, or a telemetry
+vendor. The JSONL lifecycle runtime facade also exposes the runtime's
+subscription and in-memory query methods, while its `query()` method reads
+durable history after flushing accepted journal events.
+
+## Packages
+
+- `alhambra_plugin_api`: stable plugin and observability contracts.
+- `alhambra_plugin_runtime`: in-memory composition runtime and observability.
+- `alhambra_lifecycle_file_store`: optional durable JSONL adapter.

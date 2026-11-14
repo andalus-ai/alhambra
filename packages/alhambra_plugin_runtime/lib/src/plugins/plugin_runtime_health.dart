@@ -130,6 +130,33 @@ class PluginRuntimeHealthRegistry {
     return snapshot;
   }
 
+  /// Replaces a stale projection with an authoritative host observation.
+  ///
+  /// Reconciliation is not a lifecycle event: it does not append to history or
+  /// increment [PluginRuntimeHealthSnapshot.transitionCount]. Historical
+  /// transitions remain available for diagnostics.
+  PluginRuntimeHealthSnapshot synchronize({
+    required String pluginId,
+    required PluginRuntimeState state,
+    DateTime? at,
+    String? reason,
+  }) {
+    final id = pluginId.trim();
+    if (id.isEmpty) {
+      throw ArgumentError.value(pluginId, 'pluginId', 'must not be empty');
+    }
+    final previous = _snapshots[id];
+    final snapshot = PluginRuntimeHealthSnapshot(
+      pluginId: id,
+      state: state,
+      updatedAt: at ?? DateTime.now().toUtc(),
+      reason: reason ?? 'Reconciled from authoritative PluginManager state',
+      transitionCount: previous?.transitionCount ?? 0,
+    );
+    _snapshots[id] = snapshot;
+    return snapshot;
+  }
+
   /// Remove projection state only; this does not perform plugin cleanup.
   void forget(String pluginId) {
     final id = pluginId.trim();
