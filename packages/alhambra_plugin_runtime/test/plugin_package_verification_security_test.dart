@@ -2,7 +2,7 @@ import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-const _digest = 'sha256:${'a' * 64}';
+const _digest = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 class _Package implements PluginPackage {
   @override
@@ -72,7 +72,7 @@ void main() {
 
     test('rejects payload tampering before accepting unsigned package', () async {
       final result = await DefaultPluginPackageVerifier(
-        integrityVerifier: const _Integrity('b' * 64),
+        integrityVerifier: const _Integrity('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
       ).verify(_Package());
       expect(result, isA<PackageVerificationFailed>());
       expect((result as PackageVerificationFailed).issues.single.code,
