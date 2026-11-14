@@ -214,6 +214,47 @@ void main() {
   });
 
   group('PluginInstallRecoveryExecutor', () {
+    test('recovery cannot claim an operation leased by an installer', () async {
+      final journal = _Journal()..entries['op-1'] = _entry();
+      final fs = _FileSystem()..stagingExists = true;
+      final store = InMemoryInstalledPluginStore();
+      final finding = (await PluginInstallRecoveryPlanner(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+      ).inspect()).findings.single;
+      final leases = InMemoryPluginInstallOperationLeaseStore();
+      await leases.acquire(
+        operationId: 'op-1',
+        ownerId: 'installer-worker',
+        now: DateTime.utc(2026, 1, 1),
+        leaseDuration: const Duration(seconds: 30),
+      );
+
+      await expectLater(
+        PluginInstallRecoveryExecutor(
+          journal: journal,
+          fileSystem: fs,
+          installedStore: store,
+          leaseStore: leases,
+          workerId: 'recovery-worker',
+          clock: () => DateTime.utc(2026, 1, 1),
+        ).execute(
+          finding,
+          approvedBy: 'operator',
+          approvalId: 'approval-lease-conflict',
+        ),
+        throwsA(isA<PluginInstallRecoveryException>().having(
+          (error) => error.code,
+          'code',
+          'RECOVERY_OPERATION_BUSY',
+        )),
+      );
+      expect(journal.entries['op-1']!.status,
+          PluginInstallJournalStatus.extracting);
+      expect(fs.calls, ['inspect']);
+    });
+
     test('executes approved discard and persists operator audit metadata',
         () async {
       final journal = _Journal()..entries['op-1'] = _entry();
