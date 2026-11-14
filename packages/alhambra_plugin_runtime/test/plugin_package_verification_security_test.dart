@@ -83,7 +83,7 @@ void main() {
       final result = await DefaultPluginPackageVerifier(
         integrityVerifier: const _Integrity(),
       ).verify(_Package());
-      expect(result, const isA<PackageVerified>());
+      expect(result, isA<PackageVerified>());
       expect((result as PackageVerified).trust, PluginTrustLevel.unsigned);
     });
 
