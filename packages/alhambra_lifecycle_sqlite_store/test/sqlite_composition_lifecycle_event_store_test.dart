@@ -520,4 +520,78 @@ void main() {
     expect(recovered.single.eventId, event.eventId);
   });
 
+  test('runs SQLite retention and WAL checkpoint maintenance', () async {
+    store = SqliteCompositionLifecycleEventStore.open(
+      path: '${directory.path}/maintenance.sqlite',
+    );
+    await store!.append(CompositionLifecycleEvent(
+      eventId: 'maintenance-old',
+      correlationId: 'maintenance-old',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: DateTime.utc(2026, 1, 1),
+      nodeIds: const ['command:maintenance'],
+      ownerIds: const ['owner-maintenance'],
+    ));
+    await store!.append(CompositionLifecycleEvent(
+      eventId: 'maintenance-new',
+      correlationId: 'maintenance-new',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: DateTime.utc(2026, 1, 2),
+      nodeIds: const ['command:maintenance'],
+      ownerIds: const ['owner-maintenance'],
+    ));
+
+    final result = await store!.maintain(
+      const CompositionLifecycleStorageMaintenanceRequest(
+        maxEvents: 1,
+        checkpoint: true,
+      ),
+    );
+
+    expect(result.recordsRemoved, 1);
+    expect(result.checkpointRequested, isTrue);
+    expect(result.checkpointCompleted, isNotNull);
+    expect(result.metrics['adapter'], 'sqlite');
+    expect(result.metrics['checkpointMode'], 'passive');
+    final events = await store!.query(CompositionLifecycleEventQuery());
+    expect(events.map((event) => event.eventId), ['maintenance-new']);
+  });
+
+  test('runs SQLite maintenance through the worker isolate', () async {
+    final worker = await SqliteLifecycleEventStoreWorker.open(
+      path: '${directory.path}/maintenance-worker.sqlite',
+    );
+    addTearDown(worker.close);
+    await worker.append(CompositionLifecycleEvent(
+      eventId: 'worker-maintenance-old',
+      correlationId: 'worker-maintenance-old',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: DateTime.utc(2026, 2, 1),
+      nodeIds: const ['command:worker-maintenance'],
+      ownerIds: const ['owner-worker-maintenance'],
+    ));
+    await worker.append(CompositionLifecycleEvent(
+      eventId: 'worker-maintenance-new',
+      correlationId: 'worker-maintenance-new',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: DateTime.utc(2026, 2, 2),
+      nodeIds: const ['command:worker-maintenance'],
+      ownerIds: const ['owner-worker-maintenance'],
+    ));
+
+    final result = await worker.maintain(
+      const CompositionLifecycleStorageMaintenanceRequest(maxEvents: 1),
+    );
+    expect(result.recordsRemoved, 1);
+    expect(result.checkpointRequested, isFalse);
+    expect(result.checkpointCompleted, isNull);
+    expect(result.metrics['adapter'], 'sqlite');
+    final events = await worker.query(CompositionLifecycleEventQuery());
+    expect(events.map((event) => event.eventId), ['worker-maintenance-new']);
+  });
+
 }
