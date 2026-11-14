@@ -74,6 +74,15 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
           ON plugin_install_operation(status, updated_at, operation_id)
         ''');
         _db.execute('''
+          CREATE TABLE plugin_install_approval (
+            approval_id TEXT PRIMARY KEY,
+            operation_id TEXT NOT NULL,
+            approved_by TEXT NOT NULL,
+            recorded_at TEXT NOT NULL,
+            FOREIGN KEY(operation_id) REFERENCES plugin_install_operation(operation_id)
+          )
+        ''');
+        _db.execute('''
           CREATE TABLE plugin_install_event (
             event_id INTEGER PRIMARY KEY AUTOINCREMENT,
             operation_id TEXT NOT NULL,
@@ -94,11 +103,6 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
           )
         ''');
         _db.execute('CREATE INDEX idx_plugin_install_event_history ON plugin_install_event(operation_id, revision)');
-        _db.execute('''
-          CREATE UNIQUE INDEX idx_plugin_install_event_approval_id
-          ON plugin_install_event(approval_id)
-          WHERE approval_id IS NOT NULL
-        ''');
         _db.execute('PRAGMA user_version = 1');
       });
     }
@@ -141,6 +145,16 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
     staging_handle, promoted_path, failure_code, content_hash, approved_by, approval_id
   ''';
 
+  void _recordApproval(PluginInstallJournalEntry entry) {
+    final approvalId = entry.approvalId;
+    if (approvalId == null) return;
+    _db.execute('''
+      INSERT INTO plugin_install_approval
+      (approval_id, operation_id, approved_by, recorded_at)
+      VALUES (?, ?, ?, ?)
+    ''', [approvalId, entry.operationId, entry.approvedBy, _date(entry.updatedAt)]);
+  }
+
   void _insertEvent(PluginInstallJournalEntry entry, int revision) {
     _db.execute('''
       INSERT INTO plugin_install_event
@@ -169,6 +183,7 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
           INSERT INTO plugin_install_operation ($_columns, revision)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         ''', _values(entry));
+        _recordApproval(entry);
         _insertEvent(entry, 1);
         return;
       }
@@ -185,6 +200,7 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
       if (entry.updatedAt.toUtc().isBefore(currentAt)) {
         throw StateError('Journal updates must not move updatedAt backwards.');
       }
+      if (current['approval_id'] != entry.approvalId) _recordApproval(entry);
       _update(entry, revision + 1);
     });
   }
@@ -293,6 +309,9 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
           current['plugin_id'] != replacement.pluginId ||
           current['version'] != replacement.version) {
         return false;
+      }
+      if (current['approval_id'] != replacement.approvalId) {
+        _recordApproval(replacement);
       }
       _update(replacement, (current['revision']! as int) + 1);
       return true;
