@@ -236,7 +236,7 @@ final class PluginLifecycleRecoveryJob {
       failureCode: failureCode,
       failureSummary: failureSummary,
       cancellationRequestedAt: cancellationRequestedAt ?? this.cancellationRequestedAt,
-      expiresAt: expiresAt,
+      expiresAt: this.expiresAt,
       expiredAt: expiredAt ?? this.expiredAt,
     );
   }
