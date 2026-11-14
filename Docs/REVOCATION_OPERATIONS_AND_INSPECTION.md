@@ -61,3 +61,23 @@ print('Expired leases: ${snapshot.expiredLeases}');
 ## Validation boundary
 
 Unit tests cover state aggregation, immutable results, overdue work, expired leases and the fact that inspection does not mutate outbox state. Adapter tests verify direct read-only inspection. A full production validation still requires Dart formatting/analyzer and SQLite/PostgreSQL integration test execution.
+
+
+## Audited dead-letter replay contract
+
+The runtime now defines `PluginRevocationDeadLetterReplayStore`, an explicit command and an immutable operator-action audit record. A replay request must carry a host-authenticated actor identifier, a non-empty reason, an approval/change reference, a stable action ID and the target event ID. The runtime does not authenticate the actor or decide whether the referenced approval is valid; the host must perform those checks before calling the store.
+
+A conforming durable adapter must atomically:
+
+1. Verify that the target event currently is `deadLetter`.
+2. Return the prior result when the same action ID is repeated with identical request details; reject reuse of an action ID for different details.
+3. Allocate the next replay generation for the source event.
+4. Insert an operator-action audit record.
+5. Insert a new pending outbox message with a new event ID and idempotency key, linked to the source event and replay generation.
+6. Commit the audit and new outbox row together.
+
+The original dead-letter row is never reset or overwritten. A replay is a new delivery attempt lineage and remains at-least-once; downstream consumers must deduplicate by the new event ID while retaining the source-event link for audit correlation.
+
+The in-memory reference implementation demonstrates these semantics within one Dart isolate only. It is not durable, cross-process safe, or suitable for production. SQLite and PostgreSQL durable implementations of this new contract are a separate adapter-conformance step; do not treat the interface alone as a production replay facility.
+
+Hosts must authorize operators, validate approval evidence, scope access to the correct tenant/organization, and protect actor/reason/ticket data. Do not accept actor identity from an untrusted request body.
