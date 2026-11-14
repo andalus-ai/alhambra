@@ -51,34 +51,30 @@ final class PluginInstallRecoveryExecutor {
     }
 
     final entry = finding.journalEntry;
-    final current = await journal.unresolved();
-    final latest = current.where((item) => item.operationId == entry.operationId);
-    if (latest.length != 1 || !_sameJournal(latest.single, entry)) {
+    final freshReport = await PluginInstallRecoveryPlanner(
+      journal: journal,
+      fileSystem: fileSystem,
+      installedStore: installedStore,
+      clock: clock,
+    ).inspect();
+    final freshMatches = freshReport.findings.where(
+      (item) => item.operationId == entry.operationId,
+    );
+    if (freshMatches.length != 1) {
       throw const PluginInstallRecoveryException(
         'STALE_RECOVERY_PLAN',
         'The installation journal changed after inspection. Re-plan before approval.',
       );
     }
-
-    final freshFilesystem = await fileSystem.inspectOperation(
-      operationId: entry.operationId,
-      pluginId: entry.pluginId,
-      stagingHandle: entry.stagingHandle,
-      destinationPath: entry.promotedPath,
-    );
-    final freshRecord = await installedStore.find(entry.pluginId);
-    final freshRecordMatches = freshRecord != null &&
-        freshRecord.version.toString() == entry.version &&
-        entry.contentHash != null &&
-        freshRecord.contentHash == entry.contentHash &&
-        entry.promotedPath != null &&
-        freshRecord.installPath == entry.promotedPath;
-    if (freshFilesystem != finding.filesystem ||
-        (freshRecord != null) != finding.installedRecordExists ||
-        freshRecordMatches != finding.installedRecordMatches) {
+    final freshFinding = freshMatches.single;
+    if (!_sameJournal(freshFinding.journalEntry, entry) ||
+        freshFinding.action != finding.action ||
+        freshFinding.filesystem != finding.filesystem ||
+        freshFinding.installedRecordExists != finding.installedRecordExists ||
+        freshFinding.installedRecordMatches != finding.installedRecordMatches) {
       throw const PluginInstallRecoveryException(
         'STALE_RECOVERY_EVIDENCE',
-        'Filesystem or installed metadata changed after inspection. Re-plan before approval.',
+        'Journal, filesystem or installed metadata changed after inspection. Re-plan before approval.',
       );
     }
 
