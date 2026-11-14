@@ -437,7 +437,7 @@ void main() {
         PluginLifecycleRecoveryJobArchiveRestorer(
           archive: archive,
           jobStore: target,
-          verifier: verifier,
+          digestProvider: digests,
         ).restore(jobId: cancelled.jobId),
         throwsStateError,
       );
@@ -576,10 +576,7 @@ void main() {
         inspector: PluginLifecycleRecoveryJobRetentionInspector(archive: archive),
         auditSink: _FailingPurgeAuditSink(),
         authorizer: _AllowPurgeAuthorizer(),
-        verifier: PluginLifecycleRecoveryJobArchiveVerifier(
-          archive: archive,
-          digestProvider: digests,
-        ),
+        digestProvider: digests,
       );
 
       await expectLater(
