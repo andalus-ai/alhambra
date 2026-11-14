@@ -21,6 +21,7 @@ enum PluginRevocationExecutionStatus {
 
 final class PluginRevocationExecutionRecord {
   final String idempotencyKey;
+  final String scopeId;
   final String operationId;
   final String pluginId;
   final String providerOwnerId;
@@ -31,6 +32,7 @@ final class PluginRevocationExecutionRecord {
 
   const PluginRevocationExecutionRecord({
     required this.idempotencyKey,
+    this.scopeId = 'default',
     required this.operationId,
     required this.pluginId,
     required this.providerOwnerId,
@@ -146,8 +148,13 @@ class PluginRevocationCoordinator {
   Future<PluginRevocationExecutionReport> execute({
     required String operationId,
     required Iterable<CapabilityImpactDecision> decisions,
+    String scopeId = 'default',
   }) async {
     final normalizedOperationId = operationId.trim();
+    final normalizedScopeId = scopeId.trim();
+    if (normalizedScopeId.isEmpty) {
+      throw ArgumentError.value(scopeId, 'scopeId', 'Must not be empty');
+    }
     if (normalizedOperationId.isEmpty) {
       throw ArgumentError.value(operationId, 'operationId', 'Must not be empty');
     }
@@ -164,7 +171,7 @@ class PluginRevocationCoordinator {
     final records = <PluginRevocationExecutionRecord>[];
     await manager.runExclusiveLifecycleBatch(() async {
       for (final decision in ordered) {
-        records.add(await _executeOne(normalizedOperationId, decision));
+        records.add(await _executeOne(normalizedOperationId, normalizedScopeId, decision));
       }
     });
     return PluginRevocationExecutionReport(
@@ -175,6 +182,7 @@ class PluginRevocationCoordinator {
 
   Future<PluginRevocationExecutionRecord> _executeOne(
     String operationId,
+    String scopeId,
     CapabilityImpactDecision decision,
   ) async {
     final pluginId = decision.pluginId.trim();
@@ -191,7 +199,7 @@ class PluginRevocationCoordinator {
           existing.status == PluginRevocationExecutionStatus.rejected ||
           existing.status == PluginRevocationExecutionStatus.unsupported) {
         return _record(
-          operationId,
+          operationId, scopeId,
           key,
           decision,
           PluginRevocationExecutionStatus.alreadyCompleted,
@@ -199,7 +207,7 @@ class PluginRevocationCoordinator {
         );
       }
       return _record(
-        operationId,
+        operationId, scopeId,
         key,
         decision,
         PluginRevocationExecutionStatus.requiresReconciliation,
@@ -208,7 +216,7 @@ class PluginRevocationCoordinator {
     }
 
     final pending = _record(
-      operationId,
+      operationId, scopeId,
       key,
       decision,
       PluginRevocationExecutionStatus.requiresReconciliation,
@@ -236,7 +244,7 @@ class PluginRevocationCoordinator {
           detail: 'Host approval rejected the action.',
         );
       } else {
-        outcome = await _apply(operationId, key, decision);
+        outcome = await _apply(operationId, scopeId, key, decision);
       }
     } catch (error) {
       outcome = _record(
@@ -263,6 +271,7 @@ class PluginRevocationCoordinator {
 
   Future<PluginRevocationExecutionRecord> _apply(
     String operationId,
+    String scopeId,
     String key,
     CapabilityImpactDecision decision,
   ) async {
@@ -348,6 +357,7 @@ class PluginRevocationCoordinator {
 
   PluginRevocationExecutionRecord _record(
     String operationId,
+    String scopeId,
     String key,
     CapabilityImpactDecision decision,
     PluginRevocationExecutionStatus status, {
@@ -355,6 +365,7 @@ class PluginRevocationCoordinator {
   }) =>
       PluginRevocationExecutionRecord(
         idempotencyKey: key,
+        scopeId: scopeId,
         operationId: operationId,
         pluginId: decision.pluginId,
         providerOwnerId: decision.providerOwnerId,
