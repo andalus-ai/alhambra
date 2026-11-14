@@ -109,3 +109,22 @@ is `verified` after digest and signature verification; it is `trusted` only
 when its publisher is explicitly trusted. See
 [Plugin Package Integrity and Trust](../../Docs/PLUGIN_PACKAGE_INTEGRITY_AND_TRUST.md)
 for canonical statement and key lifecycle boundaries.
+
+## Transactional package installation
+
+`TransactionalPluginInstaller` verifies a package, runs host preflight,
+extracts an archive into an isolated staging area under bounded resource
+limits, promotes it reversibly, and persists the installed-plugin record.
+It does not load or execute downloaded code or activate plugins.
+
+Hosts must provide `PluginPackageArchive`, `PluginInstallPreflight`,
+`PluginInstallFileSystem`, `TransactionalInstalledPluginStore` and a durable
+`PluginInstallJournal` adapter. The installed-record adapter must implement
+atomic create-if-absent and compare-and-remove semantics. Filesystem
+implementations must independently enforce staging-root containment and safe
+exclusive writes. The journal and filesystem adapters must support
+reconciliation of interrupted operations; in-memory test doubles are not
+production durability guarantees.
+
+See [Transactional Plugin Installation](../../Docs/TRANSACTIONAL_PLUGIN_INSTALLATION.md)
+for the transaction sequence, archive threat model and recovery limitations.
