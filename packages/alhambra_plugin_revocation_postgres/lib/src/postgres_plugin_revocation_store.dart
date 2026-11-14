@@ -64,7 +64,7 @@ final class PostgresPluginRevocationStore
         'SELECT COALESCE(MAX(version), 0) AS version FROM alhambra_plugin_revocation_schema',
       );
       final currentVersion = schema.first.toColumnMap()['version'] as int;
-      if (currentVersion > 2) {
+      if (currentVersion > 4) {
         throw UnsupportedError('Database schema version $currentVersion is newer than this adapter supports.');
       }
       await tx.execute('''
@@ -148,6 +148,14 @@ final class PostgresPluginRevocationStore
           'VALUES (3) ON CONFLICT (version) DO NOTHING',
         );
       }
+      if (currentVersion < 4) {
+        await tx.execute("ALTER TABLE alhambra_plugin_revocation_execution ADD COLUMN IF NOT EXISTS scope_id TEXT NOT NULL DEFAULT 'default'");
+        await tx.execute("ALTER TABLE alhambra_plugin_revocation_journal ADD COLUMN IF NOT EXISTS scope_id TEXT NOT NULL DEFAULT 'default'");
+        await tx.execute("ALTER TABLE alhambra_plugin_revocation_outbox ADD COLUMN IF NOT EXISTS scope_id TEXT NOT NULL DEFAULT 'default'");
+        await tx.execute('CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_journal_scope_updated ON alhambra_plugin_revocation_journal(scope_id, updated_at DESC, idempotency_key DESC)');
+        await tx.execute('CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_outbox_scope_occurred ON alhambra_plugin_revocation_outbox(scope_id, occurred_at DESC, event_id DESC)');
+        await tx.execute("INSERT INTO alhambra_plugin_revocation_schema (version) VALUES (4) ON CONFLICT (version) DO NOTHING");
+      }
     });
   }
 
@@ -159,6 +167,7 @@ final class PostgresPluginRevocationStore
   ) =>
       PluginRevocationExecutionRecord(
         idempotencyKey: row['idempotency_key']! as String,
+        scopeId: row['scope_id']! as String,
         operationId: row['operation_id']! as String,
         pluginId: row['plugin_id']! as String,
         providerOwnerId: row['provider_owner_id']! as String,
@@ -172,7 +181,9 @@ final class PostgresPluginRevocationStore
   static PluginRevocationAuditEvent _event(Map<String, Object?> row) =>
       PluginRevocationAuditEvent(
         eventId: row['event_id']! as String,
+        scopeId: row['scope_id']! as String,
         idempotencyKey: row['idempotency_key']! as String,
+        scopeId: row['scope_id']! as String,
         operationId: row['operation_id']! as String,
         pluginId: row['plugin_id']! as String,
         providerOwnerId: row['provider_owner_id']! as String,
@@ -258,14 +269,15 @@ final class PostgresPluginRevocationStore
       final inserted = await tx.execute(
         r'''
           INSERT INTO alhambra_plugin_revocation_execution
-            (idempotency_key, operation_id, plugin_id, provider_owner_id,
+            (idempotency_key, scope_id, operation_id, plugin_id, provider_owner_id,
              action, status, updated_at, detail)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           ON CONFLICT (idempotency_key) DO NOTHING
           RETURNING idempotency_key
         ''',
         parameters: [
           record.idempotencyKey,
+          record.scopeId,
           record.operationId,
           record.pluginId,
           record.providerOwnerId,
@@ -280,13 +292,14 @@ final class PostgresPluginRevocationStore
       await tx.execute(
         r'''
           INSERT INTO alhambra_plugin_revocation_journal
-            (idempotency_key, schema_version, operation_id, plugin_id,
+            (idempotency_key, scope_id, schema_version, operation_id, plugin_id,
              provider_owner_id, action, status, revision, created_at,
              updated_at, detail)
-          VALUES ($1, $2, $3, $4, $5, $6, 'pending', 1, $7, $7, $8)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 1, $8, $8, $9)
         ''',
         parameters: [
           record.idempotencyKey,
+          record.scopeId,
           PluginRevocationJournalEntry.currentSchemaVersion,
           record.operationId,
           record.pluginId,
@@ -314,13 +327,14 @@ final class PostgresPluginRevocationStore
     await tx.execute(
       r'''
         INSERT INTO alhambra_plugin_revocation_outbox
-          (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
+          (event_id, scope_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
            action, outcome, occurred_at, detail, state, attempts, next_attempt_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 0, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 0, $9)
         ON CONFLICT (idempotency_key) DO NOTHING
       ''',
       parameters: [
         '${record.idempotencyKey}:terminal',
+        record.scopeId,
         record.idempotencyKey,
         record.operationId,
         record.pluginId,
@@ -342,12 +356,13 @@ final class PostgresPluginRevocationStore
       final execution = await tx.execute(
         r'''
           UPDATE alhambra_plugin_revocation_execution
-          SET operation_id = $1, plugin_id = $2, provider_owner_id = $3,
-              action = $4, status = $5, updated_at = $6, detail = $7
-          WHERE idempotency_key = $8
+          SET scope_id = $1, operation_id = $2, plugin_id = $3, provider_owner_id = $4,
+              action = $5, status = $6, updated_at = $7, detail = $8
+          WHERE idempotency_key = $9 AND scope_id = $1
           RETURNING idempotency_key
         ''',
         parameters: [
+          record.scopeId,
           record.operationId,
           record.pluginId,
           record.providerOwnerId,
@@ -366,7 +381,7 @@ final class PostgresPluginRevocationStore
         r'''
           UPDATE alhambra_plugin_revocation_journal
           SET status = $1, revision = revision + 1, updated_at = $2, detail = $3
-          WHERE idempotency_key = $4
+          WHERE idempotency_key = $4 AND scope_id = $5
           RETURNING idempotency_key
         ''',
         parameters: [
@@ -374,6 +389,7 @@ final class PostgresPluginRevocationStore
           record.updatedAt.toUtc(),
           record.detail,
           record.idempotencyKey,
+          record.scopeId,
         ],
       );
       if (journal.isEmpty) {
@@ -462,14 +478,14 @@ final class PostgresPluginRevocationStore
       final inserted = await tx.execute(
         r'''
           INSERT INTO alhambra_plugin_revocation_outbox
-          (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
+          (event_id, scope_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
            action, outcome, occurred_at, detail, state, attempts, next_attempt_at,
            replay_of_event_id, replay_generation)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 0, $8, $10, $11)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 0, $9, $11, $12)
           RETURNING *
         ''',
         parameters: [
-          replayEventId, replayKey, source['operation_id'], source['plugin_id'],
+          replayEventId, source['scope_id'], replayKey, source['operation_id'], source['plugin_id'],
           source['provider_owner_id'], source['action'], source['outcome'],
           at, source['detail'], sourceEventId, generation,
         ],
@@ -669,15 +685,16 @@ final class PostgresPluginRevocationStore
     final rows = await _pool.execute(
       r'''
         INSERT INTO alhambra_plugin_revocation_journal
-          (idempotency_key, schema_version, operation_id, plugin_id,
+          (idempotency_key, scope_id, schema_version, operation_id, plugin_id,
            provider_owner_id, action, status, revision, created_at,
            updated_at, correlation_id, detail)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         ON CONFLICT (idempotency_key) DO NOTHING
         RETURNING idempotency_key
       ''',
       parameters: [
         entry.idempotencyKey,
+        entry.scopeId,
         entry.schemaVersion,
         entry.operationId,
         entry.pluginId,
@@ -707,10 +724,10 @@ final class PostgresPluginRevocationStore
     final rows = await _pool.execute(
       r'''
         UPDATE alhambra_plugin_revocation_journal
-        SET schema_version = $1, operation_id = $2, plugin_id = $3,
-            provider_owner_id = $4, action = $5, status = $6, revision = $7,
-            created_at = $8, updated_at = $9, correlation_id = $10, detail = $11
-        WHERE idempotency_key = $12 AND revision = $13
+        SET scope_id = $1, schema_version = $2, operation_id = $3, plugin_id = $4,
+            provider_owner_id = $5, action = $6, status = $7, revision = $8,
+            created_at = $9, updated_at = $10, correlation_id = $11, detail = $12
+        WHERE idempotency_key = $13 AND revision = $14 AND scope_id = $1
         RETURNING idempotency_key
       ''',
       parameters: [
