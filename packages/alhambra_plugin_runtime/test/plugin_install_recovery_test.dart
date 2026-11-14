@@ -26,10 +26,13 @@ class _Journal implements PluginInstallRecoveryJournal {
   Future<bool> compareAndSet({
     required String operationId,
     required PluginInstallJournalStatus expectedStatus,
+    required DateTime expectedUpdatedAt,
     required PluginInstallJournalEntry replacement,
   }) async {
     final current = entries[operationId];
-    if (current == null || current.status != expectedStatus) return false;
+    if (current == null ||
+        current.status != expectedStatus ||
+        current.updatedAt != expectedUpdatedAt) return false;
     entries[operationId] = replacement;
     return true;
   }
