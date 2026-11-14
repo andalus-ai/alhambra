@@ -299,3 +299,25 @@ State can change immediately after validation. `executeBatchWithJob()` remains
 responsible for its own independent preflight and job-intent checks before
 plugin code runs. Hosts continue to own authorization, approval policy, and
 durable audit records.
+
+
+## Durable recovery-job cancellation
+
+`PluginLifecycleRecoveryJobCancellationController.requestCancellation()`
+uses the job store's revision compare-and-set boundary. A planned job becomes
+terminal `cancelled` immediately and its untouched steps become skipped. A
+running job becomes `cancellationRequested`; the request is durable, but no
+plugin hook is interrupted.
+
+`executeBatchWithJob()` observes a cancellation request between plugin steps.
+It lets the currently claimed step finish and persist its outcome, then marks
+remaining pending steps skipped and the job cancelled before claiming another
+step. If cancellation races with a step outcome write, the runner reloads the
+latest job revision and preserves the cancellation request while recording
+the in-flight step's result.
+
+A crash during a running step remains ambiguous. Cancellation does not convert
+a running claim into a skipped or completed step, and restart inspection must
+continue to require host review. Cancellation is not rollback, compensation,
+or proof that external side effects were undone. Hosts authorize cancellation
+and provide durable, atomic compare-and-set job storage.
