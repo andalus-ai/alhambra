@@ -139,7 +139,10 @@ recommendations only; it never mutates files, metadata or journal state.
 explicitly supplies an operator identity and approval ID. It re-inspects the
 filesystem and installed record, rejects stale evidence, atomically claims the
 journal entry, and executes one bounded action. The journal adapter must
-implement `PluginInstallRecoveryJournal.compareAndSet` durably and atomically.
+implement `PluginInstallRecoveryJournal.compareAndSet` durably and atomically,
+fencing both expected status and update timestamp. It must enforce unique
+approval IDs within the host audit scope and return only the latest unresolved
+entry per operation.
 
 Recovery actions are limited to discarding orphan staging, rolling back a
 provably operation-owned promotion, finalizing a promotion whose installed
