@@ -1,0 +1,12 @@
+name: alhambra_lifecycle_store_test
+description: Shared behavioral contract tests for Alhambra lifecycle event store adapters.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  test: ^1.25.0
+  alhambra_plugin_api:
+    path: ../alhambra_plugin_api
