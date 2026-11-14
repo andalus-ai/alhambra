@@ -718,7 +718,7 @@ final class SqlitePluginRevocationStore
               created_at = ?, updated_at = ?, correlation_id = ?, detail = ?
           WHERE idempotency_key = ? AND revision = ?
         ''', [
-          ...values,
+          ...values.skip(1),
           idempotencyKey,
           expectedRevision,
         ]);
