@@ -12,6 +12,7 @@ final class PluginLifecycleRecoveryBatchPlanStep {
   final String expectedCheckpointOperationId;
   final int expectedCheckpointSequence;
   final String executionOperationId;
+  final PluginLifecycleCheckpoint checkpoint;
 
   const PluginLifecycleRecoveryBatchPlanStep({
     required this.pluginId,
@@ -19,6 +20,7 @@ final class PluginLifecycleRecoveryBatchPlanStep {
     required this.expectedCheckpointOperationId,
     required this.expectedCheckpointSequence,
     required this.executionOperationId,
+    required this.checkpoint,
   });
 
   PluginRecoveryJobStep toJobStep() => PluginRecoveryJobStep(
@@ -121,8 +123,16 @@ final class PluginLifecycleRecoveryBatchPlanner {
   Future<PluginLifecycleRecoveryBatchPlan> planBatch(
     PluginLifecycleRecoveryBatchRequest request,
   ) {
-    return manager.runExclusiveLifecycleBatch(() => _planBatch(request));
+    return manager.runExclusiveLifecycleBatch(
+      () => planBatchWithinLifecycleBatch(request),
+    );
   }
+
+  /// Plans while the caller already owns [manager]'s lifecycle batch gate.
+  /// Runtime coordinators use this to share preflight without nesting the gate.
+  Future<PluginLifecycleRecoveryBatchPlan> planBatchWithinLifecycleBatch(
+    PluginLifecycleRecoveryBatchRequest request,
+  ) => _planBatch(request);
 
   Future<PluginLifecycleRecoveryBatchPlan> _planBatch(
     PluginLifecycleRecoveryBatchRequest request,
@@ -276,6 +286,7 @@ final class PluginLifecycleRecoveryBatchPlanner {
             expectedCheckpointOperationId: checkpoint.operationId,
             expectedCheckpointSequence: checkpoint.sequence,
             executionOperationId: operationId,
+            checkpoint: checkpoint,
           ));
         }
       } catch (error) {
