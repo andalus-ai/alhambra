@@ -32,6 +32,7 @@ Start here:
 - [Governed plugin revocation execution](GOVERNED_PLUGIN_REVOCATION_EXECUTION.md) — approval and execution semantics.
 - [Durable plugin revocation recovery](DURABLE_PLUGIN_REVOCATION_RECOVERY.md) — journal, reconciliation and recovery decisions.
 - [Transactional revocation audit outbox](TRANSACTIONAL_REVOCATION_AUDIT_OUTBOX.md) — atomic outcome/audit boundary and at-least-once dispatch.
+- [PostgreSQL plugin revocation persistence](POSTGRES_PLUGIN_REVOCATION_PERSISTENCE.md) — multi-worker durable journal and SKIP LOCKED outbox claims.
 
 ## Composition persistence and compatibility
 - [Composition persistence and recovery](COMPOSITION_PERSISTENCE_AND_RECOVERY.md) — persistence boundaries and interrupted composition.
