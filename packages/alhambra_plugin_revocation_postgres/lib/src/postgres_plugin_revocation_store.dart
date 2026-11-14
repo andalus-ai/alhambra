@@ -183,7 +183,6 @@ final class PostgresPluginRevocationStore
         eventId: row['event_id']! as String,
         scopeId: row['scope_id']! as String,
         idempotencyKey: row['idempotency_key']! as String,
-        scopeId: row['scope_id']! as String,
         operationId: row['operation_id']! as String,
         pluginId: row['plugin_id']! as String,
         providerOwnerId: row['provider_owner_id']! as String,
@@ -221,6 +220,7 @@ final class PostgresPluginRevocationStore
       PluginRevocationJournalEntry(
         schemaVersion: row['schema_version']! as int,
         idempotencyKey: row['idempotency_key']! as String,
+        scopeId: row['scope_id']! as String,
         operationId: row['operation_id']! as String,
         pluginId: row['plugin_id']! as String,
         providerOwnerId: row['provider_owner_id']! as String,
@@ -731,6 +731,7 @@ final class PostgresPluginRevocationStore
         RETURNING idempotency_key
       ''',
       parameters: [
+        replacement.scopeId,
         replacement.schemaVersion,
         replacement.operationId,
         replacement.pluginId,
