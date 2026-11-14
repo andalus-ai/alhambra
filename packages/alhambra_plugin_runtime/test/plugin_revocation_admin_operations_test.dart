@@ -210,8 +210,8 @@ void main() {
       accessAuditStore: audit,
     );
 
-    expect(
-      () => service.inspect(principal: principal, scopeId: ' '),
+    await expectLater(
+      service.inspect(principal: principal, scopeId: ' '),
       throwsArgumentError,
     );
     expect(authorizer.calls, 0);
