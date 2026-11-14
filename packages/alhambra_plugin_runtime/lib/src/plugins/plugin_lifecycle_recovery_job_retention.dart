@@ -42,7 +42,8 @@ final class PluginLifecycleRecoveryJobArchiver {
       throw StateError('Recovery job in state "${job.status.name}" is not eligible for archival.');
     }
 
-    final payload = codec.encode(job);
+    final archivedAt = _clock().toUtc();
+    final payload = codec.encode(job, archivedAt: archivedAt);
     final digest = await digestProvider.digest(
       algorithm: digestAlgorithm,
       canonicalPayload: payload,
@@ -64,7 +65,7 @@ final class PluginLifecycleRecoveryJobArchiver {
 
     final record = PluginLifecycleRecoveryJobArchiveRecord(
       job: job,
-      archivedAt: _clock(),
+      archivedAt: archivedAt,
       integrity: PluginLifecycleRecoveryJobArchiveIntegrity(
         formatVersion: PluginLifecycleRecoveryJobSnapshotCodec.formatVersion,
         algorithm: digestAlgorithm,
