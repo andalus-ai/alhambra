@@ -273,6 +273,42 @@ void main() {
       expect(fs.calls, isNot(contains('discard')));
     });
 
+
+    test('rejects a caller-forged action that differs from fresh planning', () async {
+      final journal = _Journal()..entries['op-1'] = _entry();
+      final fs = _FileSystem()..stagingExists = true;
+      final store = InMemoryInstalledPluginStore();
+      final finding = (await PluginInstallRecoveryPlanner(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+      ).inspect()).findings.single;
+      final forged = PluginInstallRecoveryFinding(
+        journalEntry: finding.journalEntry,
+        filesystem: finding.filesystem,
+        installedRecordExists: finding.installedRecordExists,
+        installedRecordMatches: finding.installedRecordMatches,
+        action: PluginInstallRecoveryAction.finalizePromotion,
+        guidance: 'forged',
+      );
+
+      await expectLater(
+        PluginInstallRecoveryExecutor(
+          journal: journal,
+          fileSystem: fs,
+          installedStore: store,
+        ).execute(
+          forged,
+          approvedBy: 'operator',
+          approvalId: 'approval-forged',
+        ),
+        throwsA(isA<PluginInstallRecoveryException>()),
+      );
+      expect(journal.entries['op-1']!.status,
+          PluginInstallJournalStatus.extracting);
+      expect(fs.calls, ['inspect', 'inspect']);
+    });
+
     test('finalizes only after explicit approval when record matches',
         () async {
       final journal = _Journal()
