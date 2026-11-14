@@ -4,3 +4,4 @@ export 'src/alhambra_plugin_test_host.dart';
 export 'src/plugin_contribution_snapshot.dart';
 export 'src/plugin_conformance_result.dart';
 export 'src/plugin_conformance_suite.dart';
+export 'src/plugin_packaging_conformance_suite.dart';

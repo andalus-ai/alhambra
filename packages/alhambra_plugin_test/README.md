@@ -29,6 +29,32 @@ plugin IDs in a selected set. They deliberately do not impose a SemVer grammar
 on `PluginMetadata.version`; the public contract defines it as a string without
 a formal version parser.
 
+## Package and discovery conformance
+
+Use `PluginPackagingConformanceSuite` to validate the richer package manifest,
+lockfile and package-header contracts, and to exercise the actual legacy
+compiled-plugin discovery graph:
+
+```dart
+const suite = PluginPackagingConformanceSuite();
+suite.validatePackageManifest(package.manifest).throwIfNotConformant();
+suite.validatePackageMetadata(package.manifest, package.metadata)
+    .throwIfNotConformant();
+suite.validateLockfile(lockfile).throwIfNotConformant();
+suite.validateDiscoveryGraph(discovered.map((item) => item.manifest))
+    .throwIfNotConformant();
+```
+
+The suite checks manifest identity and version fields, host API bounds,
+duplicate/self dependencies, capability and platform declarations, lockfile
+key/ID consistency, and package header consistency. Discovery validation
+delegates to `PluginDependencyResolver.resolve`, covering the current
+required-ID-only dependency graph. It does not implement resolution of the
+richer version-constrained package dependency model.
+
+See [Plugin packaging and discovery conformance](../../Docs/PLUGIN_PACKAGING_AND_DISCOVERY_CONFORMANCE.md)
+for the current loader, verifier and trust boundaries.
+
 ## Opt-in lifecycle round trip
 
 For trusted plugin implementations:
