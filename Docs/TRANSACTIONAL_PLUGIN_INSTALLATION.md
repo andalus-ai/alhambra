@@ -120,7 +120,9 @@ manual review because its previous side effects may be incomplete.
 
 The host must explicitly call
 `PluginInstallRecoveryExecutor.execute(finding, approvedBy:, approvalId:)`.
-Before side effects, the executor re-reads the unresolved journal entry,
+Before side effects, the host must fence the original installer worker or
+prove its durable operation lease has expired. A recovery scan must never race
+a live installer. The executor re-reads the unresolved journal entry,
 re-inspects filesystem and installed metadata, compares them with the finding,
 and atomically claims the operation using
 `PluginInstallRecoveryJournal.compareAndSet`.
