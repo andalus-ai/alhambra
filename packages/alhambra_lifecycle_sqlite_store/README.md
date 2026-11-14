@@ -57,7 +57,12 @@ commands and exposes explicit `close()` and `checkpoint()` operations.
 Both adapters expose explicit WAL checkpointing. PASSIVE is recommended for
 routine maintenance; FULL, RESTART, and TRUNCATE are available for controlled
 maintenance. Results include SQLite's busy, log-frame, and checkpointed-frame
-counters so callers can detect incomplete checkpoints.
+counters so callers can detect incomplete checkpoints. A long-lived reader
+transaction can pin an older WAL snapshot and prevent a checkpoint from
+advancing through newer frames. Keep read transactions short; monitor the
+checkpoint counters and WAL file size, and retry a checkpoint after readers
+release their snapshots. The test suite exercises this behavior against a
+second connection for both direct and worker-backed stores.
 
 The adapter does not own databases passed to its constructor. Only instances
 created with `SqliteCompositionLifecycleEventStore.open()` close their
@@ -86,14 +91,17 @@ main database file's disk space is required.
 
 ## Performance checks
 
-Run the local smoke benchmark from this package:
+Run the local benchmark from this package at increasing data volumes:
 
 ```sh
 dart run benchmark/sqlite_lifecycle_store_benchmark.dart 10000
+dart run benchmark/sqlite_lifecycle_store_benchmark.dart 100000
+dart run benchmark/sqlite_lifecycle_store_benchmark.dart 1000000
 ```
 
-The harness reports append throughput, a filtered owner/status query, and WAL
-checkpoint counters. It is intentionally not a CI threshold: compare runs only
-when Dart/SQLite versions, machine, filesystem, and event count are recorded.
-The adapter tests also inspect `EXPLAIN QUERY PLAN` for the combined
-status/operation query path.
+The harness reports append throughput, 30 warmed filtered-query samples
+(p50/p95), database and pre-checkpoint WAL file sizes, and checkpoint counters.
+The 100K and 1M profiles are intended for local scale characterization and
+should not be treated as CI thresholds. Compare runs only when Dart/SQLite
+versions, machine, filesystem, and event count are recorded. The adapter tests
+also inspect `EXPLAIN QUERY PLAN` for the combined status/operation query path.
