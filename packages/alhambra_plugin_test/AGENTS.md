@@ -7,6 +7,6 @@
 - Lifecycle execution must be explicitly opt-in and documented as executing trusted plugin code.
 - Keep results immutable and machine-readable with stable issue codes.
 - Do not silently swallow lifecycle or cleanup failures.
-- Do not impose version or capability semantics absent from the public API.
+- Do not impose version or capability semantics absent from the public API.\n- Packaging checks must reflect existing manifest and lockfile models; do not claim signature or payload-hash verification.\n- Discovery conformance must delegate to the real PluginLoader dependency resolver. Keep richer version-constrained dependency solving explicitly out of scope until implemented.
 - Cover valid/invalid metadata, duplicate plugin IDs, lifecycle success, activation failure and deactivation failure.
 - Update package docs and the central documentation index when public helpers change.
