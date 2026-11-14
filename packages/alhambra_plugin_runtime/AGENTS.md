@@ -42,3 +42,9 @@ alhambra_plugin_api.
 - Transactional installation requires an atomic create-only installed-record store; do not use an upsert-only store for install commits.
 - Rollback must compare the candidate install record before removal so it cannot delete another concurrent installation.
 - The default operation ID is instance-scoped; production hosts should inject globally unique operation IDs and enforce journal uniqueness.
+
+- Installation recovery planning must be read-only and compare journal, filesystem provenance and installed metadata.
+- Never infer destination ownership from a path string alone; require adapter-owned operation provenance.
+- Recovery execution requires explicit operator identity, approval ID, fresh evidence and an atomic journal compare-and-set claim.
+- If recovery side effects or outcome persistence are ambiguous, leave the operation unresolved for manual reconciliation; do not automatically repeat it.
+- Recovery adapters must document and integration-test crash-safe idempotency for discard, rollback and finalization.
