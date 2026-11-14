@@ -166,6 +166,32 @@ void main() {
     );
   });
 
+  test('applies the time filter before the newest-event cap', () async {
+    store = SqliteCompositionLifecycleEventStore.open(
+      path: '${directory.path}/compact-combined.sqlite',
+    );
+    final base = DateTime.utc(2026, 8, 4);
+    for (var minute = 0; minute < 5; minute++) {
+      await store!.append(CompositionLifecycleEvent(
+        eventId: 'combined-$minute',
+        correlationId: 'combined-correlation',
+        operation: CompositionLifecycleOperation.activate,
+        status: CompositionLifecycleStatus.succeeded,
+        timestamp: base.add(Duration(minutes: minute)),
+        nodeIds: const ['command:combined'],
+        ownerIds: const ['owner-combined'],
+      ));
+    }
+
+    final removed = await store!.compact(
+      retainFrom: base.add(const Duration(minutes: 1)),
+      maxEvents: 2,
+    );
+    expect(removed, 3);
+    final retained = await store!.query(CompositionLifecycleEventQuery());
+    expect(retained.map((value) => value.eventId), ['combined-3', 'combined-4']);
+  });
+
   test('rolls back retention when a delete trigger rejects compaction', () async {
     store = SqliteCompositionLifecycleEventStore.open(
       path: '${directory.path}/compact-rollback.sqlite',
