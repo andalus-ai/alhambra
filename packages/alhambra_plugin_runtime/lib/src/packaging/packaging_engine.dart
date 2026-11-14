@@ -92,7 +92,7 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
         message: 'Package metadata version does not match manifest version.',
       ));
     }
-    if (!_sha256Pattern.hasMatch(metadata.contentHash.toLowerCase())) {
+    if (!_sha256Pattern.hasMatch(metadata.contentHash)) {
       issues.add(const VerificationIssue(
         code: 'INVALID_CONTENT_HASH',
         message: 'Content hash must use sha256:<64 hexadecimal characters> encoding.',
