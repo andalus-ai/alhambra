@@ -50,7 +50,8 @@ lost, it stops issuing new mutations and leaves the journal for reconciliation
 rather than attempting rollback with a stale token. Recovery records its lease
 token in the recovery claim and uses the token-bearing staging handle.
 
-Hosts must provide a stable unique worker ID and configure a lease duration
+Hosts must provide a worker ID unique to each concurrently running worker
+instance (stable across that instance's renewals) and configure a lease duration
 appropriate to their workload. The runtime does not create background
 heartbeat timers; adapters and hosts should keep operations bounded and ensure
 renewal occurs during long-running streams.
