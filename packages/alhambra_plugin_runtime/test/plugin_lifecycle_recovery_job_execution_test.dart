@@ -140,7 +140,7 @@ void main() {
       expect(observed, ['core', 'app']);
       final persisted = (await jobs.read(job.jobId))!;
       expect(persisted.status, PluginRecoveryJobStatus.completed);
-      expect(persisted.revision, 6);
+      expect(persisted.revision, 7);
       expect(persisted.steps.map((step) => step.status),
           everyElement(PluginRecoveryJobStepStatus.completed));
       expect(persisted.steps.map((step) => step.executionOperationId),
