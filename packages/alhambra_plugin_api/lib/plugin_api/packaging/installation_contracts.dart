@@ -128,6 +128,8 @@ final class PluginInstallJournalEntry {
   final String? promotedPath;
   final String? failureCode;
   final String? contentHash;
+  final String? approvedBy;
+  final String? approvalId;
 
   const PluginInstallJournalEntry({
     required this.operationId,
@@ -139,6 +141,8 @@ final class PluginInstallJournalEntry {
     this.promotedPath,
     this.failureCode,
     this.contentHash,
+    this.approvedBy,
+    this.approvalId,
   });
 }
 
