@@ -58,9 +58,7 @@ final class PluginLifecycleRecoveryJobArchiver {
 
     final existing = await archive.read(jobId);
     if (existing != null) {
-      if (existing.job.revision != job.revision ||
-          existing.job.updatedAt != job.updatedAt ||
-          existing.job.status != job.status) {
+      if (!_sameJobSnapshot(existing.job, job)) {
         throw StateError('An archive with a different job snapshot already exists.');
       }
       return existing;
@@ -72,10 +70,7 @@ final class PluginLifecycleRecoveryJobArchiver {
     );
     if (!await archive.putIfAbsent(record)) {
       final raced = await archive.read(jobId);
-      if (raced != null &&
-          raced.job.revision == job.revision &&
-          raced.job.updatedAt == job.updatedAt &&
-          raced.job.status == job.status) {
+      if (raced != null && _sameJobSnapshot(raced.job, job)) {
         return raced;
       }
       throw StateError('A conflicting archive record was written concurrently.');
@@ -87,12 +82,56 @@ final class PluginLifecycleRecoveryJobArchiver {
     PluginRecoveryJobStatus.completed ||
     PluginRecoveryJobStatus.failed ||
     PluginRecoveryJobStatus.partiallyCompleted ||
-    PluginRecoveryJobStatus.interrupted ||
-    PluginRecoveryJobStatus.manualReview ||
     PluginRecoveryJobStatus.cancelled ||
     PluginRecoveryJobStatus.expired => true,
     PluginRecoveryJobStatus.planned ||
     PluginRecoveryJobStatus.running ||
     PluginRecoveryJobStatus.cancellationRequested => false,
   };
+}
+
+bool _sameJobSnapshot(
+  PluginLifecycleRecoveryJob left,
+  PluginLifecycleRecoveryJob right,
+) {
+  if (left.schemaVersion != right.schemaVersion ||
+      left.jobId != right.jobId ||
+      left.idempotencyKey != right.idempotencyKey ||
+      left.operationId != right.operationId ||
+      left.action != right.action ||
+      left.status != right.status ||
+      left.revision != right.revision ||
+      left.createdAt != right.createdAt ||
+      left.updatedAt != right.updatedAt ||
+      left.initiatedBy != right.initiatedBy ||
+      left.correlationId != right.correlationId ||
+      left.failureCode != right.failureCode ||
+      left.failureSummary != right.failureSummary ||
+      left.cancellationRequestedAt != right.cancellationRequestedAt ||
+      left.expiresAt != right.expiresAt ||
+      left.expiredAt != right.expiredAt ||
+      left.orderedPluginIds.length != right.orderedPluginIds.length ||
+      left.steps.length != right.steps.length) {
+    return false;
+  }
+  for (var i = 0; i < left.orderedPluginIds.length; i++) {
+    if (left.orderedPluginIds[i] != right.orderedPluginIds[i]) return false;
+  }
+  for (var i = 0; i < left.steps.length; i++) {
+    final a = left.steps[i];
+    final b = right.steps[i];
+    if (a.pluginId != b.pluginId ||
+        a.ordinal != b.ordinal ||
+        a.status != b.status ||
+        a.expectedCheckpointOperationId != b.expectedCheckpointOperationId ||
+        a.expectedCheckpointSequence != b.expectedCheckpointSequence ||
+        a.executionOperationId != b.executionOperationId ||
+        a.startedAt != b.startedAt ||
+        a.completedAt != b.completedAt ||
+        a.failureCode != b.failureCode ||
+        a.failureSummary != b.failureSummary) {
+      return false;
+    }
+  }
+  return true;
 }
