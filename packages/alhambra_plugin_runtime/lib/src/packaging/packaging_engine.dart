@@ -269,7 +269,7 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
 }
 
 /// In-memory installed-plugin store; intended as a reference implementation.
-class InMemoryInstalledPluginStore implements InstalledPluginStore {
+class InMemoryInstalledPluginStore implements TransactionalInstalledPluginStore {
   final Map<String, InstalledPluginRecord> _installed = {};
 
   @override
@@ -288,5 +288,25 @@ class InMemoryInstalledPluginStore implements InstalledPluginStore {
   @override
   Future<void> save(InstalledPluginRecord plugin) async {
     _installed[plugin.id] = plugin;
+  }
+
+  @override
+  Future<bool> createIfAbsent(InstalledPluginRecord plugin) async {
+    if (_installed.containsKey(plugin.id)) return false;
+    _installed[plugin.id] = plugin;
+    return true;
+  }
+
+  @override
+  Future<bool> removeIfMatches(InstalledPluginRecord plugin) async {
+    final current = _installed[plugin.id];
+    if (current == null ||
+        current.version != plugin.version ||
+        current.contentHash != plugin.contentHash ||
+        current.installPath != plugin.installPath) {
+      return false;
+    }
+    _installed.remove(plugin.id);
+    return true;
   }
 }
