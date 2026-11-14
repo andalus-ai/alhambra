@@ -508,4 +508,25 @@ void main() {
     expect(recovered.single.eventId, event.eventId);
   });
 
+  test('reports SQLite database footprint and record count', () async {
+    store = SqliteCompositionLifecycleEventStore.open(path: '${directory.path}/health.sqlite');
+    await store!.append(CompositionLifecycleEvent(eventId: 'health-event', correlationId: 'health-correlation', operation: CompositionLifecycleOperation.activate, status: CompositionLifecycleStatus.succeeded, timestamp: DateTime.utc(2026, 9, 1), nodeIds: const ['command:health'], ownerIds: const ['owner-health']));
+    final health = await store!.inspectHealth();
+    expect(health.state, CompositionLifecycleStorageHealthState.healthy);
+    expect(health.recordCount, 1);
+    expect(health.primaryStorageBytes, greaterThan(0));
+    expect(health.lastSuccessfulWriteAt, isNotNull);
+    expect(health.metrics['adapter'], 'sqlite');
+  });
+
+  test('reports SQLite worker health through the isolate boundary', () async {
+    final worker = await SqliteLifecycleEventStoreWorker.open(path: '${directory.path}/worker-health.sqlite');
+    addTearDown(worker.close);
+    await worker.append(CompositionLifecycleEvent(eventId: 'worker-health-event', correlationId: 'worker-health-correlation', operation: CompositionLifecycleOperation.activate, status: CompositionLifecycleStatus.succeeded, timestamp: DateTime.utc(2026, 9, 2), nodeIds: const ['command:worker-health'], ownerIds: const ['owner-worker-health']));
+    final health = await worker.inspectHealth();
+    expect(health.state, CompositionLifecycleStorageHealthState.healthy);
+    expect(health.recordCount, 1);
+    expect(health.primaryStorageBytes, greaterThan(0));
+  });
+
 }
