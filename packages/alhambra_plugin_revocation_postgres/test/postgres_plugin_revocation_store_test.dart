@@ -31,6 +31,30 @@ void main() {
       ? 'Set ALHAMBRA_TEST_DATABASE_URL to run PostgreSQL integration tests.'
       : false;
 
+
+  test('migration applies schema v4 scope ownership', () async {
+    final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
+    await store.migrate();
+    addTearDown(store.close);
+
+    final rows = await Pool.withUrl(databaseUrl!).execute(
+      'SELECT MAX(version) AS version FROM alhambra_plugin_revocation_schema',
+    );
+    expect(rows.first.toColumnMap()['version'], 4);
+
+    for (final table in [
+      'alhambra_plugin_revocation_execution',
+      'alhambra_plugin_revocation_journal',
+      'alhambra_plugin_revocation_outbox',
+    ]) {
+      final columns = await Pool.withUrl(databaseUrl!).execute(
+        'SELECT column_name FROM information_schema.columns WHERE table_name = @table AND column_name = @column',
+        substitutionValues: {'table': table, 'column': 'scope_id'},
+      );
+      expect(columns, isNotEmpty);
+    }
+  }, skip: skipReason);
+
   test('transactionally commits execution, journal and outbox', () async {
     final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
     await store.migrate();
