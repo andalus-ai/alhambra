@@ -10,6 +10,10 @@ Start here:
 - [Plugin developer guide](PLUGIN_DEVELOPER_GUIDE.md)
 - [Repository overview](../README.md)
 
+## Examples
+- [Plugin host starter](../examples/plugin_host_starter/README.md) — runnable Flutter host demonstrating plugin activation and contribution registration.
+- [Examples index](../examples/README.md) — all maintained examples.
+
 ## Architecture and ownership
 - [UI package boundaries](ALHAMBRA_UI_PACKAGE_BOUNDARIES.md) — dependency direction and presentation-only rules.
 - [Application host composition](APPLICATION_HOST_COMPOSITION.md) — product ownership, profiles, layout selection and composition roots.
