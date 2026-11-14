@@ -93,7 +93,7 @@ final class PluginLifecycleRecoveryJobArchiver {
       }
       throw StateError('A conflicting or invalid archive record was written concurrently.');
     }
-
+    return record;
   }
 
   bool _isArchivable(PluginRecoveryJobStatus status) => switch (status) {
