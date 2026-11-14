@@ -1,4 +1,5 @@
 import 'package:sqlite3/sqlite3.dart' as sq;
+import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 
 /// Durable SQLite implementation of [PluginInstallRecoveryJournal].
@@ -228,7 +229,8 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
       throw ArgumentError('Approval ID must not be empty.');
     }
     for (final value in [entry.approvedBy, entry.approvalId]) {
-      if (value != null && (value.length > 256 || value.contains(RegExp(r'[\\x00-\\x1F\\x7F]')))) {
+      if (value != null &&
+          (value.length > 256 || value.codeUnits.any((unit) => unit < 0x20 || unit == 0x7f))) {
         throw ArgumentError('Approval audit values must be bounded and contain no control characters.');
       }
     }
