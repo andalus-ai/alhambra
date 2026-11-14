@@ -12,7 +12,8 @@ import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 final class SqlitePluginRevocationStore
     implements
         TransactionalPluginRevocationStore,
-        PluginRevocationOutboxStore {
+        PluginRevocationOutboxStore,
+        PluginRevocationOutboxInspectionStore {
   final sq.Database _db;
   final Random _random;
   bool _closed = false;
@@ -312,6 +313,15 @@ final class SqlitePluginRevocationStore
       }
       _enqueue(record);
     });
+  }
+
+  @override
+  Future<List<PluginRevocationOutboxMessage>> readAllOutbox() async {
+    _assertOpen();
+    final rows = _db.select(
+      'SELECT * FROM plugin_revocation_outbox ORDER BY occurred_at, event_id',
+    );
+    return List.unmodifiable(rows.map((row) => _message(row)));
   }
 
   @override
