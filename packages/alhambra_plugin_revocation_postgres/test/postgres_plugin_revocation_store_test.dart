@@ -275,6 +275,7 @@ void main() {
     final request = PluginRevocationReplayRequest(
       actionId: 'pg-action-$key',
       actorId: 'operator-1',
+      scopeId: 'tenant-blue',
       reason: 'Approved after sink recovery',
       approvalReference: 'change-$key',
       targetEventId: claimed.event.eventId,
@@ -287,6 +288,7 @@ void main() {
     final first = results.first!;
     expect(results.last!.replay.event.eventId, first.replay.event.eventId);
     expect(first.audit.replayGeneration, 1);
+    expect(first.audit.scopeId, 'tenant-blue');
     expect(first.replay.event.replayOfEventId, claimed.event.eventId);
     expect(first.replay.event.replayGeneration, 1);
     expect(first.replay.state, PluginRevocationOutboxState.pending);
@@ -299,6 +301,7 @@ void main() {
     final second = await store.replayDeadLetter(PluginRevocationReplayRequest(
       actionId: 'pg-action-2-$key',
       actorId: 'operator-2',
+      scopeId: 'tenant-blue',
       reason: 'Second approved replay generation',
       approvalReference: 'change-2-$key',
       targetEventId: claimed.event.eventId,

@@ -11,7 +11,7 @@ Durable SQLite implementation for Alhambra plugin revocation.
 
 The adapter is an optional package. The neutral `alhambra_plugin_runtime` package remains database-independent.
 
-The current adapter does **not yet** implement `PluginRevocationDeadLetterReplayStore`. The in-memory runtime reference implementation is not a substitute for durable operator audit. Do not enable production dead-letter replay until a later adapter release provides one-transaction audit insertion + new replay outbox insertion.
+The adapter implements `PluginRevocationDeadLetterReplayStore`. Replay inserts a new pending event and operator audit record atomically; it never resets the source dead-letter row.
 
 ## Bootstrap
 
@@ -52,4 +52,9 @@ SQLite is intended for embedded, single-host persistence. Use a server database 
 
 ## Schema
 
-Schema version 1 creates `plugin_revocation_execution`, `plugin_revocation_outbox`, and `plugin_revocation_journal`. The outbox has a unique event ID and idempotency key plus an index for due/expired work. The adapter creates tables idempotently and records SQLite `user_version = 1`. Future schema changes must use forward-only migrations and preserve enum names as text rather than ordinal values.
+Schema version 1 creates the execution, outbox and journal tables. Version 2 adds replay lineage and the operator-action audit table. Version 3 adds the opaque `scope_id` to operator audit rows. Existing databases are upgraded forward-only; v2 and v3 DDL is applied transactionally. Older audit rows receive the compatibility scope `default`.
+
+
+## Audited replay and scope
+
+Use `PluginRevocationReplayCommandService` rather than calling the persistence method from an untrusted request handler. The host must supply a principal, authoritative event-scope resolver, authorization adapter and approval verifier. The adapter persists `scopeId` with the actor and approval evidence. SQLite's immediate transaction serializes replay generations.

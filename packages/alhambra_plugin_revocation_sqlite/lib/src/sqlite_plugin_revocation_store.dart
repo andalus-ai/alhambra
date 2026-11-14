@@ -55,7 +55,7 @@ final class SqlitePluginRevocationStore
   void _migrate() {
     final version =
         _db.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > 2) {
+    if (version > 3) {
       throw UnsupportedError(
         'Database schema version $version is newer than this adapter supports.',
       );
@@ -143,6 +143,15 @@ final class SqlitePluginRevocationStore
           ON plugin_revocation_operator_action(target_event_id, replay_generation)
         ''');
         _db.execute('PRAGMA user_version = 2');
+      });
+    }
+    if (version < 3) {
+      _transaction(() {
+        _db.execute(
+          "ALTER TABLE plugin_revocation_operator_action "
+          "ADD COLUMN scope_id TEXT NOT NULL DEFAULT 'default'",
+        );
+        _db.execute('PRAGMA user_version = 3');
       });
     }
   }
@@ -369,6 +378,7 @@ final class SqlitePluginRevocationStore
           final row = Map<String, Object?>.from(priorRows.first);
           if (row['target_event_id'] != request.targetEventId ||
               row['actor_id'] != request.actorId ||
+              row['scope_id'] != request.scopeId ||
               row['reason'] != request.reason ||
               row['approval_reference'] != request.approvalReference) {
             throw StateError(
@@ -385,6 +395,7 @@ final class SqlitePluginRevocationStore
           final audit = PluginRevocationOperatorAction(
             actionId: row['action_id']! as String,
             actorId: row['actor_id']! as String,
+            scopeId: row['scope_id']! as String,
             reason: row['reason']! as String,
             approvalReference: row['approval_reference']! as String,
             targetEventId: row['target_event_id']! as String,
@@ -425,16 +436,17 @@ final class SqlitePluginRevocationStore
         ]);
         _db.execute('''
           INSERT INTO plugin_revocation_operator_action
-          (action_id, actor_id, reason, approval_reference, target_event_id,
+          (action_id, actor_id, scope_id, reason, approval_reference, target_event_id,
            replay_event_id, replay_generation, occurred_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', [
-          request.actionId, request.actorId, request.reason,
+          request.actionId, request.actorId, request.scopeId, request.reason,
           request.approvalReference, sourceEventId, replayEventId, generation, at,
         ]);
         final audit = PluginRevocationOperatorAction(
           actionId: request.actionId,
           actorId: request.actorId,
+          scopeId: request.scopeId,
           reason: request.reason,
           approvalReference: request.approvalReference,
           targetEventId: sourceEventId,
@@ -474,6 +486,7 @@ final class SqlitePluginRevocationStore
     return List.unmodifiable(rows.map((row) => PluginRevocationOperatorAction(
       actionId: row['action_id']! as String,
       actorId: row['actor_id']! as String,
+      scopeId: row['scope_id']! as String,
       reason: row['reason']! as String,
       approvalReference: row['approval_reference']! as String,
       targetEventId: row['target_event_id']! as String,

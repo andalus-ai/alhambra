@@ -37,6 +37,7 @@ Start here:
 - [PostgreSQL plugin revocation persistence](POSTGRES_PLUGIN_REVOCATION_PERSISTENCE.md) — multi-worker durable journal and SKIP LOCKED outbox claims.
 - [Revocation persistence adapter conformance](REVOCATION_PERSISTENCE_ADAPTER_CONFORMANCE.md) — shared behavioral invariants for SQLite and PostgreSQL stores.
 - [Revocation operations and inspection](REVOCATION_OPERATIONS_AND_INSPECTION.md) — read-only operational snapshots, metrics and safety boundaries.
+- [Scoped revocation replay authorization](SCOPED_REVOCATION_REPLAY_AUTHORIZATION.md) — host identity, scope resolution, replay permission and approval gates.
 - [Audited dead-letter replay contract](REVOCATION_OPERATIONS_AND_INSPECTION.md#audited-dead-letter-replay-contract) — operator attribution, approval evidence and replay identity rules.
 
 ## Composition persistence and compatibility
