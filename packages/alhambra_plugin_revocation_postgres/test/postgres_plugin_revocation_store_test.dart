@@ -246,4 +246,67 @@ void main() {
     );
     expect(claimed.any((item) => item.event.idempotencyKey == key), isFalse);
   }, skip: skipReason);
+
+  test('audited replay is durable, idempotent and allocates generations', () async {
+    final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
+    await store.migrate();
+    final key = 'replay-${DateTime.now().microsecondsSinceEpoch}';
+    addTearDown(store.close);
+    await store.writePending(_record(key));
+    await store.completeAndEnqueue(_record(
+      key,
+      status: PluginRevocationExecutionStatus.completed,
+      at: DateTime.utc(2026, 1, 1, 0, 1),
+    ));
+    final claimed = (await store.claim(
+      workerId: 'replay-worker',
+      now: DateTime.utc(2026, 1, 1, 0, 2),
+      leaseDuration: const Duration(seconds: 30),
+      limit: 100,
+      maxAttempts: 1,
+    )).singleWhere((item) => item.event.idempotencyKey == key);
+    await store.reschedule(
+      eventId: claimed.event.eventId,
+      leaseToken: claimed.leaseToken!,
+      nextAttemptAt: DateTime.utc(2026, 1, 1, 0, 3),
+      errorCode: 'publisher_unavailable',
+      maxAttempts: 1,
+    );
+    final request = PluginRevocationReplayRequest(
+      actionId: 'pg-action-$key',
+      actorId: 'operator-1',
+      reason: 'Approved after sink recovery',
+      approvalReference: 'change-$key',
+      targetEventId: claimed.event.eventId,
+      occurredAt: DateTime.utc(2026, 1, 1, 0, 4),
+    );
+    final results = await Future.wait([
+      store.replayDeadLetter(request),
+      store.replayDeadLetter(request),
+    ]);
+    final first = results.first!;
+    expect(results.last!.replay.event.eventId, first.replay.event.eventId);
+    expect(first.audit.replayGeneration, 1);
+    expect(first.replay.event.replayOfEventId, claimed.event.eventId);
+    expect(first.replay.event.replayGeneration, 1);
+    expect(first.replay.state, PluginRevocationOutboxState.pending);
+    expect(first.replay.attempts, 0);
+    expect(await store.readOperatorActions(), hasLength(1));
+    final all = await store.readAllOutbox();
+    expect(all.singleWhere((m) => m.event.eventId == claimed.event.eventId).state,
+        PluginRevocationOutboxState.deadLetter);
+
+    final second = await store.replayDeadLetter(PluginRevocationReplayRequest(
+      actionId: 'pg-action-2-$key',
+      actorId: 'operator-2',
+      reason: 'Second approved replay generation',
+      approvalReference: 'change-2-$key',
+      targetEventId: claimed.event.eventId,
+      occurredAt: DateTime.utc(2026, 1, 1, 0, 5),
+    ));
+    expect(second!.audit.replayGeneration, 2);
+    expect(second.replay.event.eventId, isNot(first.replay.event.eventId));
+    expect(await store.readOperatorActions(), hasLength(2));
+  }, skip: skipReason);
+
 }
