@@ -38,8 +38,9 @@ final class PluginLifecycleRecoveryJobArchiver {
     if (job.revision != expectedRevision) {
       throw StateError('Recovery job revision changed; refresh before archiving.');
     }
-    if (!_isArchivable(job.status)) {
-      throw StateError('Recovery job in state "${job.status.name}" is not eligible for archival.');
+    if (!_isArchivable(job.status) ||
+        job.steps.any((step) => step.status == PluginRecoveryJobStepStatus.running)) {
+      throw StateError('Recovery job is not in a safe terminal state for archival.');
     }
 
     final existing = await archive.read(jobId);
