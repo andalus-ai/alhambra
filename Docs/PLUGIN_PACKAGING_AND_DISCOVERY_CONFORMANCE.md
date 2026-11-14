@@ -26,7 +26,7 @@ suite.validateDiscoveryGraph(discovered.map((item) => item.manifest))
     .throwIfNotConformant();
 ```
 
-This delegates to the actual `PluginLoader.resolveDependencyOrder` contract and reports missing required dependencies, duplicate IDs, invalid IDs and cycles. The resolver preserves discovery order where no dependency edge constrains ordering and returns a dependency-first plan.
+This delegates to the actual `PluginDependencyResolver.resolve` contract used by `PluginLoader` and reports missing required dependencies, duplicate IDs, invalid IDs and cycles. The resolver preserves discovery order where no dependency edge constrains ordering and returns a dependency-first plan.
 
 ## Security and compatibility boundaries
 
