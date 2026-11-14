@@ -74,10 +74,12 @@ class ExtensionRuntime {
   final DefaultUiProjectionRegistry uiProjectionRegistry;
   final DefaultPluginTrustStore pluginTrustStore;
   final DefaultPluginSecurityPolicy pluginSecurityPolicy;
-  final DefaultPluginPackageVerifier pluginPackageVerifier;
+  late final DefaultPluginPackageVerifier pluginPackageVerifier;
+  final PluginPayloadIntegrityVerifier? pluginPayloadIntegrityVerifier;
+  final PluginCryptographicSignatureVerifier? pluginSignatureVerifier;
   final InMemoryInstalledPluginStore installedPluginStore;
   final InMemoryPluginCatalog pluginCatalog;
-  final DefaultPluginLifecycleManager pluginLifecycleManager;
+  late final DefaultPluginLifecycleManager pluginLifecycleManager;
   final DefaultWorkspaceManager workspaceManager;
 
   late final WorkspaceModeController workspaceModeController;
@@ -131,6 +133,8 @@ class ExtensionRuntime {
     DefaultPluginTrustStore? pluginTrustStore,
     PluginSecurityPolicy? pluginSecurityPolicy,
     DefaultPluginPackageVerifier? pluginPackageVerifier,
+    PluginPayloadIntegrityVerifier? pluginPayloadIntegrityVerifier,
+    PluginCryptographicSignatureVerifier? pluginSignatureVerifier,
     InMemoryInstalledPluginStore? installedPluginStore,
     InMemoryPluginCatalog? pluginCatalog,
     DefaultPluginLifecycleManager? pluginLifecycleManager,
@@ -181,33 +185,28 @@ class ExtensionRuntime {
        pluginSecurityPolicy =
            (pluginSecurityPolicy as DefaultPluginSecurityPolicy?) ??
            const DefaultPluginSecurityPolicy(),
-       pluginPackageVerifier =
-           pluginPackageVerifier ??
-           DefaultPluginPackageVerifier(
-             trustStore: pluginTrustStore ?? DefaultPluginTrustStore(),
-             securityPolicy:
-                 pluginSecurityPolicy ?? const DefaultPluginSecurityPolicy(),
-           ),
+       pluginPayloadIntegrityVerifier = pluginPayloadIntegrityVerifier,
+       pluginSignatureVerifier = pluginSignatureVerifier,
        installedPluginStore =
            installedPluginStore ?? InMemoryInstalledPluginStore(),
        pluginCatalog = pluginCatalog ?? InMemoryPluginCatalog(),
-       pluginLifecycleManager =
-           pluginLifecycleManager ??
-           DefaultPluginLifecycleManager(
-             verifier:
-                 pluginPackageVerifier ??
-                 DefaultPluginPackageVerifier(
-                   trustStore: pluginTrustStore ?? DefaultPluginTrustStore(),
-                   securityPolicy:
-                       pluginSecurityPolicy ??
-                       const DefaultPluginSecurityPolicy(),
-                 ),
-             dependencyResolver: DefaultPluginDependencyResolver(
-               catalog: pluginCatalog ?? InMemoryPluginCatalog(),
-             ),
-             store: installedPluginStore ?? InMemoryInstalledPluginStore(),
-           ),
        workspaceManager = workspaceManager ?? DefaultWorkspaceManager() {
+    this.pluginPackageVerifier = pluginPackageVerifier ??
+        DefaultPluginPackageVerifier(
+          trustStore: this.pluginTrustStore,
+          securityPolicy: pluginSecurityPolicy ??
+              const DefaultPluginSecurityPolicy(),
+          integrityVerifier: this.pluginPayloadIntegrityVerifier,
+          signatureVerifier: this.pluginSignatureVerifier,
+        );
+    this.pluginLifecycleManager = pluginLifecycleManager ??
+        DefaultPluginLifecycleManager(
+          verifier: this.pluginPackageVerifier,
+          dependencyResolver: DefaultPluginDependencyResolver(
+            catalog: this.pluginCatalog,
+          ),
+          store: this.installedPluginStore,
+        );
     contextService = ContextService(registry: this.context);
     validator = ContributionValidator(
       views: this.views,
