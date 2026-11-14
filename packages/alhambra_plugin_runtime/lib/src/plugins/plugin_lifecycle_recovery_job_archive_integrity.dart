@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'plugin_lifecycle_recovery_job.dart';
 import 'plugin_lifecycle_recovery_job_archive.dart';
+import 'plugin_lifecycle_recovery_job_archive_integrity_metadata.dart';
 
 /// Stable JSON representation used as the input to an archive digest.
 ///
@@ -59,21 +60,6 @@ abstract interface class PluginLifecycleRecoveryJobDigestProvider {
   });
 }
 
-final class PluginLifecycleRecoveryJobArchiveIntegrity {
-  final int formatVersion;
-  final String algorithm;
-  final String digest;
-
-  PluginLifecycleRecoveryJobArchiveIntegrity({
-    required this.formatVersion,
-    required this.algorithm,
-    required this.digest,
-  }) {
-    if (formatVersion < 1) throw ArgumentError.value(formatVersion, 'formatVersion');
-    if (algorithm.trim().isEmpty) throw ArgumentError.value(algorithm, 'algorithm');
-    if (digest.trim().isEmpty) throw ArgumentError.value(digest, 'digest');
-  }
-}
 
 enum PluginRecoveryArchiveVerificationDisposition {
   valid,
