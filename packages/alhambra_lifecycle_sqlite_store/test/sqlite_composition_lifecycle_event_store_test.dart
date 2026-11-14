@@ -483,7 +483,19 @@ void main() {
 
     await expectLater(store!.append(event), throwsA(isA<Exception>()));
     store!.database.execute('DROP TRIGGER reject_owner');
+
+    // Reopen to prove the failed transaction left no durable event row.
+    await store!.close();
+    store = SqliteCompositionLifecycleEventStore.open(
+      path: '${directory.path}/rollback.sqlite',
+    );
     expect(await store!.query(CompositionLifecycleEventQuery()), isEmpty);
+    expect(
+      await store!.query(
+        CompositionLifecycleEventQuery(ownerId: 'owner-rollback'),
+      ),
+      isEmpty,
+    );
   });
 
   test('recovers committed WAL data after closing and reopening', () async {
