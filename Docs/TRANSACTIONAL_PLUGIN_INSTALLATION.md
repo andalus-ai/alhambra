@@ -87,3 +87,60 @@ crash durability, cross-process serialization or filesystem atomicity.
 
 Plugin activation remains a separate host-controlled lifecycle operation after
 installation has committed.
+
+## Installation recovery and reconciliation
+
+### Read-only planning
+
+`PluginInstallRecoveryPlanner.inspect()` reads unresolved journal entries,
+calls the filesystem adapter's read-only `inspectOperation`, and compares the
+destination with the installed record. It produces immutable findings and
+never changes journal, filesystem or installed-record state.
+
+The planner proposes only narrowly supported cases:
+
+- **discardStaging** — staging exists, destination does not, and no installed
+  record exists.
+- **rollbackPromotion** — destination exists, the adapter proves operation
+  ownership, rollback remains available, and no installed record exists.
+- **finalizePromotion** — destination ownership and the installed record agree
+  on plugin ID, version, content hash and destination.
+- **markFailed** — no staging, destination or installed record exists and the
+  journal shows the operation stopped before staging began.
+- **manualReview** — ownership, record identity, metadata or prior recovery
+  outcome is ambiguous.
+
+The journal must persist the package content hash. The filesystem inspection
+must prove destination ownership using operation-bound metadata (for example
+a durable operation marker); a matching path string is not proof of ownership.
+
+### Explicitly approved execution
+
+The host must explicitly call
+`PluginInstallRecoveryExecutor.execute(finding, approvedBy:, approvalId:)`.
+Before side effects, the executor re-reads the unresolved journal entry,
+re-inspects filesystem and installed metadata, compares them with the finding,
+and atomically claims the operation using
+`PluginInstallRecoveryJournal.compareAndSet`.
+
+The claim records the operator identity and approval ID in the journal before
+performing one action. The executor then writes a terminal outcome with another
+compare-and-set. If a side effect or outcome write fails, the journal remains
+`needsReconciliation` or `recoveryStarted`; another worker must not blindly
+repeat the action. A new host inspection and explicit resolution are required.
+
+### Production adapter requirements
+
+- `inspectOperation` is read-only and must not create, remove, rename or repair files.
+- Operation ownership must be derived from trusted durable provenance.
+- Journal compare-and-set must be atomic across processes and enforce one
+  current record per operation ID.
+- The adapter must define whether rollback, finalize and discard are idempotent
+  after process interruption and ambiguous return values.
+- The journal must retain approval attribution and operation history according
+  to the host's audit-retention policy.
+- Filesystem and journal adapters need crash-injection and multi-process tests.
+  In-memory tests do not establish those guarantees.
+
+The recovery executor does not activate plugins, rerun extraction, overwrite
+installed records, or automatically retry ambiguous operations.
