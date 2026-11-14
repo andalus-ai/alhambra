@@ -81,3 +81,8 @@ The original dead-letter row is never reset or overwritten. A replay is a new de
 The in-memory reference implementation demonstrates these semantics within one Dart isolate only. It is not durable, cross-process safe, or suitable for production. SQLite and PostgreSQL durable implementations of this new contract are a separate adapter-conformance step; do not treat the interface alone as a production replay facility.
 
 Hosts must authorize operators, validate approval evidence, scope access to the correct tenant/organization, and protect actor/reason/ticket data. Do not accept actor identity from an untrusted request body.
+
+
+## Scoped administrative inspection
+
+Use `PluginRevocationAdminOperationsService` to expose the read-only projection through an authenticated host surface. It checks scope authorization, audits allowed/denied access, resolves journal/outbox ownership using host metadata and returns only records in the requested scope. See [Scoped revocation administrative operations](SCOPED_REVOCATION_ADMIN_OPERATIONS.md). The service does not expose mutation commands or an HTTP endpoint.
