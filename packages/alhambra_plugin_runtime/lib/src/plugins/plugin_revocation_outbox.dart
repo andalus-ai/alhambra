@@ -11,6 +11,8 @@ final class PluginRevocationAuditEvent {
   final String outcome;
   final DateTime occurredAt;
   final String? detail;
+  final String? replayOfEventId;
+  final int replayGeneration;
 
   const PluginRevocationAuditEvent({
     required this.eventId,
@@ -22,7 +24,9 @@ final class PluginRevocationAuditEvent {
     required this.outcome,
     required this.occurredAt,
     this.detail,
-  });
+    this.replayOfEventId,
+    this.replayGeneration = 0,
+  }) : assert(replayGeneration >= 0);
 }
 
 enum PluginRevocationOutboxState { pending, leased, delivered, deadLetter }
@@ -87,9 +91,10 @@ abstract interface class PluginRevocationOutboxStore {
 /// Single-isolate reference implementation for tests only. A real adapter
 /// needs database transactions, uniqueness constraints and row-level claims.
 class InMemoryTransactionalPluginRevocationStore
-    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore {
+    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore, PluginRevocationDeadLetterReplayStore {
   final Map<String, PluginRevocationExecutionRecord> _executions = {};
   final Map<String, PluginRevocationOutboxMessage> _messages = {};
+  final Map<String, PluginRevocationOperatorAction> _operatorActions = {};
 
   @override
   Future<PluginRevocationExecutionRecord?> read(String idempotencyKey) async =>
@@ -258,6 +263,75 @@ class InMemoryTransactionalPluginRevocationStore
     );
     return true;
   }
+
+  @override
+  Future<PluginRevocationReplayResult?> replayDeadLetter(
+    PluginRevocationReplayRequest request,
+  ) async {
+    final existingAction = _operatorActions[request.actionId];
+    if (existingAction != null) {
+      if (existingAction.targetEventId != request.targetEventId ||
+          existingAction.actorId != request.actorId ||
+          existingAction.reason != request.reason ||
+          existingAction.approvalReference != request.approvalReference) {
+        throw StateError('Operator action ID was already used with different replay details.');
+      }
+      final replay = _messages[existingAction.replayEventId];
+      if (replay == null) throw StateError('Recorded replay event is missing.');
+      return PluginRevocationReplayResult(existingAction, replay);
+    }
+    final source = _messages[request.targetEventId];
+    if (source == null || source.state != PluginRevocationOutboxState.deadLetter) {
+      return null;
+    }
+    final generation = _operatorActions.values
+        .where((action) => action.targetEventId == request.targetEventId)
+        .fold<int>(0, (value, action) => value > action.replayGeneration ? value : action.replayGeneration) + 1;
+    final replayEventId = '${source.event.eventId}:replay:$generation';
+    final replayKey = '${source.event.idempotencyKey}:replay:$generation';
+    if (_messages.containsKey(replayEventId) ||
+        _messages.values.any((message) => message.event.idempotencyKey == replayKey)) {
+      throw StateError('Replay identity collision.');
+    }
+    final at = request.occurredAt.toUtc();
+    final event = PluginRevocationAuditEvent(
+      eventId: replayEventId,
+      idempotencyKey: replayKey,
+      operationId: source.event.operationId,
+      pluginId: source.event.pluginId,
+      providerOwnerId: source.event.providerOwnerId,
+      action: source.event.action,
+      outcome: source.event.outcome,
+      occurredAt: at,
+      detail: source.event.detail,
+      replayOfEventId: source.event.eventId,
+      replayGeneration: generation,
+    );
+    final replay = PluginRevocationOutboxMessage(
+      event: event,
+      state: PluginRevocationOutboxState.pending,
+      attempts: 0,
+      nextAttemptAt: at,
+    );
+    final audit = PluginRevocationOperatorAction(
+      actionId: request.actionId,
+      actorId: request.actorId,
+      reason: request.reason,
+      approvalReference: request.approvalReference,
+      targetEventId: source.event.eventId,
+      replayEventId: replayEventId,
+      replayGeneration: generation,
+      occurredAt: at,
+    );
+    // No await between writes: reference atomicity within this isolate only.
+    _operatorActions[audit.actionId] = audit;
+    _messages[replayEventId] = replay;
+    return PluginRevocationReplayResult(audit, replay);
+  }
+
+  Future<List<PluginRevocationOperatorAction>> readOperatorActions() async =>
+      List.unmodifiable(_operatorActions.values.toList()
+        ..sort((a, b) => a.occurredAt.compareTo(b.occurredAt)));
 
   @override
   Future<List<PluginRevocationOutboxMessage>> readAllOutbox() async =>
