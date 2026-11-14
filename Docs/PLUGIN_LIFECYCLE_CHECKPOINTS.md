@@ -248,3 +248,33 @@ The in-memory implementation is not a distributed lock or durable store. The
 runner's lifecycle gate serializes work only within its `PluginManager`
 instance. No automatic replay, exactly-once guarantee, or external side-effect
 verification is provided.
+
+
+## Read-only recovery batch planning and approval
+
+`PluginLifecycleRecoveryBatchPlanner.planBatch()` builds an immutable, read-only
+snapshot before a host creates a durable recovery job. The plan includes the
+recovery action, stable dependency order, each target's expected checkpoint
+operation ID and sequence, and one reserved execution operation ID per step.
+It also reports blockers and warnings. Startup is ordered prerequisite-first;
+shutdown compensation is ordered dependent-first.
+
+Planning runs under the manager's local lifecycle batch gate so its view of
+active plugins cannot interleave with another lifecycle batch on that same
+manager. It does not write checkpoints or jobs, mutate the manager or health
+registry, or invoke plugin hooks. It does not reserve identifiers in a
+distributed allocator; the host's operation ID factory must provide IDs with
+the required uniqueness scope.
+
+After review and explicit host authorization, call `plan.toJob(...)` to
+materialize the exact `PluginLifecycleRecoveryJob` intent. Persist that job
+with `insertIfAbsent` before calling `executeBatchWithJob()`. The plan-to-job
+conversion is pure and preserves the exact dependency order, checkpoint
+snapshots, and execution operation IDs.
+
+A plan is a point-in-time review artifact, not a lock, approval token, or
+execution guarantee. Checkpoints or external conditions can change after
+planning. `executeBatchWithJob()` independently repeats preflight and rejects
+a job whose action, ordered targets, checkpoint snapshots, or reserved
+operation IDs no longer match. The host owns authorization, persistence,
+idempotency-key policy, and any approval audit trail.
