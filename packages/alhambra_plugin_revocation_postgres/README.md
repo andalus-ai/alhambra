@@ -68,7 +68,7 @@ Delivery is **at least once**, not exactly once. A process can publish successfu
 
 ## Migration and operations
 
-- Migration version 1 is available at `migrations/001_plugin_revocation.sql`; version 2 adds audited replay; version 3 adds the operator `scope_id`. All versions are applied by `migrate()`.
+- Migration version 1 is available at `migrations/001_plugin_revocation.sql`; version 2 is available at `migrations/002_audited_dead_letter_replay.sql`. Both are applied by `migrate()`.
 - Run migrations with a dedicated role; grant the application role only the required table and sequence privileges (no sequence is currently used).
 - Configure pool size, connection timeout, query timeout, and TLS through the PostgreSQL URL.
 - Monitor pending count, oldest pending age, expired leases, retry attempts and dead-letter count using the outbox tables.
@@ -87,6 +87,8 @@ dart test
 The integration suite verifies atomic execution/journal/outbox completion, independent-pool claim concurrency, journal revision CAS, and rollback when the journal update cannot be completed. Tests are skipped when the environment variable is absent.
 
 
-## Audited replay and scope
+## Audited dead-letter replay
 
-Use `PluginRevocationReplayCommandService` rather than calling the persistence method from an untrusted request handler. The host supplies an authenticated principal, authoritative event-scope resolver, authorization adapter and approval verifier. The adapter persists `scopeId` with the actor and approval evidence. PostgreSQL serializes action IDs with a transaction-scoped advisory lock and replay generations with a source-row lock.
+`replayDeadLetter` verifies and locks the source dead-letter row, allocates a generation, and inserts a new pending outbox event plus its operator-action audit record in one PostgreSQL transaction. A transaction-scoped advisory lock serializes requests using the same action ID; the source row lock serializes distinct approved replays of the same source event. Unique constraints provide a final integrity boundary. The original dead-letter row remains unchanged.
+
+The adapter exposes `readOperatorActions()`. Actor authentication, authorization, tenant scoping and approval-reference validation must be performed by the host before invoking replay. Replay delivery remains at-least-once.

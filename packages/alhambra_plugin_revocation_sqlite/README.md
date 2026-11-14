@@ -52,9 +52,11 @@ SQLite is intended for embedded, single-host persistence. Use a server database 
 
 ## Schema
 
-Schema version 1 creates the execution, outbox and journal tables. Version 2 adds replay lineage and the operator-action audit table. Version 3 adds the opaque `scope_id` to operator audit rows. Existing databases are upgraded forward-only; v2 and v3 DDL is applied transactionally. Older audit rows receive the compatibility scope `default`.
+Schema version 1 creates the execution, outbox and journal tables. Schema version 2 adds replay lineage columns, a unique source-event/generation index, and the operator-action audit table. The version-2 migration runs in one `BEGIN IMMEDIATE` transaction and records SQLite `user_version = 2` only after all changes succeed. Existing version-1 databases are upgraded automatically on adapter startup.
 
 
-## Audited replay and scope
+## Audited dead-letter replay
 
-Use `PluginRevocationReplayCommandService` rather than calling the persistence method from an untrusted request handler. The host must supply a principal, authoritative event-scope resolver, authorization adapter and approval verifier. The adapter persists `scopeId` with the actor and approval evidence. SQLite's immediate transaction serializes replay generations.
+`replayDeadLetter` only accepts a source row currently in `deadLetter`. It inserts a new pending outbox row and its operator-action audit record in the same immediate transaction. The source row is unchanged. The database writer lock serializes replay generation allocation across independent SQLite connections; unique action IDs make retries idempotent. Each generation has a distinct event ID and idempotency key.
+
+The adapter exposes `readOperatorActions()` for audit inspection. Operator authentication and approval validation remain host responsibilities. SQLite is a single-host persistence option, not a multi-host coordination database.

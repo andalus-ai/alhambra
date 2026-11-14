@@ -63,7 +63,7 @@ final class PostgresPluginRevocationStore
         'SELECT COALESCE(MAX(version), 0) AS version FROM alhambra_plugin_revocation_schema',
       );
       final currentVersion = schema.first.toColumnMap()['version'] as int;
-      if (currentVersion > 3) {
+      if (currentVersion > 2) {
         throw UnsupportedError('Database schema version $currentVersion is newer than this adapter supports.');
       }
       await tx.execute('''
@@ -513,7 +513,6 @@ final class PostgresPluginRevocationStore
       return PluginRevocationOperatorAction(
         actionId: value['action_id'] as String,
         actorId: value['actor_id'] as String,
-        scopeId: value['scope_id'] as String,
         reason: value['reason'] as String,
         approvalReference: value['approval_reference'] as String,
         targetEventId: value['target_event_id'] as String,
