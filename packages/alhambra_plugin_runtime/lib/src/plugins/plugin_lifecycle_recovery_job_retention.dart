@@ -86,7 +86,9 @@ final class PluginLifecycleRecoveryJobArchiver {
     PluginRecoveryJobStatus.expired => true,
     PluginRecoveryJobStatus.planned ||
     PluginRecoveryJobStatus.running ||
-    PluginRecoveryJobStatus.cancellationRequested => false,
+    PluginRecoveryJobStatus.cancellationRequested ||
+    PluginRecoveryJobStatus.interrupted ||
+    PluginRecoveryJobStatus.manualReview => false,
   };
 }
 
