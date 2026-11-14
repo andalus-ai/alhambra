@@ -172,6 +172,12 @@ final class PluginInstallRecoveryPlanner {
     }
 
     if (filesystem.destinationExists && installedRecordMatches) {
+      if (entry.stagingHandle == null || entry.promotedPath == null) {
+        return (
+          PluginInstallRecoveryAction.manualReview,
+          'The journal is missing staging or destination metadata required to finalize promotion.',
+        );
+      }
       return (
         PluginInstallRecoveryAction.finalizePromotion,
         'The destination and installed record agree. Finalize the reversible '
@@ -182,6 +188,12 @@ final class PluginInstallRecoveryPlanner {
     if (filesystem.destinationExists &&
         !installedRecordExists &&
         filesystem.rollbackAvailable) {
+      if (entry.stagingHandle == null || entry.promotedPath == null) {
+        return (
+          PluginInstallRecoveryAction.manualReview,
+          'The journal is missing staging or destination metadata required to roll back promotion.',
+        );
+      }
       return (
         PluginInstallRecoveryAction.rollbackPromotion,
         'The destination belongs to this operation but no installed record '
@@ -192,6 +204,12 @@ final class PluginInstallRecoveryPlanner {
     if (filesystem.stagingExists &&
         !filesystem.destinationExists &&
         !installedRecordExists) {
+      if (entry.stagingHandle == null) {
+        return (
+          PluginInstallRecoveryAction.manualReview,
+          'The staging handle is missing; the adapter must not guess which staging area to remove.',
+        );
+      }
       return (
         PluginInstallRecoveryAction.discardStaging,
         'Only private staging remains. Discard it and close the interrupted install.',
