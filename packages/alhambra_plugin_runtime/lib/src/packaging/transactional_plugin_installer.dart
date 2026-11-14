@@ -405,7 +405,11 @@ final class TransactionalPluginInstaller {
       final store = leaseStore;
       final current = operationLease;
       if (store != null && current != null) {
-        await store.release(lease: current, now: clock().toUtc());
+        try {
+          await store.release(lease: current, now: clock().toUtc());
+        } catch (_) {
+          // Expiry remains the fallback if lease release cannot be persisted.
+        }
       }
     }
   }
