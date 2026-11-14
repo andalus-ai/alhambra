@@ -149,6 +149,65 @@ void main() {
       expect(plan.blockers, contains('Recovery operation IDs must be unique within a batch.'));
     });
 
+    test('blocks blank and duplicate target IDs', () async {
+      final store = InMemoryPluginLifecycleCheckpointStore();
+      await store.write(_checkpoint('a'));
+      final planner = PluginLifecycleRecoveryBatchPlanner(store: store, manager: PluginManager());
+
+      final blank = await planner.planBatch(PluginLifecycleRecoveryBatchRequest(
+        pluginIds: [' '],
+        action: PluginLifecycleRecoveryExecutionAction.resumeStartup,
+        operationIdFactory: (id) => 'new-$id',
+      ));
+      expect(blank.isBlocked, isTrue);
+      expect(blank.blockers, contains('Plugin IDs must not be blank.'));
+      expect(blank.blockers, contains('Select at least one plugin.'));
+
+      final duplicate = await planner.planBatch(PluginLifecycleRecoveryBatchRequest(
+        pluginIds: ['a', ' a '],
+        action: PluginLifecycleRecoveryExecutionAction.resumeStartup,
+        compiledPlugins: {'a': _Plugin('a')},
+        operationIdFactory: (id) => 'new-$id',
+      ));
+      expect(duplicate.isBlocked, isTrue);
+      expect(duplicate.blockers, contains('Duplicate plugin ID "a".'));
+    });
+
+    test('blocks inactive dependencies outside a startup batch', () async {
+      final store = InMemoryPluginLifecycleCheckpointStore();
+      await store.write(_checkpoint('app', dependencies: ['database']));
+      final planner = PluginLifecycleRecoveryBatchPlanner(store: store, manager: PluginManager());
+
+      final plan = await planner.planBatch(PluginLifecycleRecoveryBatchRequest(
+        pluginIds: ['app'],
+        action: PluginLifecycleRecoveryExecutionAction.resumeStartup,
+        compiledPlugins: {'app': _Plugin('app')},
+        operationIdFactory: (id) => 'new-$id',
+      ));
+
+      expect(plan.isBlocked, isTrue);
+      expect(plan.blockers, contains(
+        'Startup recovery for "app" requires inactive dependency "database" outside this batch.',
+      ));
+    });
+
+    test('rejects operation IDs that reuse the checkpoint operation ID', () async {
+      final store = InMemoryPluginLifecycleCheckpointStore();
+      await store.write(_checkpoint('a'));
+      final planner = PluginLifecycleRecoveryBatchPlanner(store: store, manager: PluginManager());
+
+      final plan = await planner.planBatch(PluginLifecycleRecoveryBatchRequest(
+        pluginIds: ['a'],
+        action: PluginLifecycleRecoveryExecutionAction.resumeStartup,
+        compiledPlugins: {'a': _Plugin('a')},
+        operationIdFactory: (_) => 'old-a',
+      ));
+
+      expect(plan.isBlocked, isTrue);
+      expect(plan.steps, isEmpty);
+      expect(plan.blockers.single, contains('must be non-empty and differ'));
+    });
+
     test('blocks stale or ineligible checkpoints without creating a job', () async {
       final store = InMemoryPluginLifecycleCheckpointStore();
       await store.write(_checkpoint(
