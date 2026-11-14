@@ -14,7 +14,8 @@ final class SqlitePluginRevocationStore
         TransactionalPluginRevocationStore,
         PluginRevocationOutboxStore,
         PluginRevocationOutboxInspectionStore,
-        PluginRevocationDeadLetterReplayStore {
+        PluginRevocationDeadLetterReplayStore,
+        PluginRevocationOperatorActionInspectionStore {
   final sq.Database _db;
   final Random _random;
   bool _closed = false;
@@ -143,6 +144,15 @@ final class SqlitePluginRevocationStore
           ON plugin_revocation_operator_action(target_event_id, replay_generation)
         ''');
         _db.execute('PRAGMA user_version = 2');
+      });
+    }
+    if (version < 3) {
+      _transaction(() {
+        _db.execute(
+          "ALTER TABLE plugin_revocation_operator_action "
+          "ADD COLUMN scope_id TEXT NOT NULL DEFAULT 'default'",
+        );
+        _db.execute('PRAGMA user_version = 3');
       });
     }
   }
@@ -469,6 +479,7 @@ final class SqlitePluginRevocationStore
         );
       });
 
+  @override
   Future<List<PluginRevocationOperatorAction>> readOperatorActions() async {
     _assertOpen();
     final rows = _db.select(
@@ -477,6 +488,7 @@ final class SqlitePluginRevocationStore
     return List.unmodifiable(rows.map((row) => PluginRevocationOperatorAction(
       actionId: row['action_id']! as String,
       actorId: row['actor_id']! as String,
+      scopeId: row['scope_id']! as String,
       reason: row['reason']! as String,
       approvalReference: row['approval_reference']! as String,
       targetEventId: row['target_event_id']! as String,
