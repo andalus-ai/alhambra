@@ -93,6 +93,11 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
           )
         ''');
         _db.execute('CREATE INDEX idx_plugin_install_event_history ON plugin_install_event(operation_id, revision)');
+        _db.execute('''
+          CREATE UNIQUE INDEX idx_plugin_install_event_approval_id
+          ON plugin_install_event(approval_id)
+          WHERE approval_id IS NOT NULL
+        ''');
         _db.execute('PRAGMA user_version = 1');
       });
     }
@@ -239,7 +244,7 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
   Future<List<PluginInstallJournalEntry>> history(String operationId) async {
     _assertOpen();
     final rows = _db.select(
-      'SELECT * FROM plugin_install_event WHERE operation_id = ? ORDER BY revision',
+      'SELECT *, occurred_at AS updated_at FROM plugin_install_event WHERE operation_id = ? ORDER BY revision',
       [operationId],
     );
     return List.unmodifiable(rows.map((row) => _entry(Map<String, Object?>.from(row))));
