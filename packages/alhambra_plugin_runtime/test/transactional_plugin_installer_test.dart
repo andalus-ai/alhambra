@@ -83,6 +83,11 @@ class _FileSystem implements FencedPluginInstallFileSystem {
   bool failPromote = false;
   final Map<String, int> _highestFence = {};
 
+  void _assertFence(PluginInstallStaging staging) {
+    final highest = _highestFence[staging.operationId] ?? 0;
+    if (staging.fencingToken < highest) throw StateError('Stale filesystem fencing token.');
+  }
+
   @override
   Future<bool> advanceFence({
     required String operationId,
@@ -101,6 +106,8 @@ class _FileSystem implements FencedPluginInstallFileSystem {
     required String version,
     int fencingToken = 0,
   }) async {
+    final highest = _highestFence[operationId] ?? 0;
+    if (fencingToken < highest) throw StateError('Stale filesystem fencing token.');
     calls.add('createStaging');
     return PluginInstallStaging(
       operationId: operationId,
@@ -115,6 +122,7 @@ class _FileSystem implements FencedPluginInstallFileSystem {
     PluginInstallStaging staging,
     String relativePath,
   ) async {
+    _assertFence(staging);
     calls.add('directory:$relativePath');
   }
 
@@ -125,6 +133,7 @@ class _FileSystem implements FencedPluginInstallFileSystem {
     required Stream<List<int>> bytes,
     required int maxBytes,
   }) async {
+    _assertFence(staging);
     calls.add('write:$relativePath');
     var count = 0;
     await for (final chunk in bytes) {
@@ -144,6 +153,7 @@ class _FileSystem implements FencedPluginInstallFileSystem {
     PluginInstallStaging staging, {
     required String destinationPath,
   }) async {
+    _assertFence(staging);
     calls.add('promote');
     if (failPromote) throw StateError('promotion failed');
   }
@@ -153,6 +163,7 @@ class _FileSystem implements FencedPluginInstallFileSystem {
     PluginInstallStaging staging, {
     required String promotedPath,
   }) async {
+    _assertFence(staging);
     calls.add('rollbackPromotion');
   }
 
@@ -161,11 +172,13 @@ class _FileSystem implements FencedPluginInstallFileSystem {
     PluginInstallStaging staging, {
     required String promotedPath,
   }) async {
+    _assertFence(staging);
     calls.add('finalizePromotion');
   }
 
   @override
   Future<void> discardStaging(PluginInstallStaging staging) async {
+    _assertFence(staging);
     calls.add('discardStaging');
   }
 
