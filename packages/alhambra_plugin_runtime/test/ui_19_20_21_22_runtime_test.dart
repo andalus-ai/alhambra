@@ -2,6 +2,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 
+const _testHash = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
+
+class _FakeIntegrityVerifier implements PluginPayloadIntegrityVerifier {
+  @override
+  Future<PluginPayloadDigest> digest(PluginPackage package) async =>
+      const PluginPayloadDigest(algorithm: 'sha256', value: '0000000000000000000000000000000000000000000000000000000000000000');
+}
+
+class _FakeSignatureVerifier implements PluginCryptographicSignatureVerifier {
+  final bool result;
+  const _FakeSignatureVerifier({this.result = true});
+
+  @override
+  Future<bool> verify({
+    required String algorithm,
+    required String publicKey,
+    required String signature,
+    required List<int> message,
+  }) async => result;
+}
+
 class _MockPluginPackage implements PluginPackage {
   @override
   final PluginPackageManifest manifest;
@@ -67,7 +88,11 @@ void main() {
 
     setUp(() {
       trustStore = DefaultPluginTrustStore();
-      verifier = DefaultPluginPackageVerifier(trustStore: trustStore);
+      verifier = DefaultPluginPackageVerifier(
+        trustStore: trustStore,
+        integrityVerifier: _FakeIntegrityVerifier(),
+        signatureVerifier: const _FakeSignatureVerifier(),
+      );
     });
 
     test('verifies unsigned package under default community policy', () async {
@@ -81,7 +106,7 @@ void main() {
         metadata: PluginPackageMetadata(
           packageId: 'org.example.tools',
           version: SemanticVersion.parse('1.0.0'),
-          contentHash: 'sha256_mock_hash',
+          contentHash: _testHash,
           formatVersion: 1,
         ),
       );
@@ -102,7 +127,7 @@ void main() {
         metadata: PluginPackageMetadata(
           packageId: 'org.example.future',
           version: SemanticVersion.parse('1.0.0'),
-          contentHash: 'hash',
+          contentHash: _testHash,
           formatVersion: 99,
         ),
       );
@@ -132,7 +157,7 @@ void main() {
         metadata: PluginPackageMetadata(
           packageId: 'org.example.signed',
           version: SemanticVersion.parse('1.0.0'),
-          contentHash: 'hash',
+          contentHash: _testHash,
           formatVersion: 1,
         ),
         signature: const PluginPackageSignature(
@@ -159,7 +184,9 @@ void main() {
       resolver = DefaultPluginDependencyResolver(catalog: catalog);
       store = InMemoryInstalledPluginStore();
       manager = DefaultPluginLifecycleManager(
-        verifier: DefaultPluginPackageVerifier(),
+        verifier: DefaultPluginPackageVerifier(
+          integrityVerifier: _FakeIntegrityVerifier(),
+        ),
         dependencyResolver: resolver,
         store: store,
       );
@@ -192,7 +219,7 @@ void main() {
         metadata: PluginPackageMetadata(
           packageId: 'com.alhambra.git',
           version: SemanticVersion.parse('1.5.0'),
-          contentHash: 'hash_git',
+          contentHash: _testHash,
           formatVersion: 1,
         ),
       );

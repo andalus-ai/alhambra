@@ -24,6 +24,7 @@ Start here:
 - [Plugin developer guide](PLUGIN_DEVELOPER_GUIDE.md) — implement, compose, test and operate a plugin.
 - [Plugin test utilities](../packages/alhambra_plugin_test/README.md) — in-process test host and metadata, packaging, discovery and lifecycle conformance checks.
 - [Plugin packaging and discovery conformance](PLUGIN_PACKAGING_AND_DISCOVERY_CONFORMANCE.md) — manifest, lockfile, package header and compiled discovery boundaries.
+- [Plugin package integrity and trust](PLUGIN_PACKAGE_INTEGRITY_AND_TRUST.md) — payload digest, signature verification adapters, publisher trust and key lifecycle.
 - [Plugin capability negotiation](PLUGIN_CAPABILITY_NEGOTIATION.md) — version compatibility and required/optional resolution.
 - [Dynamic capability activation](DYNAMIC_CAPABILITY_ACTIVATION.md) — runtime capability activation boundaries.
 - [Plugin startup capability gate](PLUGIN_STARTUP_CAPABILITY_GATE.md) — startup preconditions and capability checks.

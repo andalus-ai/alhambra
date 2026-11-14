@@ -91,12 +91,22 @@ final class TrustedKey {
   final String keyId;
   final String algorithm;
   final String publicKey;
+  final String? publisherId;
+  final DateTime? notBefore;
+  final DateTime? notAfter;
+  final DateTime? revokedAt;
 
   const TrustedKey({
     required this.keyId,
     required this.algorithm,
     required this.publicKey,
+    this.publisherId,
+    this.notBefore,
+    this.notAfter,
+    this.revokedAt,
   });
+
+  bool get isRevoked => revokedAt != null;
 }
 
 /// Trust store for signature and publisher verification.
