@@ -138,7 +138,8 @@ final class PluginInstallRecoveryPlanner {
     required bool installedRecordMatches,
   }) {
     if (entry.status == PluginInstallJournalStatus.recoveryStarted ||
-        entry.status == PluginInstallJournalStatus.needsReconciliation) {
+        entry.status == PluginInstallJournalStatus.needsReconciliation ||
+        entry.status == PluginInstallJournalStatus.rollingBack) {
       return (
         PluginInstallRecoveryAction.manualReview,
         'A previous recovery attempt may have performed a side effect. Inspect '
@@ -172,6 +173,13 @@ final class PluginInstallRecoveryPlanner {
     }
 
     if (filesystem.destinationExists && installedRecordMatches) {
+      if (entry.status != PluginInstallJournalStatus.promoted &&
+          entry.status != PluginInstallJournalStatus.installedRecordSaved) {
+        return (
+          PluginInstallRecoveryAction.manualReview,
+          'The journal phase does not permit completing a commit from this filesystem state.',
+        );
+      }
       if (entry.stagingHandle == null || entry.promotedPath == null) {
         return (
           PluginInstallRecoveryAction.manualReview,
@@ -188,6 +196,14 @@ final class PluginInstallRecoveryPlanner {
     if (filesystem.destinationExists &&
         !installedRecordExists &&
         filesystem.rollbackAvailable) {
+      if (entry.status != PluginInstallJournalStatus.promoting &&
+          entry.status != PluginInstallJournalStatus.promoted &&
+          entry.status != PluginInstallJournalStatus.installedRecordSaved) {
+        return (
+          PluginInstallRecoveryAction.manualReview,
+          'The journal phase does not establish that this operation may roll back the destination.',
+        );
+      }
       if (entry.stagingHandle == null || entry.promotedPath == null) {
         return (
           PluginInstallRecoveryAction.manualReview,
@@ -204,6 +220,14 @@ final class PluginInstallRecoveryPlanner {
     if (filesystem.stagingExists &&
         !filesystem.destinationExists &&
         !installedRecordExists) {
+      if (entry.status != PluginInstallJournalStatus.stagingCreated &&
+          entry.status != PluginInstallJournalStatus.extracting &&
+          entry.status != PluginInstallJournalStatus.promoting) {
+        return (
+          PluginInstallRecoveryAction.manualReview,
+          'The journal phase does not establish that this staging area belongs to an incomplete extraction.',
+        );
+      }
       if (entry.stagingHandle == null) {
         return (
           PluginInstallRecoveryAction.manualReview,
