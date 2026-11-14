@@ -13,8 +13,9 @@ final class PluginLifecycleRecoveryJobSnapshotCodec {
 
   const PluginLifecycleRecoveryJobSnapshotCodec();
 
-  String encode(PluginLifecycleRecoveryJob job) => jsonEncode({
+  String encode(PluginLifecycleRecoveryJob job, {DateTime? archivedAt}) => jsonEncode({
     'formatVersion': formatVersion,
+    'archivedAt': _date(archivedAt),
     'schemaVersion': job.schemaVersion,
     'jobId': job.jobId,
     'idempotencyKey': job.idempotencyKey,
@@ -66,6 +67,7 @@ enum PluginRecoveryArchiveVerificationDisposition {
   missing,
   unsupportedFormat,
   unsupportedJobSchema,
+  identityMismatch,
   invalidDigest,
 }
 
@@ -74,12 +76,16 @@ final class PluginRecoveryArchiveVerificationReport {
   final PluginRecoveryArchiveVerificationDisposition disposition;
   final String? expectedDigest;
   final String? actualDigest;
+  final String? algorithm;
+  final DateTime? archivedAt;
 
   const PluginRecoveryArchiveVerificationReport({
     required this.jobId,
     required this.disposition,
     required this.expectedDigest,
     required this.actualDigest,
+    required this.algorithm,
+    required this.archivedAt,
   });
 
   bool get isValid =>
@@ -106,6 +112,8 @@ final class PluginLifecycleRecoveryJobArchiveVerifier {
         disposition: PluginRecoveryArchiveVerificationDisposition.missing,
         expectedDigest: null,
         actualDigest: null,
+        algorithm: null,
+        archivedAt: null,
       );
     }
     if (record.integrity.formatVersion !=
@@ -115,6 +123,8 @@ final class PluginLifecycleRecoveryJobArchiveVerifier {
         disposition: PluginRecoveryArchiveVerificationDisposition.unsupportedFormat,
         expectedDigest: record.integrity.digest,
         actualDigest: null,
+        algorithm: record.integrity.algorithm,
+        archivedAt: record.archivedAt,
       );
     }
     if (record.job.schemaVersion != PluginLifecycleRecoveryJob.currentSchemaVersion) {
@@ -123,11 +133,23 @@ final class PluginLifecycleRecoveryJobArchiveVerifier {
         disposition: PluginRecoveryArchiveVerificationDisposition.unsupportedJobSchema,
         expectedDigest: record.integrity.digest,
         actualDigest: null,
+        algorithm: record.integrity.algorithm,
+        archivedAt: record.archivedAt,
+      );
+    }
+    if (record.job.jobId != jobId) {
+      return PluginRecoveryArchiveVerificationReport(
+        jobId: jobId,
+        disposition: PluginRecoveryArchiveVerificationDisposition.identityMismatch,
+        expectedDigest: record.integrity.digest,
+        actualDigest: null,
+        algorithm: record.integrity.algorithm,
+        archivedAt: record.archivedAt,
       );
     }
     final actual = await digestProvider.digest(
       algorithm: record.integrity.algorithm,
-      canonicalPayload: codec.encode(record.job),
+      canonicalPayload: codec.encode(record.job, archivedAt: record.archivedAt),
     );
     return PluginRecoveryArchiveVerificationReport(
       jobId: jobId,
@@ -136,6 +158,8 @@ final class PluginLifecycleRecoveryJobArchiveVerifier {
           : PluginRecoveryArchiveVerificationDisposition.invalidDigest,
       expectedDigest: record.integrity.digest,
       actualDigest: actual,
+      algorithm: record.integrity.algorithm,
+      archivedAt: record.archivedAt,
     );
   }
 }
@@ -169,6 +193,8 @@ final class PluginLifecycleRecoveryJobArchiveRestorer {
     final record = await archive.read(jobId);
     if (record == null) throw StateError('Archive "$jobId" disappeared during restore.');
     if (record.integrity.digest != verification.expectedDigest ||
+        record.integrity.algorithm != verification.algorithm ||
+        record.archivedAt != verification.archivedAt ||
         record.integrity.formatVersion !=
             PluginLifecycleRecoveryJobSnapshotCodec.formatVersion) {
       throw StateError('Archive changed between verification and restore.');
