@@ -266,7 +266,8 @@ final class PluginLifecycleRecoveryJobArchivePurger {
   final PluginLifecycleRecoveryJobRetentionInspector inspector;
   final PluginRecoveryArchivePurgeAuditSink auditSink;
   final PluginRecoveryArchivePurgeAuthorizer authorizer;
-  final PluginLifecycleRecoveryJobArchiveVerifier verifier;
+  final PluginLifecycleRecoveryJobDigestProvider digestProvider;
+  final PluginLifecycleRecoveryJobSnapshotCodec codec;
   final DateTime Function() _clock;
 
   PluginLifecycleRecoveryJobArchivePurger({
@@ -274,7 +275,8 @@ final class PluginLifecycleRecoveryJobArchivePurger {
     required this.inspector,
     required this.auditSink,
     required this.authorizer,
-    required this.verifier,
+    required this.digestProvider,
+    this.codec = const PluginLifecycleRecoveryJobSnapshotCodec(),
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
@@ -306,7 +308,11 @@ final class PluginLifecycleRecoveryJobArchivePurger {
     if (authorization.approvedAt.isAfter(requestedAt)) {
       throw StateError('Purge approval timestamp cannot be in the future.');
     }
-    final verification = await verifier.verify(jobId);
+    final verification = await PluginLifecycleRecoveryJobArchiveVerifier(
+      archive: archive,
+      digestProvider: digestProvider,
+      codec: codec,
+    ).verify(jobId);
     if (!verification.isValid || verification.expectedDigest != expectedDigest) {
       throw StateError('Archive integrity verification failed; purge is blocked.');
     }
