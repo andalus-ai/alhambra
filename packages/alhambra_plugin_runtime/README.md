@@ -128,3 +128,29 @@ production durability guarantees.
 
 See [Transactional Plugin Installation](../../Docs/TRANSACTIONAL_PLUGIN_INSTALLATION.md)
 for the transaction sequence, archive threat model and recovery limitations.
+
+## Installation recovery and reconciliation
+
+`PluginInstallRecoveryPlanner` compares unresolved journal entries with
+read-only filesystem inspection and installed-record metadata. It emits
+recommendations only; it never mutates files, metadata or journal state.
+
+`PluginInstallRecoveryExecutor` accepts one finding only after the host
+explicitly supplies an operator identity and approval ID. It re-inspects the
+filesystem and installed record, rejects stale evidence, atomically claims the
+journal entry, and executes one bounded action. The journal adapter must
+implement `PluginInstallRecoveryJournal.compareAndSet` durably and atomically.
+
+Recovery actions are limited to discarding orphan staging, rolling back a
+provably operation-owned promotion, finalizing a promotion whose installed
+record matches, or closing a pre-install operation with no side effects.
+Unknown ownership, mismatched records, incomplete metadata and interrupted
+recovery claims require manual review. A recovery claim that loses its outcome
+write is deliberately left unresolved; it is not automatically retried.
+
+The filesystem adapter's `inspectOperation` must be read-only and report
+operation ownership from trusted adapter metadata, not from path-name
+similarity. `finalizePromotion`, `rollbackPromotion` and
+`discardStaging` must have documented idempotency behavior. See
+[Transactional Plugin Installation](../../Docs/TRANSACTIONAL_PLUGIN_INSTALLATION.md)
+for the complete recovery protocol and its limitations.
