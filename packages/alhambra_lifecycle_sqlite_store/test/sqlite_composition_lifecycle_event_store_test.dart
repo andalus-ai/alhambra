@@ -584,7 +584,7 @@ void main() {
     ));
 
     final result = await worker.maintain(
-      const CompositionLifecycleStorageMaintenanceRequest(maxEvents: 1),
+      CompositionLifecycleStorageMaintenanceRequest(maxEvents: 1),
     );
     expect(result.recordsRemoved, 1);
     expect(result.checkpointRequested, isFalse);
