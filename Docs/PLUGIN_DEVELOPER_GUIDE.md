@@ -161,6 +161,13 @@ At minimum, test:
 Use fake services and deterministic inputs. Keep network and database integration
 tests in the corresponding adapter or host test suite.
 
+For in-process lifecycle tests, add `alhambra_plugin_test` as a development
+dependency and use `AlhambraPluginTestHost` to exercise the real manager. Its
+immutable snapshots help compare registry counts before activation and after
+cleanup. See the [test utilities guide](../packages/alhambra_plugin_test/README.md)
+for failure-injection examples and limitations. These helpers do not provide
+plugin isolation or simulate process crashes.
+
 ## 10. Compatibility and publishing
 
 Treat metadata IDs, contribution IDs, public constructors and persisted fields
