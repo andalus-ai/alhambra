@@ -87,6 +87,13 @@ final class TransactionalPluginInstaller {
 
     PluginInstallOperationLease? operationLease;
     if (leaseStore != null) {
+      if (journal is! FencedPluginInstallJournal ||
+          fileSystem is! FencedPluginInstallFileSystem ||
+          installedStore is! FencedTransactionalInstalledPluginStore) {
+        throw ArgumentError(
+          'Lease mode requires fenced journal, filesystem and installed-store adapters.',
+        );
+      }
       final owner = workerId;
       if (owner == null || owner.trim().isEmpty) {
         throw ArgumentError('workerId is required when an installation lease store is configured.');
@@ -148,6 +155,7 @@ final class TransactionalPluginInstaller {
       promotedPath: promotedPath,
       failureCode: failureCode,
       contentHash: package.metadata.contentHash,
+      fencingToken: operationLease?.fencingToken,
     ));
     }
 
@@ -181,7 +189,16 @@ final class TransactionalPluginInstaller {
         operationId: operationId,
         pluginId: pluginId,
         version: version,
+        fencingToken: operationLease?.fencingToken ?? 0,
       );
+      if (operationLease != null &&
+          stagingHandle.fencingToken != operationLease!.fencingToken) {
+        throw const PluginInstallException(
+          'INSTALL_FENCE_MISMATCH',
+          'Filesystem staging handle did not preserve the current fencing token.',
+          reconciliationRequired: true,
+        );
+      }
       staging = stagingHandle;
       await record(PluginInstallJournalStatus.stagingCreated);
 
@@ -326,7 +343,14 @@ final class TransactionalPluginInstaller {
       candidateRecord = installRecord;
       recordCreateAttempted = true;
       await ensureLease();
-      final created = await installedStore.createIfAbsent(installRecord);
+      final created = operationLease == null
+          ? await installedStore.createIfAbsent(installRecord)
+          : await (installedStore as FencedTransactionalInstalledPluginStore)
+              .createIfAbsentFenced(
+                installRecord,
+                operationId: operationId,
+                fencingToken: operationLease!.fencingToken,
+              );
       if (!created) {
         recordCreateAttempted = false;
         throw PluginInstallException(
@@ -372,7 +396,16 @@ final class TransactionalPluginInstaller {
         }
         if (recordCreateAttempted && candidateRecord != null) {
           await ensureLease();
-          await installedStore.removeIfMatches(candidateRecord);
+          if (operationLease == null) {
+            await installedStore.removeIfMatches(candidateRecord);
+          } else {
+            await (installedStore as FencedTransactionalInstalledPluginStore)
+                .removeIfMatchesFenced(
+                  candidateRecord,
+                  operationId: operationId,
+                  fencingToken: operationLease!.fencingToken,
+                );
+          }
         }
         await record(PluginInstallJournalStatus.rolledBack,
             failureCode: failure.code);
