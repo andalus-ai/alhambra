@@ -17,7 +17,7 @@ final class PluginLifecycleRecoveryJobArchiver {
     required this.archive,
     required this.digestProvider,
     this.codec = const PluginLifecycleRecoveryJobSnapshotCodec(),
-    this.digestAlgorithm = 'sha-256',
+    required this.digestAlgorithm,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
     if (digestAlgorithm.trim().isEmpty) {
