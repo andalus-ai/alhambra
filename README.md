@@ -96,10 +96,13 @@ standalone host application in stages.
   workflows are verified; it is not the definition of Alhambra's public
   foundation API.
 
-See [`Docs/`](Docs/) for extension contracts, package boundaries, and
-migration decisions.
+See [`Docs/README.md`](Docs/README.md) for the architecture and developer documentation index.
+Start with [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md) before changing code.
 
 ## Development
+
+Read [`AGENTS.md`](AGENTS.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), and
+[`Docs/DEVELOPER_GUIDELINES.md`](Docs/DEVELOPER_GUIDELINES.md) before contributing.
 
 This repository contains multiple Dart/Flutter packages. Work from the
 package directory being changed and resolve its local path dependencies in the
