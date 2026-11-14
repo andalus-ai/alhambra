@@ -50,3 +50,30 @@ a particular action will reclaim the reported amount of space.
 Hosts remain responsible for scheduling evaluations, persisting maintenance
 history, enforcing authorization, serializing operations, and executing the
 returned request through an adapter's optional maintenance capability.
+
+## Lifecycle maintenance coordination
+
+`CompositionLifecycleStorageMaintenanceCoordinator` is an explicit
+single-flight execution primitive for a host-defined store scope. A host
+supplies an operation ID, maintenance request, and executor callback. A second
+operation submitted through the same coordinator while one is active is
+rejected with `StateError`; this is an in-process, per-instance guard, not a
+cross-process lock.
+
+An optional `CompositionLifecycleStorageMaintenanceAuditLog` receives a
+started record before execution and a terminal record afterwards. Failure to
+persist the started record fails closed and prevents execution. Failure to
+persist the terminal record is exposed separately on the operation outcome so
+it cannot silently erase the execution result. Hosts should provide a durable
+audit implementation when durable history is required.
+
+Cancellation before the executor starts prevents execution. During execution,
+cancellation is cooperative: the executor receives a signal and must check it
+at safe boundaries. The coordinator does not interrupt an in-flight Future or
+claim that already-applied destructive work was rolled back. Executors should
+return a partial result with a warning when they stop after work has begun.
+
+The coordinator does not schedule operations, choose policy, inspect storage,
+or perform authorization. Hosts own those responsibilities and must provide
+stronger external locking when multiple coordinator instances or processes
+can target the same store.
