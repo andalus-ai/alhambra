@@ -4,7 +4,7 @@ Durable SQLite implementation for Alhambra plugin revocation.
 
 ## Responsibilities
 
-- `TransactionalPluginRevocationStore`: create pending execution records and atomically commit terminal execution outcomes with their audit outbox event.
+- `TransactionalPluginRevocationStore`: atomically create pending execution + journal records and commit terminal execution outcomes + journal revision/status + audit outbox event.
 - `PluginRevocationOutboxStore`: claim events using expiring leases, retry scheduling, and lease-token fencing.
 - `PluginRevocationJournalStore`: revisioned journal reads, insert-if-absent, and compare-and-set updates, exposed through `store.journalStore`.
 
@@ -41,7 +41,7 @@ Call `close()` when the owning host shuts down.
 
 Every mutation is synchronous on the connection and wrapped in `BEGIN IMMEDIATE` / `COMMIT`. SQLite's writer lock serializes write transactions across independent connections. `busy_timeout` is configured to five seconds; callers should still surface and handle lock/busy failures.
 
-The terminal execution update and outbox insert share one transaction. Outbox claims also run in an immediate transaction, preventing two connections from claiming the same due row. A lease token fences stale workers from acknowledging or rescheduling a message after another worker has reclaimed it.
+The pending execution and initial journal record share one transaction. The terminal execution update, journal status/revision advance, and outbox insert share one transaction. Outbox claims also run in an immediate transaction, preventing two connections from claiming the same due row. A lease token fences stale workers from acknowledging or rescheduling a message after another worker has reclaimed it.
 
 Publishing remains **at least once**, not exactly once. If a process publishes successfully and crashes before marking the row delivered, the event will be published again after lease expiry. The downstream publisher/consumer must deduplicate by `eventId`.
 
