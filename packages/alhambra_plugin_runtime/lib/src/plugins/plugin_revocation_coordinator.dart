@@ -226,6 +226,10 @@ class PluginRevocationCoordinator {
       detail: 'Execution started; reconcile if the host process stops.',
     );
     if (!await executionStore.writePending(pending)) {
+      final claimed = await executionStore.read(key);
+      if (claimed != null && claimed.scopeId != scopeId) {
+        throw StateError('Revocation idempotency key was claimed by another scope.');
+      }
       return _record(
         operationId,
         scopeId,
