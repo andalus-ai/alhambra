@@ -116,3 +116,8 @@ atomicity guarantees beyond the host filesystem's documented behavior.
   cross-process locking.
 - Rename guarantees depend on the host filesystem and do not claim
   transactional durability against power loss or device failure.
+
+
+## Health and diagnostics
+
+`JsonlCompositionLifecycleEventStore` implements the optional `CompositionLifecycleStorageHealthProvider` capability. Call `inspectHealth()` to obtain the current JSONL byte size, sparse-index sidecar size, last successful append observed by this store instance, and the most recent append error. The `JsonlCompositionLifecycleRuntime` facade additionally reports pending and rejected journal writes. A degraded snapshot signals a known write error or rejected journal events; an unavailable snapshot means the health inspection itself could not read the backing files. Health inspection does not scan the full log, validate every record, predict free disk space, or guarantee the next append.
