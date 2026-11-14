@@ -96,6 +96,7 @@ final class TransactionalPluginInstaller {
       stagingHandle: staging?.opaqueHandle,
       promotedPath: promotedPath,
       failureCode: failureCode,
+      contentHash: package.metadata.contentHash,
     ));
 
     try {
