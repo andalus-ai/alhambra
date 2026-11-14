@@ -37,7 +37,7 @@ class _Package implements PluginPackage {
 
 class _Integrity implements PluginPayloadIntegrityVerifier {
   final String value;
-  const _Integrity([this.value = 'a' * 64]);
+  const _Integrity([this.value = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']);
 
   @override
   Future<PluginPayloadDigest> digest(PluginPackage package) async =>
@@ -47,7 +47,7 @@ class _Integrity implements PluginPayloadIntegrityVerifier {
 class _SignatureVerifier implements PluginCryptographicSignatureVerifier {
   final bool valid;
   List<int>? receivedMessage;
-  const _SignatureVerifier({this.valid = true});
+  _SignatureVerifier({this.valid = true});
 
   @override
   Future<bool> verify({
@@ -118,7 +118,7 @@ void main() {
       final result = await DefaultPluginPackageVerifier(
         trustStore: trust,
         integrityVerifier: const _Integrity(),
-        signatureVerifier: const _SignatureVerifier(),
+        signatureVerifier: _SignatureVerifier(),
       ).verify(_Package(signature: const PluginPackageSignature(
         algorithm: 'ed25519',
         keyId: 'key-1',
@@ -184,7 +184,7 @@ void main() {
             publicKey: 'public-key',
           )),
         integrityVerifier: const _Integrity(),
-        signatureVerifier: const _SignatureVerifier(valid: false),
+        signatureVerifier: _SignatureVerifier(valid: false),
       ).verify(package);
       expect((invalid as PackageVerificationFailed).issues.single.code,
           'INVALID_SIGNATURE');
