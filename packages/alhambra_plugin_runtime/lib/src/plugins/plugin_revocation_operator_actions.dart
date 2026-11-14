@@ -101,3 +101,9 @@ abstract interface class PluginRevocationDeadLetterReplayStore {
     PluginRevocationReplayRequest request,
   );
 }
+
+
+/// Read-only access to durable operator replay history.
+abstract interface class PluginRevocationOperatorActionInspectionStore {
+  Future<List<PluginRevocationOperatorAction>> readOperatorActions();
+}
