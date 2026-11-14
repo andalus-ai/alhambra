@@ -101,8 +101,8 @@ final class PluginRevocationAdminOperationsSnapshot {
 /// Authenticated, scope-filtered administrative read boundary.
 ///
 /// Authorization is checked before reading operational state. Journal and
-/// outbox ownership is resolved through host-provided authoritative metadata.
-/// Operator replay history is filtered by the persisted scopeId. Access
+/// outbox ownership is enforced using persisted scopeId fields. Operator replay
+/// history is filtered by its persisted scopeId. Access
 /// decisions are audited before the service returns data or throws denial.
 final class PluginRevocationAdminOperationsService {
   final PluginRevocationOperationsService operations;
