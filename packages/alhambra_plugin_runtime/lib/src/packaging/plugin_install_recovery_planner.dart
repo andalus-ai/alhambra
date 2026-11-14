@@ -163,6 +163,15 @@ final class PluginInstallRecoveryPlanner {
       );
     }
 
+    if ((!filesystem.destinationExists &&
+            filesystem.destinationOwnedByOperation) ||
+        (!filesystem.destinationExists && filesystem.rollbackAvailable)) {
+      return (
+        PluginInstallRecoveryAction.manualReview,
+        'The filesystem adapter returned contradictory destination ownership or rollback evidence.',
+      );
+    }
+
     if (filesystem.destinationExists &&
         !filesystem.destinationOwnedByOperation) {
       return (
