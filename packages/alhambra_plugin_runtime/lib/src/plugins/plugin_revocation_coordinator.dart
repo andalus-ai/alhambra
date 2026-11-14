@@ -285,14 +285,16 @@ class PluginRevocationCoordinator {
     switch (decision.action) {
       case CapabilityImpactAction.notify:
         return _record(
-          operationId, key, decision, PluginRevocationExecutionStatus.noOp,
+          operationId, scopeId,
+          key, decision, PluginRevocationExecutionStatus.noOp,
           detail: 'Notification is delegated to the host event consumer.',
         );
       case CapabilityImpactAction.markDegraded:
         final health = healthRegistry;
         if (health == null) {
           return _record(
-            operationId, key, decision, PluginRevocationExecutionStatus.unsupported,
+          operationId, scopeId,
+          key, decision, PluginRevocationExecutionStatus.unsupported,
             detail: 'No PluginRuntimeHealthRegistry was configured.',
           );
         }
@@ -313,16 +315,19 @@ class PluginRevocationCoordinator {
           );
         } else if (state != PluginRuntimeState.degraded) {
           return _record(
-            operationId, key, decision, PluginRevocationExecutionStatus.noOp,
+          operationId, scopeId,
+          key, decision, PluginRevocationExecutionStatus.noOp,
             detail: 'Plugin is not active; current state is $state.',
           );
         }
         return _record(
-          operationId, key, decision, PluginRevocationExecutionStatus.completed,
+          operationId, scopeId,
+          key, decision, PluginRevocationExecutionStatus.completed,
         );
       case CapabilityImpactAction.suspend:
         return _record(
-          operationId, key, decision, PluginRevocationExecutionStatus.unsupported,
+          operationId, scopeId,
+          key, decision, PluginRevocationExecutionStatus.unsupported,
           detail: 'Suspend/resume is not yet part of the plugin lifecycle contract.',
         );
       case CapabilityImpactAction.deactivate:
@@ -333,13 +338,15 @@ class PluginRevocationCoordinator {
           reason: 'Deactivated by approved provider revocation operation $operationId',
         );
         return _record(
-          operationId, key, decision, PluginRevocationExecutionStatus.completed,
+          operationId, scopeId,
+          key, decision, PluginRevocationExecutionStatus.completed,
         );
       case CapabilityImpactAction.recovered:
         final health = healthRegistry;
         if (health == null) {
           return _record(
-            operationId, key, decision, PluginRevocationExecutionStatus.unsupported,
+          operationId, scopeId,
+          key, decision, PluginRevocationExecutionStatus.unsupported,
             detail: 'No PluginRuntimeHealthRegistry was configured.',
           );
         }
@@ -351,11 +358,13 @@ class PluginRevocationCoordinator {
             reason: 'Capability provider ${decision.providerOwnerId} recovered',
           );
           return _record(
-            operationId, key, decision, PluginRevocationExecutionStatus.completed,
+          operationId, scopeId,
+          key, decision, PluginRevocationExecutionStatus.completed,
           );
         }
         return _record(
-          operationId, key, decision, PluginRevocationExecutionStatus.noOp,
+          operationId, scopeId,
+          key, decision, PluginRevocationExecutionStatus.noOp,
           detail: 'Plugin is not degraded; no recovery transition was required.',
         );
     }
