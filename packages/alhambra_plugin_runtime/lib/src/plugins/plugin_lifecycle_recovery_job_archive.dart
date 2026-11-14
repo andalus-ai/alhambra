@@ -1,5 +1,5 @@
 import 'plugin_lifecycle_recovery_job.dart';
-import 'plugin_lifecycle_recovery_job_archive_integrity.dart';
+import 'plugin_lifecycle_recovery_job_archive_integrity_metadata.dart';
 
 /// Immutable archive envelope for a terminal recovery job.
 final class PluginLifecycleRecoveryJobArchiveRecord {
