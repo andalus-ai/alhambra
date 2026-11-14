@@ -240,8 +240,8 @@ The job must be created with the exact dependency order, expected checkpoint
 operation ID/sequence for each plugin, and a reserved unique execution
 operation ID per step. The host should persist that planned job before
 calling `executeBatchWithJob()`. The supplied request's operation ID factory
-must return those reserved IDs. This API does not yet provide a standalone
-read-only `planBatch()` builder; that is the next planning/approval surface.
+must return those reserved IDs. The read-only planning API described below
+provides the canonical way to assemble this intent.
 
 The job store's compare-and-set implementation must be atomic across processes.
 The in-memory implementation is not a distributed lock or durable store. The
