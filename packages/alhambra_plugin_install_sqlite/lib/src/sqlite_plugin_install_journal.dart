@@ -175,6 +175,10 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
       if (current['plugin_id'] != entry.pluginId || current['version'] != entry.version) {
         throw StateError('An operation ID cannot be reused for a different plugin or version.');
       }
+      final currentStatus = PluginInstallJournalStatus.values.byName(current['status']! as String);
+      if (_isTerminal(currentStatus)) {
+        throw StateError('A terminal installation operation cannot be advanced.');
+      }
       final revision = current['revision']! as int;
       final currentAt = _parseDate(current['updated_at']);
       if (entry.updatedAt.toUtc().isBefore(currentAt)) {
@@ -207,15 +211,26 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
     entry.approvedBy, entry.approvalId,
   ];
 
+  static bool _isTerminal(PluginInstallJournalStatus status) =>
+      status == PluginInstallJournalStatus.committed ||
+      status == PluginInstallJournalStatus.rolledBack ||
+      status == PluginInstallJournalStatus.failed;
+
   static void _validateEntry(PluginInstallJournalEntry entry) {
     for (final value in [entry.operationId, entry.pluginId, entry.version]) {
       if (value.trim().isEmpty) throw ArgumentError('Journal identity fields must not be empty.');
     }
-    if (entry.approvalId != null && entry.approvedBy == null) {
-      throw ArgumentError('An approval ID requires an operator identity.');
+    if (entry.approvalId != null &&
+        (entry.approvedBy == null || entry.approvedBy!.trim().isEmpty)) {
+      throw ArgumentError('An approval ID requires a non-empty operator identity.');
     }
     if (entry.approvalId != null && entry.approvalId!.trim().isEmpty) {
       throw ArgumentError('Approval ID must not be empty.');
+    }
+    for (final value in [entry.approvedBy, entry.approvalId]) {
+      if (value != null && (value.length > 256 || value.contains(RegExp(r'[\\x00-\\x1F\\x7F]')))) {
+        throw ArgumentError('Approval audit values must be bounded and contain no control characters.');
+      }
     }
   }
 
