@@ -1,4 +1,5 @@
 import 'plugin_revocation_coordinator.dart';
+import 'plugin_revocation_operator_actions.dart';
 
 /// Stable, sanitized audit payload created when a revocation reaches an outcome.
 final class PluginRevocationAuditEvent {
