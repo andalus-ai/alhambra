@@ -352,6 +352,27 @@ void main() {
     expect(result, hasLength(1));
     expect(() => result.add(_event('x', DateTime.utc(2026))), throwsUnsupportedError);
   });
+  test('runs retention maintenance and reports unsupported checkpoint', () async {
+    await store.append(_event('old', DateTime.utc(2026, 1, 1)));
+    await store.append(_event('new', DateTime.utc(2026, 1, 2)));
+
+    final result = await store.maintain(
+      const CompositionLifecycleStorageMaintenanceRequest(
+        retainFrom: DateTime.utc(2026, 1, 2),
+        checkpoint: true,
+      ),
+    );
+
+    expect(result.recordsRemoved, 1);
+    expect(result.checkpointRequested, isTrue);
+    expect(result.checkpointCompleted, isNull);
+    expect(result.partial, isTrue);
+    expect(result.warnings, hasLength(1));
+    expect(result.metrics['adapter'], 'jsonl');
+    final events = await store.query(CompositionLifecycleEventQuery());
+    expect(events.map((event) => event.correlationId), ['new']);
+  });
+
 }
 
 CompositionLifecycleEvent _event(String id, DateTime timestamp, {String? eventId}) =>
