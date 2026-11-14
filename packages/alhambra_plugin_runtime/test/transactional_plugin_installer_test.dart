@@ -266,6 +266,28 @@ TransactionalPluginInstaller _installer({
 
 void main() {
   group('TransactionalPluginInstaller', () {
+
+    test('in-memory installed store rejects stale fencing tokens', () async {
+      final store = InMemoryInstalledPluginStore();
+      expect(await store.advanceFence(
+        operationId: 'op-1',
+        fencingToken: 2,
+      ), isTrue);
+      final record = InstalledPluginRecord(
+        id: 'org.example.editor',
+        version: const SemanticVersion(1, 0, 0),
+        contentHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        installedAt: DateTime.utc(2026, 1, 1),
+        installPath: '/plugins/org.example.editor',
+      );
+      expect(await store.createIfAbsentFenced(
+        record,
+        operationId: 'op-1',
+        fencingToken: 1,
+      ), isFalse);
+      expect(await store.find(record.id), isNull);
+    });
+
     test('acquires and releases a worker lease around installation', () async {
       final leases = InMemoryPluginInstallOperationLeaseStore();
       final journal = _Journal();
