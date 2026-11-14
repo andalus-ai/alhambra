@@ -142,7 +142,7 @@ final class PluginPackagingConformanceSuite {
     Iterable<ExtensionManifest> manifests,
   ) {
     try {
-      PluginLoader.resolveDependencyOrder(manifests);
+      const PluginDependencyResolver().resolve(manifests.toList(growable: false));
       return PluginConformanceResult(const []);
     } on PluginDependencyResolutionException catch (error) {
       return PluginConformanceResult([
