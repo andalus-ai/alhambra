@@ -11,7 +11,10 @@ import 'package:sqlite3/sqlite3.dart';
 /// UI hosts should use the isolate worker adapter to move database work
 /// to a dedicated isolate.
 final class SqliteCompositionLifecycleEventStore
-    implements CompositionLifecycleEventStore {
+    implements
+        CompositionLifecycleEventStore,
+        CompositionLifecycleStorageHealthProvider,
+        CompositionLifecycleStorageMaintenanceProvider {
   static const int schemaVersion = 2;
 
   static final List<_SqliteSchemaMigration> _migrations = [
@@ -23,6 +26,8 @@ final class SqliteCompositionLifecycleEventStore
   final CompositionLifecycleEventJsonCodec codec;
   final bool _ownsDatabase;
   bool _closed = false;
+  DateTime? _lastSuccessfulWriteAt;
+  Object? _lastWriteError;
 
   SqliteCompositionLifecycleEventStore({
     required this.database,
@@ -140,44 +145,98 @@ final class SqliteCompositionLifecycleEventStore
   Future<void> append(CompositionLifecycleEvent event) async {
     _ensureOpen();
     final payload = codec.encode(event);
-    database.execute('BEGIN IMMEDIATE');
     try {
-      final existing = database.select(
-        'SELECT payload FROM lifecycle_events WHERE event_id = ?',
-        [event.eventId],
-      );
-      if (existing.isNotEmpty) {
-        if (existing.first['payload'] == payload) {
-          database.execute('COMMIT');
-          return;
-        }
-        throw CompositionLifecycleEventIdentityConflictException(event.eventId);
-      }
-
-      database.execute(
-        'INSERT INTO lifecycle_events '
-        '(event_id, event_id_sort_key, correlation_id, operation, status, timestamp_micros, payload) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [
-          event.eventId,
-          _eventIdSortKey(event.eventId),
-          event.correlationId,
-          event.operation.name,
-          event.status.name,
-          event.timestamp.toUtc().microsecondsSinceEpoch,
-          payload,
-        ],
-      );
-      for (final ownerId in event.ownerIds.toSet()) {
-        database.execute(
-          'INSERT INTO lifecycle_event_owners (event_id, owner_id) VALUES (?, ?)',
-          [event.eventId, ownerId],
+      database.execute('BEGIN IMMEDIATE');
+      try {
+        final existing = database.select(
+          'SELECT payload FROM lifecycle_events WHERE event_id = ?',
+          [event.eventId],
         );
+        if (existing.isNotEmpty) {
+          if (existing.first['payload'] == payload) {
+            database.execute('COMMIT');
+            _lastSuccessfulWriteAt = DateTime.now().toUtc();
+            _lastWriteError = null;
+            return;
+          }
+          throw CompositionLifecycleEventIdentityConflictException(event.eventId);
+        }
+
+        database.execute(
+          'INSERT INTO lifecycle_events '
+          '(event_id, event_id_sort_key, correlation_id, operation, status, timestamp_micros, payload) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [
+            event.eventId,
+            _eventIdSortKey(event.eventId),
+            event.correlationId,
+            event.operation.name,
+            event.status.name,
+            event.timestamp.toUtc().microsecondsSinceEpoch,
+            payload,
+          ],
+        );
+        for (final ownerId in event.ownerIds.toSet()) {
+          database.execute(
+            'INSERT INTO lifecycle_event_owners (event_id, owner_id) VALUES (?, ?)',
+            [event.eventId, ownerId],
+          );
+        }
+        database.execute('COMMIT');
+        _lastSuccessfulWriteAt = DateTime.now().toUtc();
+        _lastWriteError = null;
+      } on Object {
+        database.execute('ROLLBACK');
+        rethrow;
       }
-      database.execute('COMMIT');
-    } on Object {
-      database.execute('ROLLBACK');
+    } on Object catch (error) {
+      _lastWriteError = error;
       rethrow;
+    }
+  }
+
+  @override
+  Future<CompositionLifecycleStorageHealth> inspectHealth() async {
+    _ensureOpen();
+    try {
+      final pageCount = database.select('PRAGMA page_count').single['page_count'] as int;
+      final pageSize = database.select('PRAGMA page_size').single['page_size'] as int;
+      final freePages = database.select('PRAGMA freelist_count').single['freelist_count'] as int;
+      final recordCount = database.select(
+        'SELECT COUNT(*) AS count FROM lifecycle_events',
+      ).single['count'] as int;
+      final databasePath = database.select('PRAGMA database_list').first['file'] as String?;
+      final wal = databasePath == null || databasePath.isEmpty
+          ? null
+          : File('$databasePath-wal');
+      final walBytes = wal != null && await wal.exists() ? await wal.length() : null;
+      final error = _lastWriteError;
+      return CompositionLifecycleStorageHealth(
+        state: error == null
+            ? CompositionLifecycleStorageHealthState.healthy
+            : CompositionLifecycleStorageHealthState.degraded,
+        checkedAt: DateTime.now().toUtc(),
+        lastSuccessfulWriteAt: _lastSuccessfulWriteAt,
+        lastError: error?.toString(),
+        recordCount: recordCount,
+        primaryStorageBytes: pageCount * pageSize,
+        auxiliaryStorageBytes: walBytes,
+        metrics: {
+          'adapter': 'sqlite',
+          'pageCount': pageCount,
+          'pageSize': pageSize,
+          'freePages': freePages,
+          'walPathAvailable': wal != null,
+        },
+      );
+    } on Object catch (error) {
+      return CompositionLifecycleStorageHealth(
+        state: CompositionLifecycleStorageHealthState.unavailable,
+        checkedAt: DateTime.now().toUtc(),
+        lastSuccessfulWriteAt: _lastSuccessfulWriteAt,
+        lastError: error.toString(),
+        metrics: const {'adapter': 'sqlite'},
+      );
     }
   }
 
@@ -305,6 +364,48 @@ final class SqliteCompositionLifecycleEventStore
       database.execute('ROLLBACK');
       rethrow;
     }
+  }
+
+  @override
+  Future<CompositionLifecycleStorageMaintenanceResult> maintain(
+    CompositionLifecycleStorageMaintenanceRequest request,
+  ) async {
+    final startedAt = DateTime.now().toUtc();
+    int? removed;
+    if (request.retainFrom != null || request.maxEvents != null) {
+      removed = await compact(
+        retainFrom: request.retainFrom,
+        maxEvents: request.maxEvents,
+      );
+    }
+
+    SqliteWalCheckpointResult? checkpointResult;
+    if (request.checkpoint) {
+      checkpointResult = checkpoint();
+    }
+    final warnings = <String>[];
+    if (checkpointResult != null && !checkpointResult.fullyCheckpointed) {
+      warnings.add(
+        'SQLite checkpoint was incomplete: busy=${checkpointResult.busy}, '
+        'checkpointed=${checkpointResult.checkpointedFrames}/'
+        '${checkpointResult.logFrames} frames.',
+      );
+    }
+    return CompositionLifecycleStorageMaintenanceResult(
+      startedAt: startedAt,
+      completedAt: DateTime.now().toUtc(),
+      recordsRemoved: removed,
+      checkpointRequested: request.checkpoint,
+      checkpointCompleted: checkpointResult?.fullyCheckpointed,
+      warnings: warnings,
+      metrics: {
+        'adapter': 'sqlite',
+        'checkpointMode': checkpointResult?.mode.name,
+        'checkpointBusy': checkpointResult?.busy,
+        'checkpointLogFrames': checkpointResult?.logFrames,
+        'checkpointedFrames': checkpointResult?.checkpointedFrames,
+      },
+    );
   }
 
   /// Runs a SQLite WAL checkpoint and returns SQLite's checkpoint counters.

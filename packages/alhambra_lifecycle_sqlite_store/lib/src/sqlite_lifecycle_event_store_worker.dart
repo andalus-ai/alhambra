@@ -13,7 +13,10 @@ import 'sqlite_composition_lifecycle_event_store.dart';
 /// serialized through one command port, preserving append order and ensuring
 /// that a single SQLite connection is never used concurrently.
 final class SqliteLifecycleEventStoreWorker
-    implements CompositionLifecycleEventStore {
+    implements
+        CompositionLifecycleEventStore,
+        CompositionLifecycleStorageHealthProvider,
+        CompositionLifecycleStorageMaintenanceProvider {
   final ReceivePort _responses;
   final ReceivePort _errors;
   final ReceivePort _exits;
@@ -179,6 +182,45 @@ final class SqliteLifecycleEventStoreWorker
     );
   }
 
+  @override
+  Future<CompositionLifecycleStorageHealth> inspectHealth() async {
+    final response = await _request('health');
+    return CompositionLifecycleStorageHealth(
+      state: CompositionLifecycleStorageHealthState.values.byName(
+        response['state'] as String,
+      ),
+      checkedAt: DateTime.parse(response['checkedAt'] as String),
+      lastSuccessfulWriteAt: response['lastSuccessfulWriteAt'] == null
+          ? null
+          : DateTime.parse(response['lastSuccessfulWriteAt'] as String),
+      lastError: response['lastError'] as String?,
+      recordCount: response['recordCount'] as int?,
+      primaryStorageBytes: response['primaryStorageBytes'] as int?,
+      auxiliaryStorageBytes: response['auxiliaryStorageBytes'] as int?,
+      metrics: Map<String, Object?>.from(response['metrics'] as Map),
+    );
+  }
+
+  @override
+  Future<CompositionLifecycleStorageMaintenanceResult> maintain(
+    CompositionLifecycleStorageMaintenanceRequest request,
+  ) async {
+    final response = await _request('maintain', {
+      'retainFrom': request.retainFrom?.toUtc().toIso8601String(),
+      'maxEvents': request.maxEvents,
+      'checkpoint': request.checkpoint,
+    });
+    return CompositionLifecycleStorageMaintenanceResult(
+      startedAt: DateTime.parse(response['startedAt'] as String),
+      completedAt: DateTime.parse(response['completedAt'] as String),
+      recordsRemoved: response['recordsRemoved'] as int?,
+      checkpointRequested: response['checkpointRequested'] as bool,
+      checkpointCompleted: response['checkpointCompleted'] as bool?,
+      warnings: (response['warnings'] as List<Object?>).cast<String>(),
+      metrics: Map<String, Object?>.from(response['metrics'] as Map),
+    );
+  }
+
   /// Requests a WAL checkpoint without closing the worker.
   Future<SqliteWalCheckpointResult> checkpoint({
     SqliteWalCheckpointMode mode = SqliteWalCheckpointMode.passive,
@@ -323,6 +365,30 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
             'events': events.map(codec.encode).toList(growable: false),
           });
           break;
+        case 'maintain':
+          final retainFrom = payload['retainFrom'] == null
+              ? null
+              : DateTime.parse(payload['retainFrom'] as String);
+          final maxEvents = payload['maxEvents'] as int?;
+          final result = await store.maintain(
+            CompositionLifecycleStorageMaintenanceRequest(
+              retainFrom: retainFrom,
+              maxEvents: maxEvents,
+              checkpoint: payload['checkpoint'] as bool? ?? false,
+            ),
+          );
+          host.send({
+            'id': id,
+            'ok': true,
+            'startedAt': result.startedAt.toIso8601String(),
+            'completedAt': result.completedAt.toIso8601String(),
+            'recordsRemoved': result.recordsRemoved,
+            'checkpointRequested': result.checkpointRequested,
+            'checkpointCompleted': result.checkpointCompleted,
+            'warnings': result.warnings,
+            'metrics': result.metrics,
+          });
+          break;
         case 'compact':
           final retainFrom = payload['retainFrom'] == null
               ? null
@@ -333,6 +399,21 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
             maxEvents: maxEvents,
           );
           host.send({'id': id, 'ok': true, 'removed': removed});
+          break;
+        case 'health':
+          final health = await store.inspectHealth();
+          host.send({
+            'id': id,
+            'ok': true,
+            'state': health.state.name,
+            'checkedAt': health.checkedAt.toIso8601String(),
+            'lastSuccessfulWriteAt': health.lastSuccessfulWriteAt?.toIso8601String(),
+            'lastError': health.lastError,
+            'recordCount': health.recordCount,
+            'primaryStorageBytes': health.primaryStorageBytes,
+            'auxiliaryStorageBytes': health.auxiliaryStorageBytes,
+            'metrics': health.metrics,
+          });
           break;
         case 'checkpoint':
           final mode = SqliteWalCheckpointMode.values.byName(payload['mode'] as String);

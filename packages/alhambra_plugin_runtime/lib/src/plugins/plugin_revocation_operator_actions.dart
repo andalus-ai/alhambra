@@ -7,6 +7,8 @@ import 'plugin_revocation_outbox.dart';
 final class PluginRevocationOperatorAction {
   final String actionId;
   final String actorId;
+  /// Opaque host-defined tenant or security boundary identifier.
+  final String scopeId;
   final String reason;
   final String approvalReference;
   final String targetEventId;
@@ -17,6 +19,7 @@ final class PluginRevocationOperatorAction {
   PluginRevocationOperatorAction({
     required this.actionId,
     required this.actorId,
+    this.scopeId = 'default',
     required this.reason,
     required this.approvalReference,
     required this.targetEventId,
@@ -27,6 +30,7 @@ final class PluginRevocationOperatorAction {
     for (final value in [
       actionId,
       actorId,
+      scopeId,
       reason,
       approvalReference,
       targetEventId,
@@ -47,6 +51,8 @@ final class PluginRevocationOperatorAction {
 final class PluginRevocationReplayRequest {
   final String actionId;
   final String actorId;
+  /// Opaque host-defined tenant or security boundary identifier.
+  final String scopeId;
   final String reason;
   final String approvalReference;
   final String targetEventId;
@@ -55,6 +61,7 @@ final class PluginRevocationReplayRequest {
   PluginRevocationReplayRequest({
     required this.actionId,
     required this.actorId,
+    this.scopeId = 'default',
     required this.reason,
     required this.approvalReference,
     required this.targetEventId,
@@ -63,6 +70,7 @@ final class PluginRevocationReplayRequest {
     for (final value in [
       actionId,
       actorId,
+      scopeId,
       reason,
       approvalReference,
       targetEventId,
@@ -92,4 +100,10 @@ abstract interface class PluginRevocationDeadLetterReplayStore {
   Future<PluginRevocationReplayResult?> replayDeadLetter(
     PluginRevocationReplayRequest request,
   );
+}
+
+
+/// Read-only access to durable operator replay history.
+abstract interface class PluginRevocationOperatorActionInspectionStore {
+  Future<List<PluginRevocationOperatorAction>> readOperatorActions();
 }

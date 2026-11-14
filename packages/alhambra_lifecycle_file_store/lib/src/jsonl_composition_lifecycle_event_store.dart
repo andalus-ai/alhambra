@@ -18,11 +18,16 @@ import 'jsonl_sparse_lifecycle_index.dart';
 /// processes writing the same file require an external lock or a different
 /// storage adapter.
 final class JsonlCompositionLifecycleEventStore
-    implements CompositionLifecycleEventStore {
+    implements
+        CompositionLifecycleEventStore,
+        CompositionLifecycleStorageHealthProvider,
+        CompositionLifecycleStorageMaintenanceProvider {
   final File file;
   final CompositionLifecycleEventJsonCodec codec;
 
   Future<void> _writeTail = Future<void>.value();
+  DateTime? _lastSuccessfulWriteAt;
+  Object? _lastWriteError;
 
   late final JsonlSparseLifecycleIndex _sparseIndex =
       JsonlSparseLifecycleIndex(logFile: file, codec: codec);
@@ -41,8 +46,48 @@ final class JsonlCompositionLifecycleEventStore
   }
 
   @override
-  Future<void> append(CompositionLifecycleEvent event) =>
-      _enqueue(() => _appendOne(event));
+  Future<void> append(CompositionLifecycleEvent event) => _enqueue(() async {
+        try {
+          await _appendOne(event);
+          _lastSuccessfulWriteAt = DateTime.now().toUtc();
+          _lastWriteError = null;
+        } on Object catch (error) {
+          _lastWriteError = error;
+          rethrow;
+        }
+      });
+
+  @override
+  Future<CompositionLifecycleStorageHealth> inspectHealth() async {
+    await _writeTail;
+    try {
+      final exists = await file.exists();
+      final primaryBytes = exists ? await file.length() : 0;
+      final sidecar = File('${file.path}.sparse-index.json');
+      final sidecarExists = await sidecar.exists();
+      final auxiliaryBytes = sidecarExists ? await sidecar.length() : 0;
+      final error = _lastWriteError;
+      return CompositionLifecycleStorageHealth(
+        state: error == null
+            ? CompositionLifecycleStorageHealthState.healthy
+            : CompositionLifecycleStorageHealthState.degraded,
+        checkedAt: DateTime.now().toUtc(),
+        lastSuccessfulWriteAt: _lastSuccessfulWriteAt,
+        lastError: error?.toString(),
+        primaryStorageBytes: primaryBytes,
+        auxiliaryStorageBytes: auxiliaryBytes,
+        metrics: {'adapter': 'jsonl', 'logExists': exists, 'indexExists': sidecarExists},
+      );
+    } on Object catch (error) {
+      return CompositionLifecycleStorageHealth(
+        state: CompositionLifecycleStorageHealthState.unavailable,
+        checkedAt: DateTime.now().toUtc(),
+        lastSuccessfulWriteAt: _lastSuccessfulWriteAt,
+        lastError: error.toString(),
+        metrics: const {'adapter': 'jsonl'},
+      );
+    }
+  }
 
   Future<void> _appendOne(CompositionLifecycleEvent event) async {
     await file.parent.create(recursive: true);
@@ -129,6 +174,37 @@ final class JsonlCompositionLifecycleEventStore
           retainFrom: retainFrom,
           maxEvents: maxEvents,
         ));
+  }
+
+  @override
+  Future<CompositionLifecycleStorageMaintenanceResult> maintain(
+    CompositionLifecycleStorageMaintenanceRequest request,
+  ) async {
+    final startedAt = DateTime.now().toUtc();
+    int? removed;
+    final warnings = <String>[];
+    if (request.retainFrom != null || request.maxEvents != null) {
+      removed = await compact(
+        retainFrom: request.retainFrom,
+        maxEvents: request.maxEvents,
+      );
+    }
+    if (request.checkpoint) {
+      warnings.add('WAL checkpointing is not applicable to the JSONL adapter.');
+    }
+    return CompositionLifecycleStorageMaintenanceResult(
+      startedAt: startedAt,
+      completedAt: DateTime.now().toUtc(),
+      recordsRemoved: removed,
+      checkpointRequested: request.checkpoint,
+      checkpointCompleted: null,
+      warnings: warnings,
+      metrics: const {
+        'adapter': 'jsonl',
+        'compactionSupported': true,
+        'checkpointSupported': false,
+      },
+    );
   }
 
   Future<int> _compactOne({

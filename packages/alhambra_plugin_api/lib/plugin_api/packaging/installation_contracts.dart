@@ -84,6 +84,16 @@ abstract interface class PluginInstallFileSystem {
   });
 
   Future<void> discardStaging(PluginInstallStaging staging);
+
+  /// Read-only, operation-scoped inspection. The adapter must prove staging
+  /// ownership from the opaque handle or operation marker, not from path
+  /// similarity. Must not repair, delete, promote or mutate files.
+  Future<PluginInstallRecoverySnapshot> inspectOperation({
+    required String operationId,
+    required String pluginId,
+    required String? stagingHandle,
+    required String? destinationPath,
+  });
 }
 
 /// Host compatibility/dependency preflight. Must not execute plugin code.
@@ -104,10 +114,11 @@ enum PluginInstallJournalStatus {
   rolledBack,
   failed,
   needsReconciliation,
+  recoveryStarted,
 }
 
-/// Append/update semantics are adapter-defined but writes must be durable
-/// before the installer performs the corresponding external side effect.
+/// [unresolved] returns exactly the latest non-terminal entry per operation ID.
+/// Writes must be durable before the corresponding external side effect.
 final class PluginInstallJournalEntry {
   final String operationId;
   final String pluginId;
@@ -117,6 +128,9 @@ final class PluginInstallJournalEntry {
   final String? stagingHandle;
   final String? promotedPath;
   final String? failureCode;
+  final String? contentHash;
+  final String? approvedBy;
+  final String? approvalId;
 
   const PluginInstallJournalEntry({
     required this.operationId,
@@ -127,6 +141,9 @@ final class PluginInstallJournalEntry {
     this.stagingHandle,
     this.promotedPath,
     this.failureCode,
+    this.contentHash,
+    this.approvedBy,
+    this.approvalId,
   });
 }
 
@@ -158,4 +175,56 @@ abstract interface class TransactionalInstalledPluginStore
     implements InstalledPluginStore {
   Future<bool> createIfAbsent(InstalledPluginRecord plugin);
   Future<bool> removeIfMatches(InstalledPluginRecord plugin);
+}
+
+
+/// Read-only facts returned by a host filesystem adapter during reconciliation.
+///
+/// Both staging and destination facts must be based on adapter-owned
+/// operation provenance (for example a durable operation marker), not merely
+/// on matching path names.
+final class PluginInstallRecoverySnapshot {
+  final bool stagingExists;
+  final bool destinationExists;
+  final bool destinationOwnedByOperation;
+  final bool rollbackAvailable;
+
+  const PluginInstallRecoverySnapshot({
+    required this.stagingExists,
+    required this.destinationExists,
+    required this.destinationOwnedByOperation,
+    required this.rollbackAvailable,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      other is PluginInstallRecoverySnapshot &&
+      other.stagingExists == stagingExists &&
+      other.destinationExists == destinationExists &&
+      other.destinationOwnedByOperation == destinationOwnedByOperation &&
+      other.rollbackAvailable == rollbackAvailable;
+
+  @override
+  int get hashCode => Object.hash(
+        stagingExists,
+        destinationExists,
+        destinationOwnedByOperation,
+        rollbackAvailable,
+      );
+}
+
+/// Journal adapter that supports stale-safe recovery claims.
+///
+/// The compare-and-set must be atomic and durable. It must update only when
+/// the latest entry for [operationId] still has both [expectedStatus] and
+/// [expectedUpdatedAt]. The host must fence the original installer worker or
+/// prove its operation lease has expired before allowing a recovery claim.
+abstract interface class PluginInstallRecoveryJournal
+    implements PluginInstallJournal {
+  Future<bool> compareAndSet({
+    required String operationId,
+    required PluginInstallJournalStatus expectedStatus,
+    required DateTime expectedUpdatedAt,
+    required PluginInstallJournalEntry replacement,
+  });
 }

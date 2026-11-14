@@ -8,6 +8,7 @@ enum PluginRecoveryJobAction { resumeStartup, compensateShutdown }
 enum PluginRecoveryJobStatus {
   planned,
   running,
+  cancellationRequested,
   partiallyCompleted,
   completed,
   failed,
@@ -110,6 +111,7 @@ final class PluginLifecycleRecoveryJob {
   final String? correlationId;
   final String? failureCode;
   final String? failureSummary;
+  final DateTime? cancellationRequestedAt;
 
   PluginLifecycleRecoveryJob({
     this.schemaVersion = currentSchemaVersion,
@@ -127,6 +129,7 @@ final class PluginLifecycleRecoveryJob {
     this.correlationId,
     this.failureCode,
     this.failureSummary,
+    this.cancellationRequestedAt,
   })  : orderedPluginIds = List<String>.unmodifiable(orderedPluginIds),
         steps = List<PluginRecoveryJobStep>.unmodifiable(steps) {
     if (schemaVersion < 1) throw ArgumentError.value(schemaVersion, 'schemaVersion');
@@ -148,6 +151,12 @@ final class PluginLifecycleRecoveryJob {
           this.steps[i].ordinal != i) {
         throw ArgumentError('Recovery steps must match the ordered plugin IDs and ordinals.');
       }
+    }
+    if (status == PluginRecoveryJobStatus.cancellationRequested && cancellationRequestedAt == null) {
+      throw ArgumentError('A cancellation-requested job requires cancellationRequestedAt.');
+    }
+    if (status == PluginRecoveryJobStatus.cancelled && cancellationRequestedAt == null) {
+      throw ArgumentError('A cancelled job requires cancellationRequestedAt.');
     }
     if (status == PluginRecoveryJobStatus.failed &&
         (failureSummary == null || failureSummary!.trim().isEmpty)) {
@@ -190,6 +199,7 @@ final class PluginLifecycleRecoveryJob {
     required Iterable<PluginRecoveryJobStep> steps,
     String? failureCode,
     String? failureSummary,
+    DateTime? cancellationRequestedAt,
   }) {
     final instant = at.toUtc();
     return PluginLifecycleRecoveryJob(
@@ -208,6 +218,7 @@ final class PluginLifecycleRecoveryJob {
       correlationId: correlationId,
       failureCode: failureCode,
       failureSummary: failureSummary,
+      cancellationRequestedAt: cancellationRequestedAt ?? this.cancellationRequestedAt,
     );
   }
 
@@ -274,6 +285,8 @@ final class InMemoryPluginLifecycleRecoveryJobStore
         replacement.schemaVersion != current.schemaVersion ||
         replacement.initiatedBy != current.initiatedBy ||
         replacement.correlationId != current.correlationId ||
+        (current.cancellationRequestedAt != null &&
+         replacement.cancellationRequestedAt != current.cancellationRequestedAt) ||
         !_samePluginIds(replacement.orderedPluginIds, current.orderedPluginIds) ||
         replacement.createdAt != current.createdAt) {
       return false;

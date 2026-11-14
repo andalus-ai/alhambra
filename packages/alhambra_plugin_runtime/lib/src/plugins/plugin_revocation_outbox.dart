@@ -92,7 +92,7 @@ abstract interface class PluginRevocationOutboxStore {
 /// Single-isolate reference implementation for tests only. A real adapter
 /// needs database transactions, uniqueness constraints and row-level claims.
 class InMemoryTransactionalPluginRevocationStore
-    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore, PluginRevocationDeadLetterReplayStore {
+    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore, PluginRevocationDeadLetterReplayStore, PluginRevocationOperatorActionInspectionStore {
   final Map<String, PluginRevocationExecutionRecord> _executions = {};
   final Map<String, PluginRevocationOutboxMessage> _messages = {};
   final Map<String, PluginRevocationOperatorAction> _operatorActions = {};
@@ -273,6 +273,7 @@ class InMemoryTransactionalPluginRevocationStore
     if (existingAction != null) {
       if (existingAction.targetEventId != request.targetEventId ||
           existingAction.actorId != request.actorId ||
+          existingAction.scopeId != request.scopeId ||
           existingAction.reason != request.reason ||
           existingAction.approvalReference != request.approvalReference) {
         throw StateError('Operator action ID was already used with different replay details.');
@@ -317,6 +318,7 @@ class InMemoryTransactionalPluginRevocationStore
     final audit = PluginRevocationOperatorAction(
       actionId: request.actionId,
       actorId: request.actorId,
+      scopeId: request.scopeId,
       reason: request.reason,
       approvalReference: request.approvalReference,
       targetEventId: source.event.eventId,
@@ -330,6 +332,7 @@ class InMemoryTransactionalPluginRevocationStore
     return PluginRevocationReplayResult(audit, replay);
   }
 
+  @override
   Future<List<PluginRevocationOperatorAction>> readOperatorActions() async =>
       List.unmodifiable(_operatorActions.values.toList()
         ..sort((a, b) => a.occurredAt.compareTo(b.occurredAt)));

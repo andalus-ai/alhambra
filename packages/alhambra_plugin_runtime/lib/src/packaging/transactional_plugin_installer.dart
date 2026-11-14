@@ -96,6 +96,7 @@ final class TransactionalPluginInstaller {
       stagingHandle: staging?.opaqueHandle,
       promotedPath: promotedPath,
       failureCode: failureCode,
+      contentHash: package.metadata.contentHash,
     ));
 
     try {
@@ -122,11 +123,12 @@ final class TransactionalPluginInstaller {
         );
       }
 
-      staging = await fileSystem.createStaging(
+      final stagingHandle = await fileSystem.createStaging(
         operationId: operationId,
         pluginId: pluginId,
         version: version,
       );
+      staging = stagingHandle;
       await record(PluginInstallJournalStatus.stagingCreated);
 
       await record(PluginInstallJournalStatus.extracting);
@@ -185,7 +187,7 @@ final class TransactionalPluginInstaller {
                 'Directory "$relativePath" declares a non-zero size.',
               );
             }
-            await fileSystem.createDirectory(staging, relativePath);
+            await fileSystem.createDirectory(stagingHandle, relativePath);
             break;
           case PluginArchiveEntryKind.file:
             final declared = entry.declaredSizeBytes;
@@ -217,7 +219,7 @@ final class TransactionalPluginInstaller {
               },
             );
             await fileSystem.writeFile(
-              staging: staging,
+              staging: stagingHandle,
               relativePath: relativePath,
               bytes: bounded,
               maxBytes: limits.maxEntryBytes,
@@ -239,11 +241,12 @@ final class TransactionalPluginInstaller {
         );
       }
 
-      promotedPath = await fileSystem.destinationPathFor(
+      final destinationPath = await fileSystem.destinationPathFor(
         pluginId: pluginId,
         version: version,
       );
-      if (promotedPath.trim().isEmpty) {
+      promotedPath = destinationPath;
+      if (destinationPath.trim().isEmpty) {
         throw const PluginInstallException(
           'INVALID_INSTALL_DESTINATION',
           'Filesystem adapter returned an empty install destination.',
@@ -251,19 +254,20 @@ final class TransactionalPluginInstaller {
       }
       await record(PluginInstallJournalStatus.promoting);
       promotionAttempted = true;
-      await fileSystem.promote(staging, destinationPath: promotedPath);
+      await fileSystem.promote(stagingHandle, destinationPath: destinationPath);
       await record(PluginInstallJournalStatus.promoted);
 
-      candidateRecord = InstalledPluginRecord(
+      final installRecord = InstalledPluginRecord(
         id: pluginId,
         version: package.manifest.version,
         contentHash: package.metadata.contentHash,
         publisher: package.publisher,
         installedAt: clock().toUtc(),
-        installPath: promotedPath!,
+        installPath: destinationPath,
       );
+      candidateRecord = installRecord;
       recordCreateAttempted = true;
-      final created = await installedStore.createIfAbsent(candidateRecord);
+      final created = await installedStore.createIfAbsent(installRecord);
       if (!created) {
         recordCreateAttempted = false;
         throw PluginInstallException(
@@ -273,13 +277,13 @@ final class TransactionalPluginInstaller {
       }
       await record(PluginInstallJournalStatus.installedRecordSaved);
 
-      await fileSystem.finalizePromotion(staging, promotedPath: promotedPath);
+      await fileSystem.finalizePromotion(stagingHandle, promotedPath: destinationPath);
       await record(PluginInstallJournalStatus.committed);
 
       return PluginInstalled(
         pluginId: pluginId,
         version: package.manifest.version,
-        installPath: promotedPath,
+        installPath: destinationPath,
       );
     } catch (error, stackTrace) {
       final failure = error is PluginInstallException
@@ -292,13 +296,17 @@ final class TransactionalPluginInstaller {
       try {
         await record(PluginInstallJournalStatus.rollingBack,
             failureCode: failure.code);
-        if (promotionAttempted && promotedPath != null && staging != null) {
+        final rollbackPath = promotedPath;
+        final rollbackStaging = staging;
+        if (promotionAttempted &&
+            rollbackPath != null &&
+            rollbackStaging != null) {
           await fileSystem.rollbackPromotion(
-            staging,
-            promotedPath: promotedPath,
+            rollbackStaging,
+            promotedPath: rollbackPath,
           );
-        } else if (staging != null) {
-          await fileSystem.discardStaging(staging);
+        } else if (rollbackStaging != null) {
+          await fileSystem.discardStaging(rollbackStaging);
         }
         if (recordCreateAttempted && candidateRecord != null) {
           await installedStore.removeIfMatches(candidateRecord);

@@ -14,7 +14,8 @@ final class SqlitePluginRevocationStore
         TransactionalPluginRevocationStore,
         PluginRevocationOutboxStore,
         PluginRevocationOutboxInspectionStore,
-        PluginRevocationDeadLetterReplayStore {
+        PluginRevocationDeadLetterReplayStore,
+        PluginRevocationOperatorActionInspectionStore {
   final sq.Database _db;
   final Random _random;
   bool _closed = false;
@@ -55,7 +56,7 @@ final class SqlitePluginRevocationStore
   void _migrate() {
     final version =
         _db.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > 2) {
+    if (version > 3) {
       throw UnsupportedError(
         'Database schema version $version is newer than this adapter supports.',
       );
@@ -118,12 +119,41 @@ final class SqlitePluginRevocationStore
     _db.execute('PRAGMA user_version = 1');
     }
     if (version < 2) {
-      _db.execute('ALTER TABLE plugin_revocation_outbox ADD COLUMN replay_of_event_id TEXT');
-      _db.execute('ALTER TABLE plugin_revocation_outbox ADD COLUMN replay_generation INTEGER NOT NULL DEFAULT 0');
-      _db.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_revocation_replay_generation ON plugin_revocation_outbox(replay_of_event_id, replay_generation) WHERE replay_generation > 0''');
-      _db.execute('''CREATE TABLE IF NOT EXISTS plugin_revocation_operator_action (action_id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, reason TEXT NOT NULL, approval_reference TEXT NOT NULL, target_event_id TEXT NOT NULL, replay_event_id TEXT NOT NULL UNIQUE, replay_generation INTEGER NOT NULL CHECK (replay_generation >= 1), occurred_at TEXT NOT NULL, FOREIGN KEY(target_event_id) REFERENCES plugin_revocation_outbox(event_id), FOREIGN KEY(replay_event_id) REFERENCES plugin_revocation_outbox(event_id))''');
-      _db.execute('CREATE INDEX IF NOT EXISTS idx_plugin_revocation_operator_target ON plugin_revocation_operator_action(target_event_id, replay_generation)');
-      _db.execute('PRAGMA user_version = 2');
+      _transaction(() {
+        _db.execute('ALTER TABLE plugin_revocation_outbox ADD COLUMN replay_of_event_id TEXT');
+        _db.execute('ALTER TABLE plugin_revocation_outbox ADD COLUMN replay_generation INTEGER NOT NULL DEFAULT 0');
+        _db.execute('''
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_revocation_replay_generation
+          ON plugin_revocation_outbox(replay_of_event_id, replay_generation)
+          WHERE replay_generation > 0
+        ''');
+        _db.execute('''
+          CREATE TABLE IF NOT EXISTS plugin_revocation_operator_action (
+            action_id TEXT PRIMARY KEY,
+            actor_id TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            approval_reference TEXT NOT NULL,
+            target_event_id TEXT NOT NULL REFERENCES plugin_revocation_outbox(event_id),
+            replay_event_id TEXT NOT NULL UNIQUE REFERENCES plugin_revocation_outbox(event_id),
+            replay_generation INTEGER NOT NULL CHECK (replay_generation >= 1),
+            occurred_at TEXT NOT NULL
+          )
+        ''');
+        _db.execute('''
+          CREATE INDEX IF NOT EXISTS idx_plugin_revocation_operator_target
+          ON plugin_revocation_operator_action(target_event_id, replay_generation)
+        ''');
+        _db.execute('PRAGMA user_version = 2');
+      });
+    }
+    if (version < 3) {
+      _transaction(() {
+        _db.execute(
+          "ALTER TABLE plugin_revocation_operator_action "
+          "ADD COLUMN scope_id TEXT NOT NULL DEFAULT 'default'",
+        );
+        _db.execute('PRAGMA user_version = 3');
+      });
     }
   }
 
@@ -337,734 +367,136 @@ final class SqlitePluginRevocationStore
   }
 
   @override
-  Future<PluginRevocationReplayResult?> replayDeadLetter(PluginRevocationReplayRequest request) async => _transaction(() {
-    final prior = _db.select('SELECT * FROM plugin_revocation_operator_action WHERE action_id = ?', [request.actionId]);
-    if (prior.isNotEmpty) {
-      final row = Map<String, Object?>.from(prior.first);
-      if (row['target_event_id'] != request.targetEventId || row['actor_id'] != request.actorId || row['reason'] != request.reason || row['approval_reference'] != request.approvalReference) throw StateError('Operator action ID was already used with different replay details.');
-      final replayRows = _db.select('SELECT * FROM plugin_revocation_outbox WHERE event_id = ?', [row['replay_event_id']]);
-      if (replayRows.isEmpty) throw StateError('Recorded replay event is missing.');
-      return PluginRevocationReplayResult(PluginRevocationOperatorAction(actionId: row['action_id']! as String, actorId: row['actor_id']! as String, reason: row['reason']! as String, approvalReference: row['approval_reference']! as String, targetEventId: row['target_event_id']! as String, replayEventId: row['replay_event_id']! as String, replayGeneration: row['replay_generation']! as int, occurredAt: _parseDate(row['occurred_at'])), _message(Map<String, Object?>.from(replayRows.first)));
-    }
-    final sourceRows = _db.select("SELECT * FROM plugin_revocation_outbox WHERE event_id = ? AND state = 'deadLetter'", [request.targetEventId]);
-    if (sourceRows.isEmpty) return null;
-    final source = Map<String, Object?>.from(sourceRows.first);
-    final generation = (_db.select('SELECT COALESCE(MAX(replay_generation), 0) AS generation FROM plugin_revocation_operator_action WHERE target_event_id = ?', [request.targetEventId]).first['generation'] as int) + 1;
-    final sourceEventId = source['event_id']! as String;
-    final replayEventId = '
-    required String workerId,
-    required DateTime now,
-    required Duration leaseDuration,
-    required int limit,
-    required int maxAttempts,
-  }) async {
-    if (workerId.trim().isEmpty ||
-        leaseDuration <= Duration.zero ||
-        limit < 1 ||
-        maxAttempts < 1) {
-      throw ArgumentError('Invalid outbox claim parameters.');
-    }
-    return _transaction(() {
-      final instant = now.toUtc();
-      final nowText = _date(instant);
-      _db.execute('''
-        UPDATE plugin_revocation_outbox
-        SET state = 'deadLetter', lease_owner = NULL, lease_token = NULL,
-            lease_until = NULL, last_error_code = 'lease_expired_after_max_attempts'
-        WHERE state = 'leased' AND lease_until <= ? AND attempts >= ?
-      ''', [nowText, maxAttempts]);
-
-      final rows = _db.select('''
-        SELECT * FROM plugin_revocation_outbox
-        WHERE attempts < ? AND (
-          (state = 'pending' AND next_attempt_at <= ?) OR
-          (state = 'leased' AND lease_until <= ?)
-        )
-        ORDER BY occurred_at ASC, event_id ASC
-        LIMIT ?
-      ''', [maxAttempts, nowText, nowText, limit]);
-
-      final claimed = <PluginRevocationOutboxMessage>[];
-      for (final row in rows) {
-        final current = Map<String, Object?>.from(row);
-        final eventId = current['event_id']! as String;
-        final attempts = (current['attempts']! as int) + 1;
-        final token = '$workerId:$eventId:$attempts:${instant.microsecondsSinceEpoch}:${_random.nextInt(1 << 32)}';
-        final leaseUntil = instant.add(leaseDuration);
-        _db.execute('''
-          UPDATE plugin_revocation_outbox
-          SET state = 'leased', attempts = ?, lease_owner = ?,
-              lease_token = ?, lease_until = ?
-          WHERE event_id = ?
-        ''', [attempts, workerId, token, _date(leaseUntil), eventId]);
-        current
-          ..['state'] = 'leased'
-          ..['attempts'] = attempts
-          ..['lease_owner'] = workerId
-          ..['lease_token'] = token
-          ..['lease_until'] = _date(leaseUntil);
-        claimed.add(_message(current));
-      }
-      return List.unmodifiable(claimed);
-    });
-  }
-
-  @override
-  Future<bool> markDelivered({
-    required String eventId,
-    required String leaseToken,
-    required DateTime deliveredAt,
-  }) async =>
+  Future<PluginRevocationReplayResult?> replayDeadLetter(
+    PluginRevocationReplayRequest request,
+  ) async =>
       _transaction(() {
+        final priorRows = _db.select(
+          'SELECT * FROM plugin_revocation_operator_action WHERE action_id = ?',
+          [request.actionId],
+        );
+        if (priorRows.isNotEmpty) {
+          final row = Map<String, Object?>.from(priorRows.first);
+          if (row['target_event_id'] != request.targetEventId ||
+              row['actor_id'] != request.actorId ||
+              row['scope_id'] != request.scopeId ||
+              row['reason'] != request.reason ||
+              row['approval_reference'] != request.approvalReference) {
+            throw StateError(
+              'Operator action ID was already used with different replay details.',
+            );
+          }
+          final replayRows = _db.select(
+            'SELECT * FROM plugin_revocation_outbox WHERE event_id = ?',
+            [row['replay_event_id']],
+          );
+          if (replayRows.isEmpty) {
+            throw StateError('Recorded replay event is missing.');
+          }
+          final audit = PluginRevocationOperatorAction(
+            actionId: row['action_id']! as String,
+            actorId: row['actor_id']! as String,
+            scopeId: row['scope_id']! as String,
+            reason: row['reason']! as String,
+            approvalReference: row['approval_reference']! as String,
+            targetEventId: row['target_event_id']! as String,
+            replayEventId: row['replay_event_id']! as String,
+            replayGeneration: row['replay_generation']! as int,
+            occurredAt: _parseDate(row['occurred_at']),
+          );
+          return PluginRevocationReplayResult(
+            audit,
+            _message(Map<String, Object?>.from(replayRows.first)),
+          );
+        }
+        final sourceRows = _db.select(
+          "SELECT * FROM plugin_revocation_outbox WHERE event_id = ? AND state = 'deadLetter'",
+          [request.targetEventId],
+        );
+        if (sourceRows.isEmpty) return null;
+        final source = Map<String, Object?>.from(sourceRows.first);
+        final generation = (_db.select(
+          'SELECT COALESCE(MAX(replay_generation), 0) AS generation '
+          'FROM plugin_revocation_operator_action WHERE target_event_id = ?',
+          [request.targetEventId],
+        ).first['generation'] as int) + 1;
+        final sourceEventId = source['event_id']! as String;
+        final replayEventId = '$sourceEventId:replay:$generation';
+        final replayKey = '${source['idempotency_key']}:replay:$generation';
+        final at = _date(request.occurredAt);
         _db.execute('''
-          UPDATE plugin_revocation_outbox
-          SET state = 'delivered', delivered_at = ?, lease_owner = NULL,
-              lease_token = NULL, lease_until = NULL, last_error_code = NULL
-          WHERE event_id = ? AND state = 'leased' AND lease_token = ?
-        ''', [_date(deliveredAt), eventId, leaseToken]);
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-
-  @override
-  Future<bool> reschedule({
-    required String eventId,
-    required String leaseToken,
-    required DateTime nextAttemptAt,
-    required String errorCode,
-    required int maxAttempts,
-  }) async =>
-      _transaction(() {
-        _db.execute('''
-          UPDATE plugin_revocation_outbox
-          SET state = CASE WHEN attempts >= ? THEN 'deadLetter' ELSE 'pending' END,
-              next_attempt_at = ?, lease_owner = NULL, lease_token = NULL,
-              lease_until = NULL, last_error_code = ?
-          WHERE event_id = ? AND state = 'leased' AND lease_token = ?
+          INSERT INTO plugin_revocation_outbox
+          (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
+           action, outcome, occurred_at, detail, state, attempts, next_attempt_at,
+           replay_of_event_id, replay_generation)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
         ''', [
-          maxAttempts,
-          _date(nextAttemptAt),
-          errorCode,
-          eventId,
-          leaseToken,
+          replayEventId, replayKey, source['operation_id'], source['plugin_id'],
+          source['provider_owner_id'], source['action'], source['outcome'],
+          at, source['detail'], at, sourceEventId, generation,
         ]);
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
+        _db.execute('''
+          INSERT INTO plugin_revocation_operator_action
+          (action_id, actor_id, scope_id, reason, approval_reference, target_event_id,
+           replay_event_id, replay_generation, occurred_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', [
+          request.actionId, request.actorId, request.scopeId, request.reason,
+          request.approvalReference, sourceEventId, replayEventId, generation, at,
+        ]);
+        final audit = PluginRevocationOperatorAction(
+          actionId: request.actionId,
+          actorId: request.actorId,
+          scopeId: request.scopeId,
+          reason: request.reason,
+          approvalReference: request.approvalReference,
+          targetEventId: sourceEventId,
+          replayEventId: replayEventId,
+          replayGeneration: generation,
+          occurredAt: request.occurredAt.toUtc(),
+        );
+        final event = PluginRevocationAuditEvent(
+          eventId: replayEventId,
+          idempotencyKey: replayKey,
+          operationId: source['operation_id']! as String,
+          pluginId: source['plugin_id']! as String,
+          providerOwnerId: source['provider_owner_id']! as String,
+          action: source['action']! as String,
+          outcome: source['outcome']! as String,
+          occurredAt: request.occurredAt.toUtc(),
+          detail: source['detail'] as String?,
+          replayOfEventId: sourceEventId,
+          replayGeneration: generation,
+        );
+        return PluginRevocationReplayResult(
+          audit,
+          PluginRevocationOutboxMessage(
+            event: event,
+            state: PluginRevocationOutboxState.pending,
+            attempts: 0,
+            nextAttemptAt: request.occurredAt.toUtc(),
+          ),
+        );
       });
 
-  Future<PluginRevocationJournalEntry?> readJournal(String idempotencyKey) async {
+  @override
+  Future<List<PluginRevocationOperatorAction>> readOperatorActions() async {
     _assertOpen();
     final rows = _db.select(
-      'SELECT * FROM plugin_revocation_journal WHERE idempotency_key = ?',
-      [idempotencyKey],
+      'SELECT * FROM plugin_revocation_operator_action ORDER BY occurred_at, action_id',
     );
-    return rows.isEmpty ? null : _journal(rows.first);
+    return List.unmodifiable(rows.map((row) => PluginRevocationOperatorAction(
+      actionId: row['action_id']! as String,
+      actorId: row['actor_id']! as String,
+      scopeId: row['scope_id']! as String,
+      reason: row['reason']! as String,
+      approvalReference: row['approval_reference']! as String,
+      targetEventId: row['target_event_id']! as String,
+      replayEventId: row['replay_event_id']! as String,
+      replayGeneration: row['replay_generation']! as int,
+      occurredAt: _parseDate(row['occurred_at']),
+    )));
   }
-
-  Future<List<PluginRevocationJournalEntry>> readAllJournal() async {
-    _assertOpen();
-    return List.unmodifiable(_db.select(
-      'SELECT * FROM plugin_revocation_journal ORDER BY created_at, idempotency_key',
-    ).map(_journal));
-  }
-
-  static PluginRevocationJournalStatus _journalStatus(
-    PluginRevocationExecutionStatus status,
-  ) =>
-      switch (status) {
-        PluginRevocationExecutionStatus.completed ||
-        PluginRevocationExecutionStatus.alreadyCompleted ||
-        PluginRevocationExecutionStatus.noOp =>
-          PluginRevocationJournalStatus.completed,
-        PluginRevocationExecutionStatus.rejected =>
-          PluginRevocationJournalStatus.rejected,
-        PluginRevocationExecutionStatus.unsupported =>
-          PluginRevocationJournalStatus.unsupported,
-        PluginRevocationExecutionStatus.failed =>
-          PluginRevocationJournalStatus.failed,
-        PluginRevocationExecutionStatus.requiresReconciliation =>
-          PluginRevocationJournalStatus.manualReview,
-      };
-
-  static PluginRevocationJournalEntry _journal(Map<String, Object?> row) =>
-      PluginRevocationJournalEntry(
-        schemaVersion: row['schema_version']! as int,
-        idempotencyKey: row['idempotency_key']! as String,
-        operationId: row['operation_id']! as String,
-        pluginId: row['plugin_id']! as String,
-        providerOwnerId: row['provider_owner_id']! as String,
-        action: CapabilityImpactAction.values.byName(row['action']! as String),
-        status: PluginRevocationJournalStatus.values
-            .byName(row['status']! as String),
-        revision: row['revision']! as int,
-        createdAt: _parseDate(row['created_at']),
-        updatedAt: _parseDate(row['updated_at']),
-        correlationId: row['correlation_id'] as String?,
-        detail: row['detail'] as String?,
-      );
-
-  static List<Object?> _journalValues(PluginRevocationJournalEntry entry) => [
-        entry.idempotencyKey,
-        entry.schemaVersion,
-        entry.operationId,
-        entry.pluginId,
-        entry.providerOwnerId,
-        entry.action.name,
-        entry.status.name,
-        entry.revision,
-        _date(entry.createdAt),
-        _date(entry.updatedAt),
-        entry.correlationId,
-        entry.detail,
-      ];
-
-  Future<bool> insertJournalIfAbsent(PluginRevocationJournalEntry entry) async =>
-      _transaction(() {
-        _db.execute('''
-          INSERT OR IGNORE INTO plugin_revocation_journal
-          (idempotency_key, schema_version, operation_id, plugin_id,
-           provider_owner_id, action, status, revision, created_at, updated_at,
-           correlation_id, detail)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', _journalValues(entry));
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-
-  Future<bool> compareAndSetJournal({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) async =>
-      _transaction(() {
-        if (replacement.idempotencyKey != idempotencyKey ||
-            replacement.revision != expectedRevision + 1) {
-          throw ArgumentError('Replacement must retain the key and increment revision once.');
-        }
-        final values = _journalValues(replacement);
-        _db.execute('''
-          UPDATE plugin_revocation_journal
-          SET schema_version = ?, operation_id = ?, plugin_id = ?,
-              provider_owner_id = ?, action = ?, status = ?, revision = ?,
-              created_at = ?, updated_at = ?, correlation_id = ?, detail = ?
-          WHERE idempotency_key = ? AND revision = ?
-        ''', [
-          ...values.skip(1),
-          idempotencyKey,
-          expectedRevision,
-        ]);
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-}
-
-
-/// Journal contract adapter. Kept separate because the journal and execution
-/// contracts both define a read(key) method with different result types.
-final class _SqlitePluginRevocationJournalStore
-    implements PluginRevocationJournalStore {
-  final SqlitePluginRevocationStore _store;
-  _SqlitePluginRevocationJournalStore(this._store);
-
-  @override
-  Future<PluginRevocationJournalEntry?> read(String idempotencyKey) =>
-      _store.readJournal(idempotencyKey);
-
-  @override
-  Future<List<PluginRevocationJournalEntry>> readAll() =>
-      _store.readAllJournal();
-
-  @override
-  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry) =>
-      _store.insertJournalIfAbsent(entry);
-
-  @override
-  Future<bool> compareAndSet({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) =>
-      _store.compareAndSetJournal(
-        idempotencyKey: idempotencyKey,
-        expectedRevision: expectedRevision,
-        replacement: replacement,
-      );
-}
- + sourceEventId + ':replay:
-    required String workerId,
-    required DateTime now,
-    required Duration leaseDuration,
-    required int limit,
-    required int maxAttempts,
-  }) async {
-    if (workerId.trim().isEmpty ||
-        leaseDuration <= Duration.zero ||
-        limit < 1 ||
-        maxAttempts < 1) {
-      throw ArgumentError('Invalid outbox claim parameters.');
-    }
-    return _transaction(() {
-      final instant = now.toUtc();
-      final nowText = _date(instant);
-      _db.execute('''
-        UPDATE plugin_revocation_outbox
-        SET state = 'deadLetter', lease_owner = NULL, lease_token = NULL,
-            lease_until = NULL, last_error_code = 'lease_expired_after_max_attempts'
-        WHERE state = 'leased' AND lease_until <= ? AND attempts >= ?
-      ''', [nowText, maxAttempts]);
-
-      final rows = _db.select('''
-        SELECT * FROM plugin_revocation_outbox
-        WHERE attempts < ? AND (
-          (state = 'pending' AND next_attempt_at <= ?) OR
-          (state = 'leased' AND lease_until <= ?)
-        )
-        ORDER BY occurred_at ASC, event_id ASC
-        LIMIT ?
-      ''', [maxAttempts, nowText, nowText, limit]);
-
-      final claimed = <PluginRevocationOutboxMessage>[];
-      for (final row in rows) {
-        final current = Map<String, Object?>.from(row);
-        final eventId = current['event_id']! as String;
-        final attempts = (current['attempts']! as int) + 1;
-        final token = '$workerId:$eventId:$attempts:${instant.microsecondsSinceEpoch}:${_random.nextInt(1 << 32)}';
-        final leaseUntil = instant.add(leaseDuration);
-        _db.execute('''
-          UPDATE plugin_revocation_outbox
-          SET state = 'leased', attempts = ?, lease_owner = ?,
-              lease_token = ?, lease_until = ?
-          WHERE event_id = ?
-        ''', [attempts, workerId, token, _date(leaseUntil), eventId]);
-        current
-          ..['state'] = 'leased'
-          ..['attempts'] = attempts
-          ..['lease_owner'] = workerId
-          ..['lease_token'] = token
-          ..['lease_until'] = _date(leaseUntil);
-        claimed.add(_message(current));
-      }
-      return List.unmodifiable(claimed);
-    });
-  }
-
-  @override
-  Future<bool> markDelivered({
-    required String eventId,
-    required String leaseToken,
-    required DateTime deliveredAt,
-  }) async =>
-      _transaction(() {
-        _db.execute('''
-          UPDATE plugin_revocation_outbox
-          SET state = 'delivered', delivered_at = ?, lease_owner = NULL,
-              lease_token = NULL, lease_until = NULL, last_error_code = NULL
-          WHERE event_id = ? AND state = 'leased' AND lease_token = ?
-        ''', [_date(deliveredAt), eventId, leaseToken]);
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-
-  @override
-  Future<bool> reschedule({
-    required String eventId,
-    required String leaseToken,
-    required DateTime nextAttemptAt,
-    required String errorCode,
-    required int maxAttempts,
-  }) async =>
-      _transaction(() {
-        _db.execute('''
-          UPDATE plugin_revocation_outbox
-          SET state = CASE WHEN attempts >= ? THEN 'deadLetter' ELSE 'pending' END,
-              next_attempt_at = ?, lease_owner = NULL, lease_token = NULL,
-              lease_until = NULL, last_error_code = ?
-          WHERE event_id = ? AND state = 'leased' AND lease_token = ?
-        ''', [
-          maxAttempts,
-          _date(nextAttemptAt),
-          errorCode,
-          eventId,
-          leaseToken,
-        ]);
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-
-  Future<PluginRevocationJournalEntry?> readJournal(String idempotencyKey) async {
-    _assertOpen();
-    final rows = _db.select(
-      'SELECT * FROM plugin_revocation_journal WHERE idempotency_key = ?',
-      [idempotencyKey],
-    );
-    return rows.isEmpty ? null : _journal(rows.first);
-  }
-
-  Future<List<PluginRevocationJournalEntry>> readAllJournal() async {
-    _assertOpen();
-    return List.unmodifiable(_db.select(
-      'SELECT * FROM plugin_revocation_journal ORDER BY created_at, idempotency_key',
-    ).map(_journal));
-  }
-
-  static PluginRevocationJournalStatus _journalStatus(
-    PluginRevocationExecutionStatus status,
-  ) =>
-      switch (status) {
-        PluginRevocationExecutionStatus.completed ||
-        PluginRevocationExecutionStatus.alreadyCompleted ||
-        PluginRevocationExecutionStatus.noOp =>
-          PluginRevocationJournalStatus.completed,
-        PluginRevocationExecutionStatus.rejected =>
-          PluginRevocationJournalStatus.rejected,
-        PluginRevocationExecutionStatus.unsupported =>
-          PluginRevocationJournalStatus.unsupported,
-        PluginRevocationExecutionStatus.failed =>
-          PluginRevocationJournalStatus.failed,
-        PluginRevocationExecutionStatus.requiresReconciliation =>
-          PluginRevocationJournalStatus.manualReview,
-      };
-
-  static PluginRevocationJournalEntry _journal(Map<String, Object?> row) =>
-      PluginRevocationJournalEntry(
-        schemaVersion: row['schema_version']! as int,
-        idempotencyKey: row['idempotency_key']! as String,
-        operationId: row['operation_id']! as String,
-        pluginId: row['plugin_id']! as String,
-        providerOwnerId: row['provider_owner_id']! as String,
-        action: CapabilityImpactAction.values.byName(row['action']! as String),
-        status: PluginRevocationJournalStatus.values
-            .byName(row['status']! as String),
-        revision: row['revision']! as int,
-        createdAt: _parseDate(row['created_at']),
-        updatedAt: _parseDate(row['updated_at']),
-        correlationId: row['correlation_id'] as String?,
-        detail: row['detail'] as String?,
-      );
-
-  static List<Object?> _journalValues(PluginRevocationJournalEntry entry) => [
-        entry.idempotencyKey,
-        entry.schemaVersion,
-        entry.operationId,
-        entry.pluginId,
-        entry.providerOwnerId,
-        entry.action.name,
-        entry.status.name,
-        entry.revision,
-        _date(entry.createdAt),
-        _date(entry.updatedAt),
-        entry.correlationId,
-        entry.detail,
-      ];
-
-  Future<bool> insertJournalIfAbsent(PluginRevocationJournalEntry entry) async =>
-      _transaction(() {
-        _db.execute('''
-          INSERT OR IGNORE INTO plugin_revocation_journal
-          (idempotency_key, schema_version, operation_id, plugin_id,
-           provider_owner_id, action, status, revision, created_at, updated_at,
-           correlation_id, detail)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', _journalValues(entry));
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-
-  Future<bool> compareAndSetJournal({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) async =>
-      _transaction(() {
-        if (replacement.idempotencyKey != idempotencyKey ||
-            replacement.revision != expectedRevision + 1) {
-          throw ArgumentError('Replacement must retain the key and increment revision once.');
-        }
-        final values = _journalValues(replacement);
-        _db.execute('''
-          UPDATE plugin_revocation_journal
-          SET schema_version = ?, operation_id = ?, plugin_id = ?,
-              provider_owner_id = ?, action = ?, status = ?, revision = ?,
-              created_at = ?, updated_at = ?, correlation_id = ?, detail = ?
-          WHERE idempotency_key = ? AND revision = ?
-        ''', [
-          ...values.skip(1),
-          idempotencyKey,
-          expectedRevision,
-        ]);
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-}
-
-
-/// Journal contract adapter. Kept separate because the journal and execution
-/// contracts both define a read(key) method with different result types.
-final class _SqlitePluginRevocationJournalStore
-    implements PluginRevocationJournalStore {
-  final SqlitePluginRevocationStore _store;
-  _SqlitePluginRevocationJournalStore(this._store);
-
-  @override
-  Future<PluginRevocationJournalEntry?> read(String idempotencyKey) =>
-      _store.readJournal(idempotencyKey);
-
-  @override
-  Future<List<PluginRevocationJournalEntry>> readAll() =>
-      _store.readAllJournal();
-
-  @override
-  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry) =>
-      _store.insertJournalIfAbsent(entry);
-
-  @override
-  Future<bool> compareAndSet({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) =>
-      _store.compareAndSetJournal(
-        idempotencyKey: idempotencyKey,
-        expectedRevision: expectedRevision,
-        replacement: replacement,
-      );
-}
- + generation.toString();
-    final replayKey = (source['idempotency_key'] as String) + ':replay:
-    required String workerId,
-    required DateTime now,
-    required Duration leaseDuration,
-    required int limit,
-    required int maxAttempts,
-  }) async {
-    if (workerId.trim().isEmpty ||
-        leaseDuration <= Duration.zero ||
-        limit < 1 ||
-        maxAttempts < 1) {
-      throw ArgumentError('Invalid outbox claim parameters.');
-    }
-    return _transaction(() {
-      final instant = now.toUtc();
-      final nowText = _date(instant);
-      _db.execute('''
-        UPDATE plugin_revocation_outbox
-        SET state = 'deadLetter', lease_owner = NULL, lease_token = NULL,
-            lease_until = NULL, last_error_code = 'lease_expired_after_max_attempts'
-        WHERE state = 'leased' AND lease_until <= ? AND attempts >= ?
-      ''', [nowText, maxAttempts]);
-
-      final rows = _db.select('''
-        SELECT * FROM plugin_revocation_outbox
-        WHERE attempts < ? AND (
-          (state = 'pending' AND next_attempt_at <= ?) OR
-          (state = 'leased' AND lease_until <= ?)
-        )
-        ORDER BY occurred_at ASC, event_id ASC
-        LIMIT ?
-      ''', [maxAttempts, nowText, nowText, limit]);
-
-      final claimed = <PluginRevocationOutboxMessage>[];
-      for (final row in rows) {
-        final current = Map<String, Object?>.from(row);
-        final eventId = current['event_id']! as String;
-        final attempts = (current['attempts']! as int) + 1;
-        final token = '$workerId:$eventId:$attempts:${instant.microsecondsSinceEpoch}:${_random.nextInt(1 << 32)}';
-        final leaseUntil = instant.add(leaseDuration);
-        _db.execute('''
-          UPDATE plugin_revocation_outbox
-          SET state = 'leased', attempts = ?, lease_owner = ?,
-              lease_token = ?, lease_until = ?
-          WHERE event_id = ?
-        ''', [attempts, workerId, token, _date(leaseUntil), eventId]);
-        current
-          ..['state'] = 'leased'
-          ..['attempts'] = attempts
-          ..['lease_owner'] = workerId
-          ..['lease_token'] = token
-          ..['lease_until'] = _date(leaseUntil);
-        claimed.add(_message(current));
-      }
-      return List.unmodifiable(claimed);
-    });
-  }
-
-  @override
-  Future<bool> markDelivered({
-    required String eventId,
-    required String leaseToken,
-    required DateTime deliveredAt,
-  }) async =>
-      _transaction(() {
-        _db.execute('''
-          UPDATE plugin_revocation_outbox
-          SET state = 'delivered', delivered_at = ?, lease_owner = NULL,
-              lease_token = NULL, lease_until = NULL, last_error_code = NULL
-          WHERE event_id = ? AND state = 'leased' AND lease_token = ?
-        ''', [_date(deliveredAt), eventId, leaseToken]);
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-
-  @override
-  Future<bool> reschedule({
-    required String eventId,
-    required String leaseToken,
-    required DateTime nextAttemptAt,
-    required String errorCode,
-    required int maxAttempts,
-  }) async =>
-      _transaction(() {
-        _db.execute('''
-          UPDATE plugin_revocation_outbox
-          SET state = CASE WHEN attempts >= ? THEN 'deadLetter' ELSE 'pending' END,
-              next_attempt_at = ?, lease_owner = NULL, lease_token = NULL,
-              lease_until = NULL, last_error_code = ?
-          WHERE event_id = ? AND state = 'leased' AND lease_token = ?
-        ''', [
-          maxAttempts,
-          _date(nextAttemptAt),
-          errorCode,
-          eventId,
-          leaseToken,
-        ]);
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-
-  Future<PluginRevocationJournalEntry?> readJournal(String idempotencyKey) async {
-    _assertOpen();
-    final rows = _db.select(
-      'SELECT * FROM plugin_revocation_journal WHERE idempotency_key = ?',
-      [idempotencyKey],
-    );
-    return rows.isEmpty ? null : _journal(rows.first);
-  }
-
-  Future<List<PluginRevocationJournalEntry>> readAllJournal() async {
-    _assertOpen();
-    return List.unmodifiable(_db.select(
-      'SELECT * FROM plugin_revocation_journal ORDER BY created_at, idempotency_key',
-    ).map(_journal));
-  }
-
-  static PluginRevocationJournalStatus _journalStatus(
-    PluginRevocationExecutionStatus status,
-  ) =>
-      switch (status) {
-        PluginRevocationExecutionStatus.completed ||
-        PluginRevocationExecutionStatus.alreadyCompleted ||
-        PluginRevocationExecutionStatus.noOp =>
-          PluginRevocationJournalStatus.completed,
-        PluginRevocationExecutionStatus.rejected =>
-          PluginRevocationJournalStatus.rejected,
-        PluginRevocationExecutionStatus.unsupported =>
-          PluginRevocationJournalStatus.unsupported,
-        PluginRevocationExecutionStatus.failed =>
-          PluginRevocationJournalStatus.failed,
-        PluginRevocationExecutionStatus.requiresReconciliation =>
-          PluginRevocationJournalStatus.manualReview,
-      };
-
-  static PluginRevocationJournalEntry _journal(Map<String, Object?> row) =>
-      PluginRevocationJournalEntry(
-        schemaVersion: row['schema_version']! as int,
-        idempotencyKey: row['idempotency_key']! as String,
-        operationId: row['operation_id']! as String,
-        pluginId: row['plugin_id']! as String,
-        providerOwnerId: row['provider_owner_id']! as String,
-        action: CapabilityImpactAction.values.byName(row['action']! as String),
-        status: PluginRevocationJournalStatus.values
-            .byName(row['status']! as String),
-        revision: row['revision']! as int,
-        createdAt: _parseDate(row['created_at']),
-        updatedAt: _parseDate(row['updated_at']),
-        correlationId: row['correlation_id'] as String?,
-        detail: row['detail'] as String?,
-      );
-
-  static List<Object?> _journalValues(PluginRevocationJournalEntry entry) => [
-        entry.idempotencyKey,
-        entry.schemaVersion,
-        entry.operationId,
-        entry.pluginId,
-        entry.providerOwnerId,
-        entry.action.name,
-        entry.status.name,
-        entry.revision,
-        _date(entry.createdAt),
-        _date(entry.updatedAt),
-        entry.correlationId,
-        entry.detail,
-      ];
-
-  Future<bool> insertJournalIfAbsent(PluginRevocationJournalEntry entry) async =>
-      _transaction(() {
-        _db.execute('''
-          INSERT OR IGNORE INTO plugin_revocation_journal
-          (idempotency_key, schema_version, operation_id, plugin_id,
-           provider_owner_id, action, status, revision, created_at, updated_at,
-           correlation_id, detail)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', _journalValues(entry));
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-
-  Future<bool> compareAndSetJournal({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) async =>
-      _transaction(() {
-        if (replacement.idempotencyKey != idempotencyKey ||
-            replacement.revision != expectedRevision + 1) {
-          throw ArgumentError('Replacement must retain the key and increment revision once.');
-        }
-        final values = _journalValues(replacement);
-        _db.execute('''
-          UPDATE plugin_revocation_journal
-          SET schema_version = ?, operation_id = ?, plugin_id = ?,
-              provider_owner_id = ?, action = ?, status = ?, revision = ?,
-              created_at = ?, updated_at = ?, correlation_id = ?, detail = ?
-          WHERE idempotency_key = ? AND revision = ?
-        ''', [
-          ...values.skip(1),
-          idempotencyKey,
-          expectedRevision,
-        ]);
-        return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
-      });
-}
-
-
-/// Journal contract adapter. Kept separate because the journal and execution
-/// contracts both define a read(key) method with different result types.
-final class _SqlitePluginRevocationJournalStore
-    implements PluginRevocationJournalStore {
-  final SqlitePluginRevocationStore _store;
-  _SqlitePluginRevocationJournalStore(this._store);
-
-  @override
-  Future<PluginRevocationJournalEntry?> read(String idempotencyKey) =>
-      _store.readJournal(idempotencyKey);
-
-  @override
-  Future<List<PluginRevocationJournalEntry>> readAll() =>
-      _store.readAllJournal();
-
-  @override
-  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry) =>
-      _store.insertJournalIfAbsent(entry);
-
-  @override
-  Future<bool> compareAndSet({
-    required String idempotencyKey,
-    required int expectedRevision,
-    required PluginRevocationJournalEntry replacement,
-  }) =>
-      _store.compareAndSetJournal(
-        idempotencyKey: idempotencyKey,
-        expectedRevision: expectedRevision,
-        replacement: replacement,
-      );
-}
- + generation.toString();
-    final at = _date(request.occurredAt);
-    _db.execute('INSERT INTO plugin_revocation_outbox (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id, action, outcome, occurred_at, detail, state, attempts, next_attempt_at, replay_of_event_id, replay_generation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, \'pending\', 0, ?, ?, ?)', [replayEventId, replayKey, source['operation_id'], source['plugin_id'], source['provider_owner_id'], source['action'], source['outcome'], at, source['detail'], at, sourceEventId, generation]);
-    _db.execute('INSERT INTO plugin_revocation_operator_action (action_id, actor_id, reason, approval_reference, target_event_id, replay_event_id, replay_generation, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [request.actionId, request.actorId, request.reason, request.approvalReference, sourceEventId, replayEventId, generation, at]);
-    final audit = PluginRevocationOperatorAction(actionId: request.actionId, actorId: request.actorId, reason: request.reason, approvalReference: request.approvalReference, targetEventId: sourceEventId, replayEventId: replayEventId, replayGeneration: generation, occurredAt: request.occurredAt.toUtc());
-    final event = PluginRevocationAuditEvent(eventId: replayEventId, idempotencyKey: replayKey, operationId: source['operation_id']! as String, pluginId: source['plugin_id']! as String, providerOwnerId: source['provider_owner_id']! as String, action: source['action']! as String, outcome: source['outcome']! as String, occurredAt: request.occurredAt.toUtc(), detail: source['detail'] as String?, replayOfEventId: sourceEventId, replayGeneration: generation);
-    return PluginRevocationReplayResult(audit, PluginRevocationOutboxMessage(event: event, state: PluginRevocationOutboxState.pending, attempts: 0, nextAttemptAt: request.occurredAt.toUtc()));
-  });
 
   @override
   Future<List<PluginRevocationOutboxMessage>> claim({

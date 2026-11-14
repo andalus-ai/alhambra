@@ -223,6 +223,50 @@ class PluginLifecycleRecoveryRunner {
 
     final completed = <String>[];
     for (var index = 0; index < orderedIds.length; index++) {
+      if (journal != null) {
+        final latest = await jobStore!.read(journal!.jobId);
+        if (latest == null) {
+          return PluginLifecycleRecoveryBatchReport(
+            succeeded: false,
+            orderedPluginIds: orderedIds,
+            completedPluginIds: completed,
+            skippedPluginIds: orderedIds.skip(index),
+            error: StateError('Recovery job disappeared while executing.'),
+          );
+        }
+        journal = latest;
+        if (latest.status == PluginRecoveryJobStatus.cancellationRequested) {
+          final cancelledSteps = latest.steps.map((step) =>
+            step.status == PluginRecoveryJobStepStatus.pending
+              ? step.copyWith(status: PluginRecoveryJobStepStatus.skipped)
+              : step).toList(growable: false);
+          final cancelled = latest.next(
+            status: PluginRecoveryJobStatus.cancelled,
+            at: _clock().toUtc(),
+            steps: cancelledSteps,
+          );
+          if (!await jobStore.compareAndSet(
+            jobId: latest.jobId,
+            expectedRevision: latest.revision,
+            replacement: cancelled,
+          )) {
+            return PluginLifecycleRecoveryBatchReport(
+              succeeded: false,
+              orderedPluginIds: orderedIds,
+              completedPluginIds: completed,
+              skippedPluginIds: orderedIds.skip(index),
+              error: StateError('Cancellation was requested but the job could not be finalized; inspect its latest revision.'),
+            );
+          }
+          return PluginLifecycleRecoveryBatchReport(
+            succeeded: false,
+            orderedPluginIds: orderedIds,
+            completedPluginIds: completed,
+            skippedPluginIds: orderedIds.skip(index),
+            error: StateError('Recovery job was cancelled between plugin steps.'),
+          );
+        }
+      }
       final id = orderedIds[index];
       final checkpoint = checkpoints[id]!;
       if (journal != null) {
@@ -252,6 +296,13 @@ class PluginLifecycleRecoveryRunner {
           }
           journal = claimedJob;
         } catch (error, stackTrace) {
+          final latest = await jobStore!.read(currentJob.jobId);
+          if (latest?.status == PluginRecoveryJobStatus.cancellationRequested) {
+            // Cancellation won the revision race before this step was claimed.
+            // No plugin code ran; the next loop boundary finalizes cancellation.
+            journal = latest;
+            continue;
+          }
           return PluginLifecycleRecoveryBatchReport(
             succeeded: false,
             orderedPluginIds: orderedIds,
@@ -280,7 +331,7 @@ class PluginLifecycleRecoveryRunner {
         );
       } catch (error, stackTrace) {
         if (journal != null) {
-          final currentJob = journal!;
+          final currentJob = await jobStore!.read(journal!.jobId) ?? journal!;
           try {
             final now = _clock().toUtc();
             final updatedSteps = currentJob.steps.toList();
@@ -325,7 +376,7 @@ class PluginLifecycleRecoveryRunner {
       // Deliberately outside the execution catch: if the plugin side effect
       // succeeded but this write fails, retain the running claim for inspection.
       if (journal != null) {
-        final currentJob = journal!;
+        final currentJob = await jobStore!.read(journal!.jobId) ?? journal!;
         final now = _clock().toUtc();
         final updatedSteps = currentJob.steps.toList();
         updatedSteps[index] = updatedSteps[index].copyWith(
@@ -333,7 +384,9 @@ class PluginLifecycleRecoveryRunner {
           completedAt: now,
         );
         final updatedJob = currentJob.next(
-          status: PluginRecoveryJobStatus.running,
+          status: currentJob.status == PluginRecoveryJobStatus.cancellationRequested
+              ? PluginRecoveryJobStatus.cancellationRequested
+              : PluginRecoveryJobStatus.running,
           at: now,
           steps: updatedSteps,
         );

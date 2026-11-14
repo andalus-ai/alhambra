@@ -334,6 +334,7 @@ void main() {
     final request = PluginRevocationReplayRequest(
       actionId: 'sqlite-action-1',
       actorId: 'operator-1',
+      scopeId: 'tenant-blue',
       reason: 'Approved after sink recovery',
       approvalReference: 'change-101',
       targetEventId: claimed.event.eventId,
@@ -343,11 +344,14 @@ void main() {
     final repeated = (await store.replayDeadLetter(request))!;
     expect(repeated.replay.event.eventId, first.replay.event.eventId);
     expect(first.audit.replayGeneration, 1);
+    expect(first.audit.scopeId, 'tenant-blue');
     expect(first.replay.event.replayOfEventId, claimed.event.eventId);
     expect(first.replay.event.replayGeneration, 1);
     expect(first.replay.state, PluginRevocationOutboxState.pending);
     expect(first.replay.attempts, 0);
-    expect(await store.readOperatorActions(), hasLength(1));
+    final persistedActions = await store.readOperatorActions();
+    expect(persistedActions, hasLength(1));
+    expect(persistedActions.single.scopeId, 'tenant-blue');
     final all = await store.readAllOutbox();
     expect(all, hasLength(2));
     expect(all.singleWhere((m) => m.event.eventId == claimed.event.eventId).state,
@@ -356,6 +360,7 @@ void main() {
     final second = await store.replayDeadLetter(PluginRevocationReplayRequest(
       actionId: 'sqlite-action-2',
       actorId: 'operator-2',
+      scopeId: 'tenant-blue',
       reason: 'Second approved replay generation',
       approvalReference: 'change-102',
       targetEventId: claimed.event.eventId,
@@ -363,7 +368,9 @@ void main() {
     ));
     expect(second!.audit.replayGeneration, 2);
     expect(second.replay.event.eventId, isNot(first.replay.event.eventId));
-    expect(await store.readOperatorActions(), hasLength(2));
+    final allActions = await store.readOperatorActions();
+    expect(allActions, hasLength(2));
+    expect(allActions.every((action) => action.scopeId == 'tenant-blue'), isTrue);
   });
 
 }

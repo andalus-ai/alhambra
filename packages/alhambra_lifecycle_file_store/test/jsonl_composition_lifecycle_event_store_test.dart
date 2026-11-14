@@ -49,13 +49,27 @@ void main() {
     expect(result.map((event) => event.correlationId), ['two']);
   });
 
-  test('ignores an incomplete trailing record after an interrupted write', () async {
-    await store.append(_event('valid', DateTime.utc(2026, 1, 1)));
-    await file.writeAsString('{"schemaVersion":1,"partial":', mode: FileMode.append);
+  test('repairs an incomplete trailing record before the next append', () async {
+    final valid = _event('valid', DateTime.utc(2026, 1, 1));
+    final recovered = _event('recovered', DateTime.utc(2026, 1, 2));
+    await store.append(valid);
+    await file.writeAsString(
+      '{"schemaVersion":1,"partial":',
+      mode: FileMode.append,
+    );
 
-    final result = await store.query(CompositionLifecycleEventQuery());
+    // A read ignores the unterminated tail without mutating the source log.
+    final beforeAppend = await store.query(CompositionLifecycleEventQuery());
+    expect(beforeAppend.map((event) => event.correlationId), ['valid']);
 
-    expect(result.map((event) => event.correlationId), ['valid']);
+    // The next write truncates only the incomplete suffix before appending.
+    await store.append(recovered);
+    final reopened = JsonlCompositionLifecycleEventStore(file: file);
+    final result = await reopened.query(CompositionLifecycleEventQuery());
+
+    expect(result.map((event) => event.correlationId), ['valid', 'recovered']);
+    expect(await file.readAsString(), contains('"correlationId":"recovered"'));
+    expect(await file.readAsString(), isNot(contains('"partial"')));
   });
 
   test('fails on malformed complete records rather than hiding corruption', () async {
@@ -338,6 +352,39 @@ void main() {
     expect(result, hasLength(1));
     expect(() => result.add(_event('x', DateTime.utc(2026))), throwsUnsupportedError);
   });
+  test('reports JSONL footprint and successful write time', () async {
+    final before = await store.inspectHealth();
+    expect(before.state, CompositionLifecycleStorageHealthState.healthy);
+    expect(before.primaryStorageBytes, 0);
+    await store.append(_event('health', DateTime.utc(2026, 1, 1)));
+    final health = await store.inspectHealth();
+    expect(health.state, CompositionLifecycleStorageHealthState.healthy);
+    expect(health.primaryStorageBytes, greaterThan(0));
+    expect(health.lastSuccessfulWriteAt, isNotNull);
+    expect(health.metrics['adapter'], 'jsonl');
+  });
+
+  test('runs retention maintenance and reports unsupported checkpoint', () async {
+    await store.append(_event('old', DateTime.utc(2026, 1, 1)));
+    await store.append(_event('new', DateTime.utc(2026, 1, 2)));
+
+    final result = await store.maintain(
+      CompositionLifecycleStorageMaintenanceRequest(
+        retainFrom: DateTime.utc(2026, 1, 2),
+        checkpoint: true,
+      ),
+    );
+
+    expect(result.recordsRemoved, 1);
+    expect(result.checkpointRequested, isTrue);
+    expect(result.checkpointCompleted, isNull);
+    expect(result.partial, isTrue);
+    expect(result.warnings, hasLength(1));
+    expect(result.metrics['adapter'], 'jsonl');
+    final events = await store.query(CompositionLifecycleEventQuery());
+    expect(events.map((event) => event.correlationId), ['new']);
+  });
+
 }
 
 CompositionLifecycleEvent _event(String id, DateTime timestamp, {String? eventId}) =>
