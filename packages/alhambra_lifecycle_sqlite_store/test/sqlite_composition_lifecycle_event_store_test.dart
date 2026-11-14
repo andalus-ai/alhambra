@@ -146,17 +146,59 @@ void main() {
     await store!.append(event('middle', 2));
     await store!.append(event('boundary', 1));
 
-    final removed = await store!.compact(
+    final removedByTime = await store!.compact(
       retainFrom: base.add(const Duration(minutes: 1)),
-      maxEvents: 2,
+    );
+    expect(removedByTime, 1);
+    final afterTimeFilter = await store!.query(CompositionLifecycleEventQuery());
+    expect(
+      afterTimeFilter.map((value) => value.eventId),
+      ['boundary', 'middle', 'newest'],
     );
 
-    expect(removed, 2);
+    final removedByCount = await store!.compact(maxEvents: 2);
+    expect(removedByCount, 1);
     final retained = await store!.query(CompositionLifecycleEventQuery());
     expect(retained.map((value) => value.eventId), ['middle', 'newest']);
     expect(
       await store!.query(CompositionLifecycleEventQuery(ownerId: 'owner-old')),
       isEmpty,
+    );
+  });
+
+  test('rolls back retention when a delete trigger rejects compaction', () async {
+    store = SqliteCompositionLifecycleEventStore.open(
+      path: '${directory.path}/compact-rollback.sqlite',
+    );
+    final event = CompositionLifecycleEvent(
+      eventId: 'compact-rollback-event',
+      correlationId: 'compact-rollback-correlation',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: DateTime.utc(2026, 8, 3),
+      nodeIds: const ['command:compact-rollback'],
+      ownerIds: const ['owner-compact-rollback'],
+    );
+    await store!.append(event);
+    store!.database.execute('''
+      CREATE TRIGGER reject_lifecycle_delete BEFORE DELETE ON lifecycle_events
+      BEGIN
+        SELECT RAISE(ABORT, 'injected retention failure');
+      END
+    ''');
+
+    await expectLater(
+      store!.compact(maxEvents: 1),
+      throwsA(isA<Exception>()),
+    );
+    store!.database.execute('DROP TRIGGER reject_lifecycle_delete');
+    final retained = await store!.query(CompositionLifecycleEventQuery());
+    expect(retained.single.eventId, event.eventId);
+    expect(
+      await store!.query(
+        CompositionLifecycleEventQuery(ownerId: 'owner-compact-rollback'),
+      ),
+      hasLength(1),
     );
   });
 
