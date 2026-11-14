@@ -352,9 +352,11 @@ expiration, and retains audit evidence according to its own requirements.
 
 `PluginLifecycleRecoveryJobArchiver` and
 `PluginLifecycleRecoveryJobArchive` define a persistence-neutral archival
-boundary. The archiver accepts only non-running terminal states, requires the
-expected job revision, and writes an immutable snapshot through an
-idempotent `putIfAbsent` operation. It does not delete or mutate the
+boundary. The archiver accepts only completed, failed, partially completed, cancelled,
+or expired jobs; planned, running, cancellation-requested, interrupted, and
+manual-review jobs remain operationally visible. It requires the expected
+job revision and writes an immutable snapshot through an idempotent
+`putIfAbsent` operation. It does not delete or mutate the
 operational job. Production archive adapters must reject conflicting snapshots
 for an existing job ID and document their durability and concurrency
 guarantees. Retention, legal holds, access control, and any eventual purge
