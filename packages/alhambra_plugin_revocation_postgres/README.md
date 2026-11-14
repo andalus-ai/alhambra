@@ -6,7 +6,7 @@ PostgreSQL implementation of Alhambra plugin revocation execution, journal and a
 
 The core `alhambra_plugin_runtime` package defines the contracts and remains database-neutral. This optional adapter provides multi-instance persistence using PostgreSQL transactions, uniqueness constraints, and row-level worker claims. It also implements the read-only `PluginRevocationOutboxInspectionStore` contract via `readAllOutbox()`; inspection does not claim or mutate messages.
 
-The current adapter does **not yet** implement `PluginRevocationDeadLetterReplayStore`. The in-memory runtime reference implementation is not a substitute for durable operator audit. Do not enable production dead-letter replay until a later adapter release provides one-transaction audit insertion + new replay outbox insertion.
+The adapter implements `PluginRevocationDeadLetterReplayStore`. Replay inserts a new pending event and operator audit record atomically; it never resets the source dead-letter row.
 
 ## Bootstrap
 
@@ -68,7 +68,7 @@ Delivery is **at least once**, not exactly once. A process can publish successfu
 
 ## Migration and operations
 
-- Migration version 1 is available at `migrations/001_plugin_revocation.sql` and is also applied by `migrate()`.
+- Migration version 1 is available at `migrations/001_plugin_revocation.sql`; version 2 adds audited replay; version 3 adds the operator `scope_id`. All versions are applied by `migrate()`.
 - Run migrations with a dedicated role; grant the application role only the required table and sequence privileges (no sequence is currently used).
 - Configure pool size, connection timeout, query timeout, and TLS through the PostgreSQL URL.
 - Monitor pending count, oldest pending age, expired leases, retry attempts and dead-letter count using the outbox tables.
@@ -85,3 +85,8 @@ dart test
 ```
 
 The integration suite verifies atomic execution/journal/outbox completion, independent-pool claim concurrency, journal revision CAS, and rollback when the journal update cannot be completed. Tests are skipped when the environment variable is absent.
+
+
+## Audited replay and scope
+
+Use `PluginRevocationReplayCommandService` rather than calling the persistence method from an untrusted request handler. The host supplies an authenticated principal, authoritative event-scope resolver, authorization adapter and approval verifier. The adapter persists `scopeId` with the actor and approval evidence. PostgreSQL serializes action IDs with a transaction-scoped advisory lock and replay generations with a source-row lock.
