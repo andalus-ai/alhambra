@@ -9,7 +9,10 @@ import 'package:postgres/postgres.dart';
 /// runs in a database transaction. Outbox claims use SKIP LOCKED so separate
 /// workers do not claim the same row.
 final class PostgresPluginRevocationStore
-    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore {
+    implements
+        TransactionalPluginRevocationStore,
+        PluginRevocationOutboxStore,
+        PluginRevocationOutboxInspectionStore {
   final Pool<dynamic> _pool;
   final Random _random;
   bool _closed = false;
