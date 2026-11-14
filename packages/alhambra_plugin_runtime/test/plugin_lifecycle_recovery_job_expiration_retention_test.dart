@@ -517,6 +517,10 @@ void main() {
         archive: archive,
         inspector: inspector,
         auditSink: _TestPurgeAuditSink((_) => auditWritten = true),
+        verifier: PluginLifecycleRecoveryJobArchiveVerifier(
+          archive: archive,
+          digestProvider: digests,
+        ),
         clock: () => DateTime.utc(2027),
       );
 
@@ -563,6 +567,10 @@ void main() {
         archive: archive,
         inspector: PluginLifecycleRecoveryJobRetentionInspector(archive: archive),
         auditSink: _FailingPurgeAuditSink(),
+        verifier: PluginLifecycleRecoveryJobArchiveVerifier(
+          archive: archive,
+          digestProvider: digests,
+        ),
       );
 
       await expectLater(
