@@ -131,6 +131,9 @@ class JournalBackedPluginRevocationExecutionStore
     if (current == null) {
       throw StateError('No journal entry for revocation operation.');
     }
+    if (current.scopeId != record.scopeId) {
+      throw StateError('Revocation scope cannot change after the journal claim.');
+    }
     final replacement = current.next(
       status: switch (record.status) {
         PluginRevocationExecutionStatus.completed ||
