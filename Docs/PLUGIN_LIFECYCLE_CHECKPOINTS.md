@@ -278,3 +278,24 @@ planning. `executeBatchWithJob()` independently repeats preflight and rejects
 a job whose action, ordered targets, checkpoint snapshots, or reserved
 operation IDs no longer match. The host owns authorization, persistence,
 idempotency-key policy, and any approval audit trail.
+
+
+## Recovery plan freshness validation
+
+`PluginLifecycleRecoveryBatchPlanner.validatePlan()` lets a host check a
+reviewed plan again before presenting its final approval action or persisting
+the job. It rebuilds the current snapshot using the plan's existing reserved
+operation IDs, then compares the dependency order and complete checkpoint
+snapshots (including state, sequence, attempt, timestamps, dependencies, and
+sanitized failure metadata).
+
+The validation is read-only: it does not regenerate operation IDs, write
+checkpoints or jobs, mutate the manager, or invoke plugin hooks. A stale or
+blocked result includes blockers and, when available, the newly observed plan
+for host review. The host must obtain fresh approval if the plan changed.
+
+This is an additional review aid, not an approval token or execution lock.
+State can change immediately after validation. `executeBatchWithJob()` remains
+responsible for its own independent preflight and job-intent checks before
+plugin code runs. Hosts continue to own authorization, approval policy, and
+durable audit records.
