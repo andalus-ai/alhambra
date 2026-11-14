@@ -11,7 +11,9 @@ import 'package:sqlite3/sqlite3.dart';
 /// UI hosts should use the isolate worker adapter to move database work
 /// to a dedicated isolate.
 final class SqliteCompositionLifecycleEventStore
-    implements CompositionLifecycleEventStore, CompositionLifecycleStorageMaintenanceProvider {
+    implements
+        CompositionLifecycleEventStore,
+        CompositionLifecycleStorageMaintenanceProvider {
   static const int schemaVersion = 2;
 
   static final List<_SqliteSchemaMigration> _migrations = [
