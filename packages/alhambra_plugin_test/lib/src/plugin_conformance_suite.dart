@@ -22,10 +22,16 @@ final class PluginConformanceSuite {
     if (metadata.name.trim().isEmpty) {
       issues.add(const PluginConformanceIssue(code: 'metadata.name.empty',
           path: 'metadata.name', message: 'Plugin display name must not be empty.'));
+    } else if (metadata.name != metadata.name.trim()) {
+      issues.add(const PluginConformanceIssue(code: 'metadata.name.untrimmed',
+          path: 'metadata.name', message: 'Plugin display name must not contain surrounding whitespace.'));
     }
     if (metadata.version.trim().isEmpty) {
       issues.add(const PluginConformanceIssue(code: 'metadata.version.empty',
           path: 'metadata.version', message: 'Plugin version must not be empty.'));
+    } else if (metadata.version != metadata.version.trim()) {
+      issues.add(const PluginConformanceIssue(code: 'metadata.version.untrimmed',
+          path: 'metadata.version', message: 'Plugin version must not contain surrounding whitespace.'));
     }
     final seen = <String>{};
     for (var i = 0; i < metadata.capabilities.length; i++) {
