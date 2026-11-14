@@ -209,7 +209,28 @@ final class SqlitePluginRevocationStore
           _date(record.updatedAt),
           record.detail,
         ]);
-        return _db.select('SELECT changes() AS count').first['count'] == 1;
+        final inserted =
+            _db.select('SELECT changes() AS count').first['count'] as int;
+        if (inserted != 1) return false;
+
+        _db.execute('''
+          INSERT INTO plugin_revocation_journal
+          (idempotency_key, schema_version, operation_id, plugin_id,
+           provider_owner_id, action, status, revision, created_at,
+           updated_at, detail)
+          VALUES (?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?)
+        ''', [
+          record.idempotencyKey,
+          PluginRevocationJournalEntry.currentSchemaVersion,
+          record.operationId,
+          record.pluginId,
+          record.providerOwnerId,
+          record.action.name,
+          _date(record.updatedAt),
+          _date(record.updatedAt),
+          record.detail,
+        ]);
+        return true;
       });
 
   @override
@@ -266,10 +287,28 @@ final class SqlitePluginRevocationStore
         record.detail,
         record.idempotencyKey,
       ]);
-      final changed =
+      final executionChanged =
           _db.select('SELECT changes() AS count').first['count'] as int;
-      if (changed != 1) {
+      if (executionChanged != 1) {
         throw StateError('Cannot complete an unclaimed revocation operation.');
+      }
+
+      _db.execute('''
+        UPDATE plugin_revocation_journal
+        SET status = ?, revision = revision + 1, updated_at = ?, detail = ?
+        WHERE idempotency_key = ?
+      ''', [
+        _journalStatus(record.status).name,
+        _date(record.updatedAt),
+        record.detail,
+        record.idempotencyKey,
+      ]);
+      final journalChanged =
+          _db.select('SELECT changes() AS count').first['count'] as int;
+      if (journalChanged != 1) {
+        throw StateError(
+          'Revocation journal row is missing; transaction rolled back.',
+        );
       }
       _enqueue(record);
     });
@@ -390,6 +429,24 @@ final class SqlitePluginRevocationStore
       'SELECT * FROM plugin_revocation_journal ORDER BY created_at, idempotency_key',
     ).map(_journal));
   }
+
+  static PluginRevocationJournalStatus _journalStatus(
+    PluginRevocationExecutionStatus status,
+  ) =>
+      switch (status) {
+        PluginRevocationExecutionStatus.completed ||
+        PluginRevocationExecutionStatus.alreadyCompleted ||
+        PluginRevocationExecutionStatus.noOp =>
+          PluginRevocationJournalStatus.completed,
+        PluginRevocationExecutionStatus.rejected =>
+          PluginRevocationJournalStatus.rejected,
+        PluginRevocationExecutionStatus.unsupported =>
+          PluginRevocationJournalStatus.unsupported,
+        PluginRevocationExecutionStatus.failed =>
+          PluginRevocationJournalStatus.failed,
+        PluginRevocationExecutionStatus.requiresReconciliation =>
+          PluginRevocationJournalStatus.manualReview,
+      };
 
   static PluginRevocationJournalEntry _journal(Map<String, Object?> row) =>
       PluginRevocationJournalEntry(
