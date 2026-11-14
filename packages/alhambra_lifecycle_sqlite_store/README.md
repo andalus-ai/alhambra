@@ -105,5 +105,3 @@ The 100K and 1M profiles are intended for local scale characterization and
 should not be treated as CI thresholds. Compare runs only when Dart/SQLite
 versions, machine, filesystem, and event count are recorded. The adapter tests
 also inspect `EXPLAIN QUERY PLAN` for the combined status/operation query path.
-The adapter tests also inspect `EXPLAIN QUERY PLAN` for the combined
-status/operation query path.
