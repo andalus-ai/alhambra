@@ -284,14 +284,6 @@ final class JsonlCompositionLifecycleEventStore
 }
 
 
-/// Reusing an event ID with a different payload is a persistence conflict.
-/// Retrying the same event ID and payload is an idempotent no-op.
-final class LifecycleEventIdentityConflictException implements Exception {
-  final String eventId;
-
-  const LifecycleEventIdentityConflictException(this.eventId);
-
-  @override
-  String toString() =>
-      'Lifecycle event ID "$eventId" already exists with a different payload.';
-}
+/// Backwards-compatible name for the storage-neutral API exception.
+typedef LifecycleEventIdentityConflictException =
+    CompositionLifecycleEventIdentityConflictException;

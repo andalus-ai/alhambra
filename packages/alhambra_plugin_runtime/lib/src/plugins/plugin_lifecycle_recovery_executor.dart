@@ -1,28 +1,10 @@
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 
 import 'plugin_lifecycle_checkpoint.dart';
+import 'plugin_lifecycle_recovery_job.dart';
+import 'plugin_lifecycle_recovery_batch.dart';
+import 'plugin_lifecycle_recovery_batch_planner.dart';
 import 'plugin_manager.dart';
-
-enum PluginLifecycleRecoveryExecutionAction {
-  resumeStartup,
-  compensateShutdown,
-}
-
-class PluginLifecycleRecoveryExecutionRequest {
-  final String pluginId;
-  final String expectedOperationId;
-  final int expectedSequence;
-  final String newOperationId;
-  final PluginLifecycleRecoveryExecutionAction action;
-
-  const PluginLifecycleRecoveryExecutionRequest({
-    required this.pluginId,
-    required this.expectedOperationId,
-    required this.expectedSequence,
-    required this.newOperationId,
-    required this.action,
-  });
-}
 
 /// Host-visible context for one controlled recovery execution.
 ///
@@ -80,6 +62,33 @@ abstract interface class PluginLifecycleRecoveryExecutor {
   Future<void> execute(PluginLifecycleRecoveryExecutionContext context);
 }
 
+
+/// Result of a dependency-ordered recovery batch.
+///
+/// A batch stops at its first execution failure. Completed plugin checkpoints
+/// remain durable; the remaining IDs are returned for a later host decision.
+class PluginLifecycleRecoveryBatchReport {
+  final bool succeeded;
+  final List<String> orderedPluginIds;
+  final List<String> completedPluginIds;
+  final List<String> skippedPluginIds;
+  final String? failedPluginId;
+  final Object? error;
+  final StackTrace? stackTrace;
+
+  PluginLifecycleRecoveryBatchReport({
+    required this.succeeded,
+    required Iterable<String> orderedPluginIds,
+    Iterable<String> completedPluginIds = const [],
+    Iterable<String> skippedPluginIds = const [],
+    this.failedPluginId,
+    this.error,
+    this.stackTrace,
+  })  : orderedPluginIds = List<String>.unmodifiable(orderedPluginIds),
+        completedPluginIds = List<String>.unmodifiable(completedPluginIds),
+        skippedPluginIds = List<String>.unmodifiable(skippedPluginIds);
+}
+
 /// Runs one explicitly requested recovery under the manager-wide lifecycle
 /// gate. Hosts recover graphs dependency-first for startup and reverse
 /// dependency order for shutdown/compensation.
@@ -102,6 +111,287 @@ class PluginLifecycleRecoveryRunner {
   }) {
     return manager.runExclusiveLifecycleBatch(
       () => _execute(request, compiledPlugin: compiledPlugin),
+    );
+  }
+
+
+  /// Executes a selected recovery set in dependency-safe order.
+  ///
+  /// The complete checkpoint/dependency preflight and all plugin operations
+  /// run under one manager-wide lifecycle gate. Startup is dependency-first;
+  /// shutdown compensation is dependent-first. Execution stops at the first
+  /// failure so a failed dependent is never followed by stopping its dependency.
+  Future<PluginLifecycleRecoveryBatchReport> executeBatch(
+    PluginLifecycleRecoveryBatchRequest request,
+  ) {
+    return manager.runExclusiveLifecycleBatch(() => _executeBatch(request));
+  }
+
+  /// Executes a pre-authorized recovery job while durably claiming and
+  /// recording each step. The job's ordered targets, checkpoint snapshots,
+  /// and execution operation IDs must match the freshly validated batch.
+  ///
+  /// A step is claimed before plugin code runs. If outcome persistence fails
+  /// after a side effect, its durable status remains running for host review;
+  /// this method never retries an ambiguous step.
+  Future<PluginLifecycleRecoveryBatchReport> executeBatchWithJob({
+    required PluginLifecycleRecoveryBatchRequest request,
+    required PluginLifecycleRecoveryJobStore jobStore,
+    required String jobId,
+  }) {
+    return manager.runExclusiveLifecycleBatch(
+      () => _executeBatch(request, jobStore: jobStore, jobId: jobId),
+    );
+  }
+
+  Future<PluginLifecycleRecoveryBatchReport> _executeBatch(
+    PluginLifecycleRecoveryBatchRequest request, {
+    PluginLifecycleRecoveryJobStore? jobStore,
+    String? jobId,
+  }) async {
+    final plan = await PluginLifecycleRecoveryBatchPlanner(
+      store: store,
+      manager: manager,
+      clock: _clock,
+    ).planBatchWithinLifecycleBatch(request);
+    if (!plan.isExecutable) {
+      return PluginLifecycleRecoveryBatchReport(
+        succeeded: false,
+        orderedPluginIds: plan.orderedPluginIds,
+        error: StateError(plan.blockers.join(' ')),
+      );
+    }
+    final orderedIds = plan.orderedPluginIds;
+    final checkpoints = <String, PluginLifecycleCheckpoint>{
+      for (final step in plan.steps) step.pluginId: step.checkpoint,
+    };
+    final operationIds = <String, String>{
+      for (final step in plan.steps) step.pluginId: step.executionOperationId,
+    };
+
+    PluginLifecycleRecoveryJob? journal;
+    if (jobStore != null) {
+      try {
+        if (jobId == null || jobId.trim().isEmpty) {
+          throw ArgumentError.value(jobId, 'jobId');
+        }
+        journal = await jobStore.read(jobId);
+        if (journal == null) throw StateError('Recovery job "$jobId" does not exist.');
+        final expectedAction = request.action == PluginLifecycleRecoveryExecutionAction.resumeStartup
+            ? PluginRecoveryJobAction.resumeStartup
+            : PluginRecoveryJobAction.compensateShutdown;
+        if (journal.status != PluginRecoveryJobStatus.planned ||
+            journal.action != expectedAction ||
+            !_sameIds(journal.orderedPluginIds, orderedIds)) {
+          throw StateError('Recovery job is not planned for this exact action and dependency order.');
+        }
+        for (var i = 0; i < orderedIds.length; i++) {
+          final id = orderedIds[i];
+          final step = journal.steps[i];
+          final checkpoint = checkpoints[id]!;
+          if (step.status != PluginRecoveryJobStepStatus.pending ||
+              step.expectedCheckpointOperationId != checkpoint.operationId ||
+              step.expectedCheckpointSequence != checkpoint.sequence ||
+              step.executionOperationId == null ||
+              step.executionOperationId!.trim().isEmpty ||
+              step.executionOperationId != operationIds[id]) {
+            throw StateError('Recovery job step for "$id" is stale, incomplete, or has a different execution operation ID.');
+          }
+        }
+        final runningJob = journal.next(
+          status: PluginRecoveryJobStatus.running,
+          at: _clock().toUtc(),
+          steps: journal.steps,
+        );
+        if (!await jobStore.compareAndSet(
+          jobId: journal.jobId,
+          expectedRevision: journal.revision,
+          replacement: runningJob,
+        )) {
+          throw StateError('Recovery job changed before execution could be claimed.');
+        }
+        journal = runningJob;
+      } catch (error, stackTrace) {
+        return PluginLifecycleRecoveryBatchReport(
+          succeeded: false,
+          orderedPluginIds: orderedIds,
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+
+    final completed = <String>[];
+    for (var index = 0; index < orderedIds.length; index++) {
+      final id = orderedIds[index];
+      final checkpoint = checkpoints[id]!;
+      if (journal != null) {
+        final currentJob = journal;
+        final currentStep = currentJob!.steps[index];
+        final claimedAt = _clock().toUtc();
+        final claimedStep = currentStep.copyWith(
+          status: PluginRecoveryJobStepStatus.running,
+          startedAt: claimedAt,
+          executionOperationId: operationIds[id],
+        );
+        final claimedSteps = currentJob.steps.toList(growable: false);
+        final mutableClaimedSteps = claimedSteps.toList();
+        mutableClaimedSteps[index] = claimedStep;
+        final claimedJob = currentJob.next(
+          status: PluginRecoveryJobStatus.running,
+          at: claimedAt,
+          steps: mutableClaimedSteps,
+        );
+        try {
+          if (!await jobStore!.compareAndSet(
+            jobId: currentJob.jobId,
+            expectedRevision: currentJob.revision,
+            replacement: claimedJob,
+          )) {
+            throw StateError('Could not claim recovery step "$id"; job revision changed.');
+          }
+          journal = claimedJob;
+        } catch (error, stackTrace) {
+          return PluginLifecycleRecoveryBatchReport(
+            succeeded: false,
+            orderedPluginIds: orderedIds,
+            completedPluginIds: completed,
+            skippedPluginIds: orderedIds.skip(index),
+            failedPluginId: id,
+            error: error,
+            stackTrace: stackTrace,
+          );
+        }
+      }
+
+      try {
+        final operationId = operationIds[id]!;
+        await _execute(
+          PluginLifecycleRecoveryExecutionRequest(
+            pluginId: id,
+            expectedOperationId: checkpoint.operationId,
+            expectedSequence: checkpoint.sequence,
+            newOperationId: operationId,
+            action: request.action,
+          ),
+          compiledPlugin: request.action == PluginLifecycleRecoveryExecutionAction.resumeStartup
+              ? request.compiledPlugins[id]
+              : null,
+        );
+      } catch (error, stackTrace) {
+        if (journal != null) {
+          final currentJob = journal!;
+          try {
+            final now = _clock().toUtc();
+            final updatedSteps = currentJob.steps.toList();
+            updatedSteps[index] = updatedSteps[index].copyWith(
+              status: PluginRecoveryJobStepStatus.failed,
+              completedAt: now,
+              failureCode: error.runtimeType.toString(),
+              failureSummary: 'Plugin recovery step failed; inspect lifecycle and external state',
+            );
+            final failedJob = currentJob.next(
+              status: completed.isEmpty
+                  ? PluginRecoveryJobStatus.failed
+                  : PluginRecoveryJobStatus.partiallyCompleted,
+              at: now,
+              steps: updatedSteps,
+              failureCode: error.runtimeType.toString(),
+              failureSummary: 'Recovery batch stopped after a plugin step failed',
+            );
+            if (await jobStore!.compareAndSet(
+              jobId: currentJob.jobId,
+              expectedRevision: currentJob.revision,
+              replacement: failedJob,
+            )) {
+              journal = failedJob;
+            }
+          } catch (_) {
+            // Leave the durable running claim intact. Restart inspection must
+            // treat it as ambiguous instead of assuming the failure was saved.
+          }
+        }
+        return PluginLifecycleRecoveryBatchReport(
+          succeeded: false,
+          orderedPluginIds: orderedIds,
+          completedPluginIds: completed,
+          skippedPluginIds: orderedIds.skip(index + 1),
+          failedPluginId: id,
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+
+      // Deliberately outside the execution catch: if the plugin side effect
+      // succeeded but this write fails, retain the running claim for inspection.
+      if (journal != null) {
+        final currentJob = journal!;
+        final now = _clock().toUtc();
+        final updatedSteps = currentJob.steps.toList();
+        updatedSteps[index] = updatedSteps[index].copyWith(
+          status: PluginRecoveryJobStepStatus.completed,
+          completedAt: now,
+        );
+        final updatedJob = currentJob.next(
+          status: PluginRecoveryJobStatus.running,
+          at: now,
+          steps: updatedSteps,
+        );
+        try {
+          if (!await jobStore!.compareAndSet(
+            jobId: currentJob.jobId,
+            expectedRevision: currentJob.revision,
+            replacement: updatedJob,
+          )) {
+            throw StateError('Plugin "$id" completed but its job outcome could not be persisted; inspect before retrying.');
+          }
+          journal = updatedJob;
+        } catch (error, stackTrace) {
+          return PluginLifecycleRecoveryBatchReport(
+            succeeded: false,
+            orderedPluginIds: orderedIds,
+            completedPluginIds: completed,
+            skippedPluginIds: orderedIds.skip(index + 1),
+            failedPluginId: id,
+            error: error,
+            stackTrace: stackTrace,
+          );
+        }
+      }
+      completed.add(id);
+    }
+
+    if (journal != null) {
+      final currentJob = journal!;
+      final completedJob = currentJob.next(
+        status: PluginRecoveryJobStatus.completed,
+        at: _clock().toUtc(),
+        steps: currentJob.steps,
+      );
+      try {
+        if (!await jobStore!.compareAndSet(
+          jobId: currentJob.jobId,
+          expectedRevision: currentJob.revision,
+          replacement: completedJob,
+        )) {
+          throw StateError('All plugin steps completed but the final job status could not be persisted.');
+        }
+        journal = completedJob;
+      } catch (error, stackTrace) {
+        return PluginLifecycleRecoveryBatchReport(
+          succeeded: false,
+          orderedPluginIds: orderedIds,
+          completedPluginIds: completed,
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+
+    return PluginLifecycleRecoveryBatchReport(
+      succeeded: true,
+      orderedPluginIds: orderedIds,
+      completedPluginIds: completed,
     );
   }
 
@@ -292,4 +582,13 @@ class PluginLifecycleRecoveryRunner {
     failureCode: failureCode,
     failureSummary: failureSummary,
   );
+}
+
+
+bool _sameIds(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var i = 0; i < left.length; i++) {
+    if (left[i] != right[i]) return false;
+  }
+  return true;
 }

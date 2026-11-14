@@ -1,0 +1,23 @@
+name: alhambra_plugin_host_starter
+description: A minimal host application demonstrating Alhambra plugin lifecycle and contribution registration.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  alhambra_plugin_api:
+    path: ../../packages/alhambra_plugin_api
+  alhambra_plugin_runtime:
+    path: ../../packages/alhambra_plugin_runtime
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

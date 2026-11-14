@@ -136,3 +136,10 @@ export 'src/di/service_graph_engine.dart';
 export 'src/plugins/plugin_lifecycle_recovery_controller.dart';
 
 export 'src/plugins/plugin_lifecycle_recovery_executor.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_job.dart';
+export 'src/plugins/plugin_lifecycle_recovery_job_planner.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_batch_planner.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_batch.dart';

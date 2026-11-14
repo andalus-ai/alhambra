@@ -5,7 +5,8 @@ import 'composition_contracts.dart';
 /// [from] and [to] are inclusive. [before] is a legacy exclusive timestamp
 /// bound. [after] and [beforeCursor] are exclusive composite bounds over
 /// `(timestamp, eventId)`, so pagination remains deterministic when several
-/// events share a timestamp. Results are always ordered oldest-first.
+/// events share a timestamp. Event IDs use Dart's `String.compareTo` ordering.
+/// Results are always ordered oldest-first.
 final class CompositionLifecycleEventCursor {
   final DateTime timestamp;
   final String eventId;
@@ -63,7 +64,7 @@ final class CompositionLifecycleEventQuery {
 /// Query results must be ordered oldest-first and respect every [query] bound
 /// and its limit. Implementations should use `eventId` as an idempotency key:
 /// an identical retry should not create a second record, while reuse of an ID
-/// for a different payload should be rejected. Adapters must document their
+/// for a different payload should throw [CompositionLifecycleEventIdentityConflictException]. Adapters must document their
 /// durability and indexing strategy.
 ///
 /// The API deliberately does not prescribe an index format, query planner,
@@ -80,4 +81,21 @@ abstract interface class CompositionLifecycleEventStore {
   Future<List<CompositionLifecycleEvent>> query(
     CompositionLifecycleEventQuery query,
   );
+}
+
+
+/// Reusing a lifecycle event ID with a different payload is a storage conflict.
+///
+/// Adapters should throw this exception when an append attempts to reuse an
+/// existing [CompositionLifecycleEvent.eventId] for a non-identical event.
+/// Retrying the same ID and payload is an idempotent no-op.
+final class CompositionLifecycleEventIdentityConflictException
+    implements Exception {
+  final String eventId;
+
+  const CompositionLifecycleEventIdentityConflictException(this.eventId);
+
+  @override
+  String toString() =>
+      'Lifecycle event ID "$eventId" already exists with a different payload.';
 }
