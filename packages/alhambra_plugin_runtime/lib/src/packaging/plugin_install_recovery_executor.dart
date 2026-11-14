@@ -87,6 +87,8 @@ final class PluginInstallRecoveryExecutor {
       entry,
       status: PluginInstallJournalStatus.recoveryStarted,
       failureCode: 'RECOVERY_APPROVED',
+      approvedBy: approvedBy.trim(),
+      approvalId: approvalId.trim(),
     );
     final didClaim = await journal.compareAndSet(
       operationId: entry.operationId,
@@ -159,7 +161,7 @@ final class PluginInstallRecoveryExecutor {
         _ => PluginInstallJournalStatus.rolledBack,
       };
       final completed = _entry(
-        entry,
+        claimed,
         status: terminalStatus,
         failureCode: 'RECOVERED_BY_HOST',
       );
@@ -182,7 +184,7 @@ final class PluginInstallRecoveryExecutor {
           operationId: entry.operationId,
           expectedStatus: PluginInstallJournalStatus.recoveryStarted,
           replacement: _entry(
-            entry,
+            claimed,
             status: PluginInstallJournalStatus.needsReconciliation,
             failureCode: error is PluginInstallRecoveryException
                 ? error.code
@@ -205,6 +207,8 @@ final class PluginInstallRecoveryExecutor {
     PluginInstallJournalEntry source, {
     required PluginInstallJournalStatus status,
     required String failureCode,
+    String? approvedBy,
+    String? approvalId,
   }) =>
       PluginInstallJournalEntry(
         operationId: source.operationId,
@@ -216,6 +220,8 @@ final class PluginInstallRecoveryExecutor {
         promotedPath: source.promotedPath,
         failureCode: failureCode,
         contentHash: source.contentHash,
+        approvedBy: approvedBy ?? source.approvedBy,
+        approvalId: approvalId ?? source.approvalId,
       );
 
   bool _sameJournal(
@@ -230,5 +236,7 @@ final class PluginInstallRecoveryExecutor {
       left.stagingHandle == right.stagingHandle &&
       left.promotedPath == right.promotedPath &&
       left.contentHash == right.contentHash &&
-      left.failureCode == right.failureCode;
+      left.failureCode == right.failureCode &&
+      left.approvedBy == right.approvedBy &&
+      left.approvalId == right.approvalId;
 }
