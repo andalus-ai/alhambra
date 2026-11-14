@@ -185,6 +185,10 @@ class PluginLifecycleRecoveryRunner {
             !_sameIds(journal.orderedPluginIds, orderedIds)) {
           throw StateError('Recovery job is not planned for this exact action and dependency order.');
         }
+        final claimTime = _clock().toUtc();
+        if (journal.expiresAt != null && !claimTime.isBefore(journal.expiresAt!)) {
+          throw StateError('Recovery job has reached expiresAt; explicitly expire or re-plan it before execution.');
+        }
         for (var i = 0; i < orderedIds.length; i++) {
           final id = orderedIds[i];
           final step = journal.steps[i];
