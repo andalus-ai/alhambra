@@ -1,5 +1,6 @@
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 
+import 'plugin_lifecycle_checkpoint.dart';
 import 'plugin_lifecycle_recovery_batch.dart';
 import 'plugin_lifecycle_recovery_batch_planner.dart';
 
