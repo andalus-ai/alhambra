@@ -338,6 +338,18 @@ void main() {
     expect(result, hasLength(1));
     expect(() => result.add(_event('x', DateTime.utc(2026))), throwsUnsupportedError);
   });
+  test('reports JSONL footprint and successful write time', () async {
+    final before = await store.inspectHealth();
+    expect(before.state, CompositionLifecycleStorageHealthState.healthy);
+    expect(before.primaryStorageBytes, 0);
+    await store.append(_event('health', DateTime.utc(2026, 1, 1)));
+    final health = await store.inspectHealth();
+    expect(health.state, CompositionLifecycleStorageHealthState.healthy);
+    expect(health.primaryStorageBytes, greaterThan(0));
+    expect(health.lastSuccessfulWriteAt, isNotNull);
+    expect(health.metrics['adapter'], 'jsonl');
+  });
+
 }
 
 CompositionLifecycleEvent _event(String id, DateTime timestamp, {String? eventId}) =>
