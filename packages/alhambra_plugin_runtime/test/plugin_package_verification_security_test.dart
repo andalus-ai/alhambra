@@ -171,7 +171,7 @@ void main() {
       final mismatch = await DefaultPluginPackageVerifier(
         trustStore: trust,
         integrityVerifier: const _Integrity(),
-        signatureVerifier: const _SignatureVerifier(),
+        signatureVerifier: _SignatureVerifier(),
       ).verify(package);
       expect((mismatch as PackageVerificationFailed).issues.single.code,
           'SIGNING_KEY_PUBLISHER_MISMATCH');
@@ -189,5 +189,26 @@ void main() {
       expect((invalid as PackageVerificationFailed).issues.single.code,
           'INVALID_SIGNATURE');
     });
+    test('ExtensionRuntime shares its trust store and accepts injected adapters', () async {
+      final runtime = ExtensionRuntime(
+        pluginPayloadIntegrityVerifier: const _Integrity(),
+        pluginSignatureVerifier: _SignatureVerifier(),
+      );
+      runtime.pluginTrustStore.addTrustedKey(const TrustedKey(
+        keyId: 'runtime-key',
+        algorithm: 'ed25519',
+        publicKey: 'runtime-public-key',
+      ));
+      final result = await runtime.pluginPackageVerifier.verify(
+        _Package(signature: const PluginPackageSignature(
+          algorithm: 'ed25519',
+          keyId: 'runtime-key',
+          signature: 'signature',
+        )),
+      );
+      expect(result, isA<PackageVerified>());
+      expect((result as PackageVerified).trust, PluginTrustLevel.verified);
+    });
+
   });
 }
