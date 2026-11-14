@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 
+import 'jsonl_sparse_lifecycle_index.dart';
+
 /// Append-only JSON Lines store for composition lifecycle events.
 ///
 /// Each line is a self-contained, versioned event record. Appends are
@@ -21,6 +23,9 @@ final class JsonlCompositionLifecycleEventStore
   final CompositionLifecycleEventJsonCodec codec;
 
   Future<void> _writeTail = Future<void>.value();
+
+  late final JsonlSparseLifecycleIndex _sparseIndex =
+      JsonlSparseLifecycleIndex(logFile: file, codec: codec);
 
   JsonlCompositionLifecycleEventStore({
     required this.file,
@@ -41,13 +46,32 @@ final class JsonlCompositionLifecycleEventStore
 
   Future<void> _appendOne(CompositionLifecycleEvent event) async {
     await file.parent.create(recursive: true);
+    await _discardIncompleteTail();
+    await _sparseIndex.ensureReady();
+
+    final existing = await _sparseIndex.findEventById(event.eventId);
+    if (existing != null) {
+      if (_sameEvent(existing, event)) return;
+      throw LifecycleEventIdentityConflictException(event.eventId);
+    }
+
+    final encoded = codec.encode(event);
+    final recordBytes = utf8.encode(encoded);
+    final offset = await file.exists() ? await file.length() : 0;
     final handle = await file.open(mode: FileMode.append);
     try {
-      await handle.writeString('${codec.encode(event)}\\n', encoding: utf8);
+      await handle.writeFrom(recordBytes);
+      await handle.writeByte(0x0a);
       await handle.flush();
     } finally {
       await handle.close();
     }
+    await _sparseIndex.append(
+      event,
+      offset: offset,
+      endOffset: offset + recordBytes.length + 1,
+      recordLength: recordBytes.length,
+    );
   }
 
   /// Removes an unterminated tail left by an interrupted prior append before
@@ -55,8 +79,19 @@ final class JsonlCompositionLifecycleEventStore
   /// fragment into a malformed complete record.
   Future<void> _discardIncompleteTail() async {
     if (!await file.exists()) return;
+    final handle = await file.open(mode: FileMode.read);
+    int lastByte;
+    try {
+      final length = await handle.length();
+      if (length == 0) return;
+      await handle.setPosition(length - 1);
+      lastByte = await handle.readByte();
+    } finally {
+      await handle.close();
+    }
+    if (lastByte == 0x0a) return;
+
     final bytes = await file.readAsBytes();
-    if (bytes.isEmpty || bytes.last == 0x0a) return;
     final lastNewline = bytes.lastIndexOf(0x0a);
     await file.writeAsBytes(
       bytes.sublist(0, lastNewline + 1),
@@ -153,6 +188,7 @@ final class JsonlCompositionLifecycleEventStore
         }
         rethrow;
       }
+      await _sparseIndex.invalidate();
       return removed;
     } finally {
       // If an unexpected failure happened after moving the original, make a
@@ -182,12 +218,31 @@ final class JsonlCompositionLifecycleEventStore
     await _writeTail;
     if (!await file.exists()) return const [];
 
-    final events = await _readAllCompleteEvents();
-    final matches = events.where((event) => _matches(event, query)).toList();
-    final ordered = _stableChronological(matches);
-    return List<CompositionLifecycleEvent>.unmodifiable(
-      ordered.take(query.limit),
-    );
+    return _sparseIndex.query(query);
+  }
+
+  bool _sameEvent(
+    CompositionLifecycleEvent left,
+    CompositionLifecycleEvent right,
+  ) {
+    bool sameList(List<String> a, List<String> b) {
+      if (a.length != b.length) return false;
+      for (var index = 0; index < a.length; index++) {
+        if (a[index] != b[index]) return false;
+      }
+      return true;
+    }
+
+    return left.eventId == right.eventId &&
+        left.correlationId == right.correlationId &&
+        left.operation == right.operation &&
+        left.status == right.status &&
+        left.timestamp.toUtc() == right.timestamp.toUtc() &&
+        sameList(left.nodeIds, right.nodeIds) &&
+        sameList(left.ownerIds, right.ownerIds) &&
+        left.duration == right.duration &&
+        left.errorType == right.errorType &&
+        left.errorMessage == right.errorMessage;
   }
 
   Future<List<CompositionLifecycleEvent>> _readAllCompleteEvents() async {
@@ -218,37 +273,17 @@ final class JsonlCompositionLifecycleEventStore
     final indexed = events.indexed.toList();
     indexed.sort((a, b) {
       final byTime = a.$2.timestamp.compareTo(b.$2.timestamp);
-      return byTime != 0 ? byTime : a.$1.compareTo(b.$1);
+      if (byTime != 0) return byTime;
+      final byId = a.$2.eventId.compareTo(b.$2.eventId);
+      return byId != 0 ? byId : a.$1.compareTo(b.$1);
     });
     return indexed.map((entry) => entry.$2).toList(growable: false);
   }
 
-  bool _matches(
-    CompositionLifecycleEvent event,
-    CompositionLifecycleEventQuery query,
-  ) {
-    if (query.correlationId != null &&
-        event.correlationId != query.correlationId) {
-      return false;
-    }
-    if (query.ownerId != null && !event.ownerIds.contains(query.ownerId)) {
-      return false;
-    }
-    if (query.operation != null && event.operation != query.operation) {
-      return false;
-    }
-    if (query.status != null && event.status != query.status) {
-      return false;
-    }
-    if (query.from != null && event.timestamp.isBefore(query.from!)) {
-      return false;
-    }
-    if (query.to != null && event.timestamp.isAfter(query.to!)) {
-      return false;
-    }
-    if (query.before != null && !event.timestamp.isBefore(query.before!)) {
-      return false;
-    }
-    return true;
-  }
+
 }
+
+
+/// Backwards-compatible name for the storage-neutral API exception.
+typedef LifecycleEventIdentityConflictException =
+    CompositionLifecycleEventIdentityConflictException;
