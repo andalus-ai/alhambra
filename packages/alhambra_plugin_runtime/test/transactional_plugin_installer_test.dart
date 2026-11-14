@@ -154,6 +154,19 @@ class _FileSystem implements PluginInstallFileSystem {
   Future<void> discardStaging(PluginInstallStaging staging) async {
     calls.add('discardStaging');
   }
+
+  @override
+  Future<PluginInstallRecoverySnapshot> inspectOperation({
+    required String operationId,
+    required String pluginId,
+    required String? stagingHandle,
+    required String? destinationPath,
+  }) async => const PluginInstallRecoverySnapshot(
+        stagingExists: false,
+        destinationExists: false,
+        destinationOwnedByOperation: false,
+        rollbackAvailable: false,
+      );
 }
 
 class _Journal implements PluginInstallJournal {
