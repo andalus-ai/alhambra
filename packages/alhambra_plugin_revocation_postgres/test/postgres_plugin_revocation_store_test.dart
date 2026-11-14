@@ -109,6 +109,65 @@ void main() {
     expect(matching, hasLength(1));
   }, skip: skipReason);
 
+  test('expired leases are reclaimed, fenced and dead-lettered at limit', () async {
+    final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
+    await store.migrate();
+    final key = 'lease-${DateTime.now().microsecondsSinceEpoch}';
+    addTearDown(store.close);
+
+    await store.writePending(_record(key));
+    await store.completeAndEnqueue(_record(
+      key,
+      status: PluginRevocationExecutionStatus.completed,
+      at: DateTime.utc(2026, 1, 1, 0, 1),
+    ));
+
+    final first = (await store.claim(
+      workerId: 'worker-a',
+      now: DateTime.utc(2026, 1, 1, 0, 2),
+      leaseDuration: const Duration(seconds: 1),
+      limit: 1,
+      maxAttempts: 2,
+    )).single;
+    final second = (await store.claim(
+      workerId: 'worker-b',
+      now: DateTime.utc(2026, 1, 1, 0, 2, 2),
+      leaseDuration: const Duration(seconds: 30),
+      limit: 1,
+      maxAttempts: 2,
+    )).single;
+
+    expect(second.attempts, 2);
+    expect(second.leaseToken, isNot(first.leaseToken));
+    expect(
+      await store.markDelivered(
+        eventId: first.event.eventId,
+        leaseToken: first.leaseToken!,
+        deliveredAt: DateTime.utc(2026, 1, 1, 0, 2, 3),
+      ),
+      isFalse,
+    );
+    expect(
+      await store.reschedule(
+        eventId: second.event.eventId,
+        leaseToken: second.leaseToken!,
+        nextAttemptAt: DateTime.utc(2026, 1, 1, 0, 3),
+        errorCode: 'publisher_unavailable',
+        maxAttempts: 2,
+      ),
+      isTrue,
+    );
+
+    final exhausted = await store.claim(
+      workerId: 'worker-c',
+      now: DateTime.utc(2026, 1, 1, 0, 4),
+      leaseDuration: const Duration(seconds: 30),
+      limit: 10,
+      maxAttempts: 2,
+    );
+    expect(exhausted, isEmpty);
+  }, skip: skipReason);
+
   test('journal compare-and-set rejects stale revisions', () async {
     final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
     await store.migrate();
