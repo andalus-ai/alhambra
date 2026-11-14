@@ -53,6 +53,8 @@ final class PluginLifecycleRecoveryJobArchiver {
     final existing = await archive.read(jobId);
     if (existing != null) {
       if (!_sameJobSnapshot(existing.job, job) ||
+          existing.integrity.formatVersion !=
+              PluginLifecycleRecoveryJobSnapshotCodec.formatVersion ||
           existing.integrity.algorithm != digestAlgorithm ||
           existing.integrity.digest != digest) {
         throw StateError('An archive with a different snapshot or digest already exists.');
@@ -73,6 +75,8 @@ final class PluginLifecycleRecoveryJobArchiver {
       final raced = await archive.read(jobId);
       if (raced != null &&
           _sameJobSnapshot(raced.job, job) &&
+          raced.integrity.formatVersion ==
+              PluginLifecycleRecoveryJobSnapshotCodec.formatVersion &&
           raced.integrity.algorithm == digestAlgorithm &&
           raced.integrity.digest == digest) {
         return raced;
@@ -243,6 +247,16 @@ abstract interface class PluginRecoveryArchivePurgeAuditSink {
   Future<void> record(PluginRecoveryArchivePurgeAuditEvent event);
 }
 
+/// Host authorization adapter. A non-empty approval reference alone is not
+/// authorization; the host must validate its identity, scope, and permissions.
+abstract interface class PluginRecoveryArchivePurgeAuthorizer {
+  Future<bool> authorize({
+    required String jobId,
+    required String archiveDigest,
+    required PluginRecoveryArchivePurgeAuthorization authorization,
+  });
+}
+
 enum PluginRecoveryArchivePurgeDisposition { purged }
 
 /// Purges only an archived copy after explicit host approval and retention
@@ -251,6 +265,7 @@ final class PluginLifecycleRecoveryJobArchivePurger {
   final PluginLifecycleRecoveryJobArchivePurgeStore archive;
   final PluginLifecycleRecoveryJobRetentionInspector inspector;
   final PluginRecoveryArchivePurgeAuditSink auditSink;
+  final PluginRecoveryArchivePurgeAuthorizer authorizer;
   final PluginLifecycleRecoveryJobArchiveVerifier verifier;
   final DateTime Function() _clock;
 
@@ -258,6 +273,7 @@ final class PluginLifecycleRecoveryJobArchivePurger {
     required this.archive,
     required this.inspector,
     required this.auditSink,
+    required this.authorizer,
     required this.verifier,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
@@ -278,6 +294,13 @@ final class PluginLifecycleRecoveryJobArchivePurger {
     }
     if (report.archiveDigest != expectedDigest) {
       throw StateError('Archive digest changed; refresh and re-authorize purge.');
+    }
+    if (!await authorizer.authorize(
+      jobId: jobId,
+      archiveDigest: expectedDigest,
+      authorization: authorization,
+    )) {
+      throw StateError('Host authorization denied archive purge.');
     }
     final requestedAt = (at ?? _clock()).toUtc();
     if (authorization.approvedAt.isAfter(requestedAt)) {
