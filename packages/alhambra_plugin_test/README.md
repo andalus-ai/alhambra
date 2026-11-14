@@ -43,6 +43,28 @@ manager active state and aggregate contribution counts return to baseline.
 It is not a sandbox and cannot prove external resources or side effects were
 released.
 
+## Lower-level lifecycle assertions
+
+Use `AlhambraPluginTestHost` when a test needs precise control over activation
+order, failure injection, or registry assertions:
+
+~~~dart
+final host = AlhambraPluginTestHost();
+final before = host.snapshot();
+
+await host.activate(MyPlugin());
+expect(host.isActive('my.plugin'), isTrue);
+expect(host.snapshot().differenceFrom(before)['commands'], 1);
+
+await host.deactivate('my.plugin');
+expect(host.snapshot().hasSameCountsAs(before), isTrue);
+~~~
+
+`PluginContributionSnapshot` captures aggregate registry counts; it does not
+claim that a contribution belongs to a particular plugin. Use stable
+contribution IDs and the runtime's owner-scoped cleanup behavior for
+ownership assertions.
+
 ## Capability compatibility
 
 The runtime's `PluginCapabilityNegotiator` remains authoritative: major
@@ -51,5 +73,11 @@ minimum; patch versions do not affect compatibility. Missing or incompatible
 required capabilities block activation; optional requirements produce a
 degraded result. Negotiation does not grant permissions.
 
-Lifecycle conformance does not imply process isolation, durable crash recovery,
-or exactly-once external effects.
+## Scope and limitations
+
+- This package is intended for `dev_dependencies`, not production runtime use.
+- It exercises in-process lifecycle behavior and does not isolate plugin code.
+- Lifecycle checks cannot prove external side effects were released.
+- It does not simulate process crashes, durable storage, cross-process races,
+  or external side-effect recovery.
+- It does not provide exactly-once execution guarantees.
