@@ -716,11 +716,12 @@ final class SqlitePluginRevocationStore
           SET scope_id = ?, schema_version = ?, operation_id = ?, plugin_id = ?,
               provider_owner_id = ?, action = ?, status = ?, revision = ?,
               created_at = ?, updated_at = ?, correlation_id = ?, detail = ?
-          WHERE idempotency_key = ? AND revision = ?
+          WHERE idempotency_key = ? AND revision = ? AND scope_id = ?
         ''', [
           ...values.skip(1),
           idempotencyKey,
           expectedRevision,
+          replacement.scopeId,
         ]);
         return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
       });
