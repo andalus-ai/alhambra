@@ -11,13 +11,17 @@ The core `alhambra_plugin_runtime` package defines the contracts and remains dat
 ```dart
 import 'package:alhambra_plugin_revocation_postgres/alhambra_plugin_revocation_postgres.dart';
 
-final persistence = PostgresPluginRevocationStore.fromUrl(
-  'postgresql://app_user:secret@db.example.com:5432/alhambra'
-      '?sslmode=verify-full&max_connection_count=12&connect_timeout=10',
+// Run once during deployment with a dedicated migration role.
+final migration = PostgresPluginRevocationStore.fromUrl(
+  migrationDatabaseUrl,
 );
+await migration.migrate();
+await migration.close();
 
-// Run migrations using a deployment/migration role before serving traffic.
-await persistence.migrate();
+// Application traffic uses a separate, least-privilege database role.
+final persistence = PostgresPluginRevocationStore.fromUrl(
+  appDatabaseUrl,
+);
 
 final coordinator = PluginRevocationCoordinator(
   manager: pluginManager,
