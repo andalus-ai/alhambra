@@ -80,7 +80,7 @@ Future<void> _runAdapter(_Adapter adapter, int count) async {
 
   final bytesBeforeCompact = await current.measureBytes();
   final compactWatch = Stopwatch()..start();
-  final removed = await current.compact((count * 9 / 10).floor().clamp(1, count));
+  final removed = await current.compact((count * 9 / 10).floor().clamp(1, count).toInt());
   compactWatch.stop();
   final bytesAfterCompact = await current.measureBytes();
 
