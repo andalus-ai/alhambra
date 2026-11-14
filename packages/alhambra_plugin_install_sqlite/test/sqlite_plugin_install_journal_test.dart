@@ -107,6 +107,10 @@ void main() {
         approvedBy: 'operator-a',
         approvalId: 'approval-shared',
       ));
+      await journal.write(_entry(
+        status: PluginInstallJournalStatus.verified,
+        at: DateTime.utc(2026, 1, 1, 0, 1),
+      ));
       await expectLater(
         journal.write(_entry(
           operationId: 'install-2',
@@ -115,7 +119,7 @@ void main() {
         )),
         throwsA(anything),
       );
-      expect(await journal.unresolved(), hasLength(1));
+      expect(await journal.unresolved(), hasLength(2));
     });
 
     test('operation identity cannot be reused for another plugin', () async {
