@@ -28,6 +28,7 @@ export 'src/context/incremental_context_engine.dart';
 
 export 'src/capabilities/plugin_capability_negotiator.dart';
 export 'src/capabilities/capability_provider_registry.dart';
+export 'src/capabilities/capability_provider_health.dart';
 
 // Reactivity & Signals
 export 'src/reactivity/signals_engine.dart';
@@ -44,6 +45,11 @@ export 'src/plugins/plugin_dependency_resolver.dart';
 export 'src/plugins/runtime_plugin_context.dart';
 export 'src/plugins/plugin_startup_pipeline.dart';
 export 'src/plugins/plugin_shutdown_coordinator.dart';
+export 'src/plugins/plugin_revocation_coordinator.dart';
+export 'src/plugins/plugin_revocation_outbox.dart';
+export 'src/plugins/plugin_revocation_journal.dart';
+export 'src/plugins/plugin_revocation_recovery_planner.dart';
+export 'src/plugins/plugin_revocation_reconciler.dart';
 export 'src/plugins/plugin_startup_coordinator.dart';
 
 // Workbench & Layout
@@ -126,3 +132,14 @@ export 'src/projection/projection_engine.dart';
 export 'src/packaging/packaging_engine.dart';
 export 'src/discovery/plugin_discovery_manager.dart';
 export 'src/di/service_graph_engine.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_controller.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_executor.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_job.dart';
+export 'src/plugins/plugin_lifecycle_recovery_job_planner.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_batch_planner.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_batch.dart';

@@ -192,6 +192,24 @@ final class SqliteLifecycleEventStoreWorker
     );
   }
 
+  /// Applies the same retention policies as the JSONL adapter.
+  Future<int> compact({
+    DateTime? retainFrom,
+    int? maxEvents,
+  }) async {
+    if (retainFrom == null && maxEvents == null) {
+      throw ArgumentError('Provide retainFrom, maxEvents, or both.');
+    }
+    if (maxEvents != null && maxEvents < 1) {
+      throw ArgumentError.value(maxEvents, 'maxEvents', 'Must be greater than zero.');
+    }
+    final response = await _request('compact', {
+      'retainFrom': retainFrom?.toUtc().toIso8601String(),
+      'maxEvents': maxEvents,
+    });
+    return response['removed'] as int;
+  }
+
   /// Flushes and closes SQLite, then terminates the worker isolate.
   Future<void> close() async {
     if (_closed || _closing) return;
@@ -304,6 +322,17 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
             'ok': true,
             'events': events.map(codec.encode).toList(growable: false),
           });
+          break;
+        case 'compact':
+          final retainFrom = payload['retainFrom'] == null
+              ? null
+              : DateTime.parse(payload['retainFrom'] as String);
+          final maxEvents = payload['maxEvents'] as int?;
+          final removed = await store.compact(
+            retainFrom: retainFrom,
+            maxEvents: maxEvents,
+          );
+          host.send({'id': id, 'ok': true, 'removed': removed});
           break;
         case 'checkpoint':
           final mode = SqliteWalCheckpointMode.values.byName(payload['mode'] as String);

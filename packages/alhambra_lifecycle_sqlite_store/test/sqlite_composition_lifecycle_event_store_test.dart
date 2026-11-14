@@ -125,6 +125,145 @@ void main() {
     );
   });
 
+  test('compacts by inclusive time boundary and newest event count', () async {
+    store = SqliteCompositionLifecycleEventStore.open(
+      path: '${directory.path}/compact.sqlite',
+    );
+    final base = DateTime.utc(2026, 8, 1);
+    CompositionLifecycleEvent event(String id, int minutes) =>
+        CompositionLifecycleEvent(
+          eventId: id,
+          correlationId: 'compact-correlation',
+          operation: CompositionLifecycleOperation.activate,
+          status: CompositionLifecycleStatus.succeeded,
+          timestamp: base.add(Duration(minutes: minutes)),
+          nodeIds: const ['command:compact'],
+          ownerIds: ['owner-$id'],
+        );
+
+    await store!.append(event('old', 0));
+    await store!.append(event('newest', 4));
+    await store!.append(event('middle', 2));
+    await store!.append(event('boundary', 1));
+
+    final removedByTime = await store!.compact(
+      retainFrom: base.add(const Duration(minutes: 1)),
+    );
+    expect(removedByTime, 1);
+    final afterTimeFilter = await store!.query(CompositionLifecycleEventQuery());
+    expect(
+      afterTimeFilter.map((value) => value.eventId),
+      ['boundary', 'middle', 'newest'],
+    );
+
+    final removedByCount = await store!.compact(maxEvents: 2);
+    expect(removedByCount, 1);
+    final retained = await store!.query(CompositionLifecycleEventQuery());
+    expect(retained.map((value) => value.eventId), ['middle', 'newest']);
+    expect(
+      await store!.query(CompositionLifecycleEventQuery(ownerId: 'owner-old')),
+      isEmpty,
+    );
+  });
+
+  test('applies the time filter before the newest-event cap', () async {
+    store = SqliteCompositionLifecycleEventStore.open(
+      path: '${directory.path}/compact-combined.sqlite',
+    );
+    final base = DateTime.utc(2026, 8, 4);
+    for (var minute = 0; minute < 5; minute++) {
+      await store!.append(CompositionLifecycleEvent(
+        eventId: 'combined-$minute',
+        correlationId: 'combined-correlation',
+        operation: CompositionLifecycleOperation.activate,
+        status: CompositionLifecycleStatus.succeeded,
+        timestamp: base.add(Duration(minutes: minute)),
+        nodeIds: const ['command:combined'],
+        ownerIds: const ['owner-combined'],
+      ));
+    }
+
+    final removed = await store!.compact(
+      retainFrom: base.add(const Duration(minutes: 1)),
+      maxEvents: 2,
+    );
+    expect(removed, 3);
+    final retained = await store!.query(CompositionLifecycleEventQuery());
+    expect(retained.map((value) => value.eventId), ['combined-3', 'combined-4']);
+  });
+
+  test('rolls back retention when a delete trigger rejects compaction', () async {
+    store = SqliteCompositionLifecycleEventStore.open(
+      path: '${directory.path}/compact-rollback.sqlite',
+    );
+    final event = CompositionLifecycleEvent(
+      eventId: 'compact-rollback-event',
+      correlationId: 'compact-rollback-correlation',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: DateTime.utc(2026, 8, 3),
+      nodeIds: const ['command:compact-rollback'],
+      ownerIds: const ['owner-compact-rollback'],
+    );
+    await store!.append(event);
+    store!.database.execute('''
+      CREATE TRIGGER reject_lifecycle_delete BEFORE DELETE ON lifecycle_events
+      BEGIN
+        SELECT RAISE(ABORT, 'injected retention failure');
+      END
+    ''');
+
+    await expectLater(
+      store!.compact(maxEvents: 1),
+      throwsA(isA<Exception>()),
+    );
+    store!.database.execute('DROP TRIGGER reject_lifecycle_delete');
+    final retained = await store!.query(CompositionLifecycleEventQuery());
+    expect(retained.single.eventId, event.eventId);
+    expect(
+      await store!.query(
+        CompositionLifecycleEventQuery(ownerId: 'owner-compact-rollback'),
+      ),
+      hasLength(1),
+    );
+  });
+
+  test('rejects empty and invalid retention policies without mutation', () async {
+    store = SqliteCompositionLifecycleEventStore.open(
+      path: '${directory.path}/compact-validation.sqlite',
+    );
+    await expectLater(store!.compact(), throwsArgumentError);
+    await expectLater(store!.compact(maxEvents: 0), throwsArgumentError);
+    expect(await store!.query(CompositionLifecycleEventQuery()), isEmpty);
+  });
+
+  test('worker compacts using the same retention semantics', () async {
+    final worker = await SqliteLifecycleEventStoreWorker.open(
+      path: '${directory.path}/worker-compact.sqlite',
+    );
+    addTearDown(worker.close);
+    final base = DateTime.utc(2026, 8, 2);
+    for (var i = 0; i < 5; i++) {
+      await worker.append(CompositionLifecycleEvent(
+        eventId: 'worker-retain-$i',
+        correlationId: 'worker-retain-correlation',
+        operation: CompositionLifecycleOperation.activate,
+        status: CompositionLifecycleStatus.succeeded,
+        timestamp: base.add(Duration(minutes: i)),
+        nodeIds: const ['command:worker-retain'],
+        ownerIds: const ['owner-worker-retain'],
+      ));
+    }
+
+    final removed = await worker.compact(maxEvents: 2);
+    expect(removed, 3);
+    final retained = await worker.query(CompositionLifecycleEventQuery());
+    expect(retained.map((value) => value.eventId), [
+      'worker-retain-3',
+      'worker-retain-4',
+    ]);
+  });
+
   test('rejects databases created by a newer schema version', () async {
     final path = '${directory.path}/future-schema.sqlite';
     final database = sqlite3.open(path);

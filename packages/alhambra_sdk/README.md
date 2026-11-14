@@ -1,39 +1,42 @@
-<!--
-This README describes the package. If you publish this package to pub.dev,
-this README's contents appear on the landing page for your package.
+# Alhambra SDK
 
-For information about how to write a good package README, see the guide for
-[writing package pages](https://dart.dev/tools/pub/writing-package-pages).
-
-For general information about developing packages, see the Dart guide for
-[creating packages](https://dart.dev/guides/libraries/create-packages)
-and the Flutter guide for
-[developing packages and plugins](https://flutter.dev/to/develop-packages).
--->
-
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
-
-## Features
-
-TODO: List what your package can do. Maybe include images, gifs, or videos.
+The Alhambra SDK is the extension-author-facing facade for Alhambra's public
+plugin contracts. It re-exports the API package so plugin libraries can use one
+stable import.
 
 ## Getting started
 
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
+Add the SDK as a dependency using the version and source appropriate to your
+host's Alhambra release. In this repository, packages use local path dependencies
+for coordinated development.
 
-## Usage
-
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder.
-
-```dart
-const like = 'sample';
+```yaml
+dependencies:
+  alhambra_sdk:
+    path: ../alhambra_sdk
 ```
 
-## Additional information
+Import the public SDK:
 
-TODO: Tell users more about the package: where to find more information, how to
-contribute to the package, how to file issues, what response they can expect
-from the package authors, and more.
+```dart
+import 'package:alhambra_sdk/alhambra_sdk.dart';
+```
+
+Implement `AlhambraPlugin` and provide stable `PluginMetadata`. See the
+[Plugin Developer Guide](../../Docs/PLUGIN_DEVELOPER_GUIDE.md) for a complete
+minimal plugin and host-composition example.
+
+## Package boundary
+
+- This package exposes public plugin API contracts.
+- The host application owns plugin selection and runtime composition.
+- The host depends on `alhambra_plugin_runtime`; extension libraries should
+  avoid depending on runtime internals unless they are also part of the host.
+- The SDK does not download, sandbox or isolate plugin code.
+
+## Compatibility
+
+The package's public exports are compatibility-sensitive. Keep examples aligned
+with the actual API and SDK constraints. Consult the repository
+[developer guidelines](../../Docs/DEVELOPER_GUIDELINES.md) and
+[contributing guide](../../CONTRIBUTING.md) before changing public contracts.

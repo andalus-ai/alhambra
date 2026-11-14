@@ -254,6 +254,59 @@ final class SqliteCompositionLifecycleEventStore
     );
   }
 
+  /// Removes events older than [retainFrom] and/or keeps only the newest
+  /// [maxEvents] records.
+  ///
+  /// [retainFrom] is inclusive. When both policies are supplied, the time
+  /// filter is applied first and [maxEvents] then caps the remaining newest
+  /// records, ordered by (timestamp, event ID). Returns the number removed.
+  ///
+  /// Deletion and owner-association cleanup are atomic. This does not shrink
+  /// the database file; use [checkpoint] for WAL maintenance and schedule
+  /// VACUUM separately when reclaiming database-file space is necessary.
+  Future<int> compact({
+    DateTime? retainFrom,
+    int? maxEvents,
+  }) async {
+    _ensureOpen();
+    if (retainFrom == null && maxEvents == null) {
+      throw ArgumentError('Provide retainFrom, maxEvents, or both.');
+    }
+    if (maxEvents != null && maxEvents < 1) {
+      throw ArgumentError.value(maxEvents, 'maxEvents', 'Must be greater than zero.');
+    }
+
+    database.execute('BEGIN IMMEDIATE');
+    try {
+      final before = database.select(
+        'SELECT COUNT(*) AS count FROM lifecycle_events',
+      ).single['count'] as int;
+      if (retainFrom != null) {
+        database.execute(
+          'DELETE FROM lifecycle_events WHERE timestamp_micros < ?',
+          [retainFrom.toUtc().microsecondsSinceEpoch],
+        );
+      }
+      if (maxEvents != null) {
+        database.execute(
+          'DELETE FROM lifecycle_events WHERE event_id NOT IN ('
+          'SELECT event_id FROM lifecycle_events '
+          'ORDER BY timestamp_micros DESC, event_id_sort_key DESC LIMIT ?'
+          ')',
+          [maxEvents],
+        );
+      }
+      final after = database.select(
+        'SELECT COUNT(*) AS count FROM lifecycle_events',
+      ).single['count'] as int;
+      database.execute('COMMIT');
+      return before - after;
+    } on Object {
+      database.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
   /// Runs a SQLite WAL checkpoint and returns SQLite's checkpoint counters.
   SqliteWalCheckpointResult checkpoint({
     SqliteWalCheckpointMode mode = SqliteWalCheckpointMode.passive,
