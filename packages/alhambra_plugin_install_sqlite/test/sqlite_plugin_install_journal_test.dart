@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_install_sqlite/alhambra_plugin_install_sqlite.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 import 'package:test/test.dart';
