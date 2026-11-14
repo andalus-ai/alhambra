@@ -27,6 +27,8 @@ final class PluginInstallOperationLease {
 /// Implementations must make acquire/renew/release linearizable for each
 /// operation ID. Tokens must never be reused, including after lease expiry or
 /// process restart. A production implementation must persist token counters.
+/// Multi-host implementations should use one authoritative clock (typically
+/// the lease database clock) rather than trusting unsynchronized worker clocks.
 abstract interface class PluginInstallOperationLeaseStore {
   /// Returns null when another owner holds an unexpired lease.
   ///
