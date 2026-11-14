@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'plugin_lifecycle_recovery_job.dart';
+import 'plugin_lifecycle_recovery_job_archive.dart';
 
 /// Stable JSON representation used as the input to an archive digest.
 ///
