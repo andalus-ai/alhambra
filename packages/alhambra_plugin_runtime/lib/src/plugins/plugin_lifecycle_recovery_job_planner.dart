@@ -33,6 +33,7 @@ enum PluginRecoveryJobDisposition {
   failedNeedsDecision,
   inconsistent,
   cancelled,
+  expired,
 }
 
 final class PluginRecoveryJobRecoveryReport {
@@ -138,6 +139,8 @@ final class PluginLifecycleRecoveryJobPlanner {
       overall = PluginRecoveryJobDisposition.inconsistent;
     } else if (job.status == PluginRecoveryJobStatus.cancelled) {
       overall = PluginRecoveryJobDisposition.cancelled;
+    } else if (job.status == PluginRecoveryJobStatus.expired) {
+      overall = PluginRecoveryJobDisposition.expired;
     } else if (job.status == PluginRecoveryJobStatus.interrupted ||
         job.status == PluginRecoveryJobStatus.running ||
         job.status == PluginRecoveryJobStatus.cancellationRequested) {

@@ -321,3 +321,43 @@ a running claim into a skipped or completed step, and restart inspection must
 continue to require host review. Cancellation is not rollback, compensation,
 or proof that external side effects were undone. Hosts authorize cancellation
 and provide durable, atomic compare-and-set job storage.
+
+
+## Recovery-job expiration and archival retention
+
+A planned recovery job may be created with an immutable UTC `expiresAt`
+timestamp. Omit it when the host does not want an expiration deadline. Expiry
+is host-controlled: `PluginLifecycleRecoveryJobExpirationController.inspect()`
+is read-only, and `expire()` changes a job only after its deadline has been
+reached and its expected revision still matches.
+
+Only `planned` jobs may expire. Expiration atomically transitions the job to
+`expired`, records `expiredAt`, and marks untouched steps skipped. The
+journaled recovery runner independently refuses to claim a planned job once
+its `expiresAt` has been reached, even if the host has not yet materialized
+the terminal `expired` state. The host can then explicitly expire or replace
+the stale plan.
+
+Running, cancellation-requested, interrupted, failed, partially completed,
+manual-review, completed, and cancelled jobs are never expired by this
+controller. In particular, expiry does not interrupt plugin hooks, compensate
+side effects, or resolve an ambiguous execution. Revision compare-and-set
+arbitrates races with execution claims and cancellation requests: whichever
+valid state transition commits first wins; a stale caller must reload and
+inspect.
+
+There is no timer, scheduler, sweeper, or automatic deletion in the runtime.
+The host supplies the deadline policy, chooses when to inspect and apply
+expiration, and retains audit evidence according to its own requirements.
+
+`PluginLifecycleRecoveryJobArchiver` and
+`PluginLifecycleRecoveryJobArchive` define a persistence-neutral archival
+boundary. The archiver accepts only completed, failed, partially completed, cancelled,
+or expired jobs; planned, running, cancellation-requested, interrupted, and
+manual-review jobs remain operationally visible. It requires the expected
+job revision and writes an immutable snapshot through an idempotent
+`putIfAbsent` operation. It does not delete or mutate the
+operational job. Production archive adapters must reject conflicting snapshots
+for an existing job ID and document their durability and concurrency
+guarantees. Retention, legal holds, access control, and any eventual purge
+remain host responsibilities.
