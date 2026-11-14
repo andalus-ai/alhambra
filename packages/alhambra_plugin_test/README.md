@@ -1,11 +1,9 @@
 # Alhambra Plugin Test Utilities
 
-A small test-only support package for exercising plugins through the real
-Alhambra PluginManager and ExtensionRuntime.
+A test-only support package for exercising plugins through the real Alhambra
+PluginManager and ExtensionRuntime.
 
 ## Add the package
-
-For in-repository development:
 
 ~~~yaml
 dev_dependencies:
@@ -13,51 +11,45 @@ dev_dependencies:
     path: ../alhambra_plugin_test
 ~~~
 
-Import the utilities in tests:
+## Metadata and plugin-set conformance
+
+Use `PluginConformanceSuite` for side-effect-free checks before handing a
+plugin selection to the host:
 
 ~~~dart
-import 'package:alhambra_plugin_test/alhambra_plugin_test.dart';
+const conformance = PluginConformanceSuite();
+conformance.validateMetadata(plugin.metadata).throwIfNotConformant();
+conformance.validatePluginSet(selectedPlugins.map((p) => p.metadata))
+    .throwIfNotConformant();
 ~~~
 
-## Test lifecycle and cleanup
+Checks require non-empty, trimmed plugin IDs, names, versions and capability
+IDs, and reject duplicate capability IDs within one plugin or duplicate
+plugin IDs in a selected set. They deliberately do not impose a SemVer grammar
+on `PluginMetadata.version`; the public contract defines it as a string without
+a formal version parser.
+
+## Opt-in lifecycle round trip
+
+For trusted plugin implementations:
 
 ~~~dart
-final host = AlhambraPluginTestHost();
-final before = host.snapshot();
-
-await host.activate(MyPlugin());
-
-expect(host.isActive('my.plugin'), isTrue);
-expect(host.snapshot().differenceFrom(before)['commands'], 1);
-
-await host.deactivate('my.plugin');
-expect(host.snapshot().hasSameCountsAs(before), isTrue);
+final result = await const PluginConformanceSuite().verifyLifecycle(plugin);
+result.throwIfNotConformant();
 ~~~
 
-The host exposes the real runtime for assertions against specific registries.
-PluginContributionSnapshot captures total registry counts and computes
-before/after differences; it does not claim that a contribution belongs to a
-particular plugin. Use stable contribution IDs and the runtime's owner-scoped
-cleanup behavior for ownership assertions.
+This executes plugin code in a fresh in-process manager and verifies that
+manager active state and aggregate contribution counts return to baseline.
+It is not a sandbox and cannot prove external resources or side effects were
+released.
 
-## Failure scenarios
+## Capability compatibility
 
-Use ordinary plugin fakes to inject failures at lifecycle boundaries:
+The runtime's `PluginCapabilityNegotiator` remains authoritative: major
+versions must match and provider minor versions must meet the requested
+minimum; patch versions do not affect compatibility. Missing or incompatible
+required capabilities block activation; optional requirements produce a
+degraded result. Negotiation does not grant permissions.
 
-- Register one or more contributions, then throw from activate to verify
-  partial registration cleanup.
-- Throw from deactivate to verify that host-owned contributions are still
-  removed and the manager no longer considers the plugin active.
-- Use close() to attempt orderly deactivation of every active plugin. If any
-  deactivation fails, the first failure is rethrown after all active plugins
-  have been attempted.
-
-## Scope and limitations
-
-- This package is a dev_dependency; it is not required by production hosts.
-- It exercises in-process lifecycle behavior. It is not a sandbox and does not
-  isolate plugin code.
-- Snapshots are aggregate registry counts, not per-owner audit records.
-- It does not simulate process crashes, durable storage, cross-process races,
-  or external side-effect recovery. Test those in the relevant adapter/host
-  integration suite.
+Lifecycle conformance does not imply process isolation, durable crash recovery,
+or exactly-once external effects.
