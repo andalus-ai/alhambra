@@ -75,3 +75,37 @@ durable history after flushing accepted journal events.
 - `alhambra_plugin_api`: stable plugin and observability contracts.
 - `alhambra_plugin_runtime`: in-memory composition runtime and observability.
 - `alhambra_lifecycle_file_store`: optional durable JSONL adapter.
+
+## Plugin package integrity and trust
+
+The default `DefaultPluginPackageVerifier` fails closed unless a host injects
+a `PluginPayloadIntegrityVerifier`. Signed packages also require a
+`PluginCryptographicSignatureVerifier`. These interfaces deliberately do not
+bundle cryptographic primitives; select a vetted implementation in the host.
+
+```dart
+final runtime = ExtensionRuntime(
+  pluginPayloadIntegrityVerifier: payloadDigestAdapter,
+  pluginSignatureVerifier: signatureAdapter,
+);
+
+runtime.pluginTrustStore.addTrustedKey(
+  TrustedKey(
+    keyId: 'publisher-key',
+    algorithm: 'ed25519',
+    publicKey: encodedPublicKey,
+    publisherId: 'publisher.example',
+    notBefore: keyValidFrom,
+    notAfter: keyValidUntil,
+  ),
+);
+runtime.pluginTrustStore.addTrustedPublisher('publisher.example');
+```
+
+The runtime shares one trust-store instance with its default package verifier.
+Unsigned packages can be permitted by policy, but still require payload
+integrity verification and remain classified as `unsigned`. A signed package
+is `verified` after digest and signature verification; it is `trusted` only
+when its publisher is explicitly trusted. See
+[Plugin Package Integrity and Trust](../../Docs/PLUGIN_PACKAGE_INTEGRITY_AND_TRUST.md)
+for canonical statement and key lifecycle boundaries.
