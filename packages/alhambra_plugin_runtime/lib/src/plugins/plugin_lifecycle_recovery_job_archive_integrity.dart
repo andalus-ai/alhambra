@@ -65,6 +65,7 @@ enum PluginRecoveryArchiveVerificationDisposition {
   valid,
   missing,
   unsupportedFormat,
+  unsupportedJobSchema,
   invalidDigest,
 }
 
@@ -112,6 +113,14 @@ final class PluginLifecycleRecoveryJobArchiveVerifier {
       return PluginRecoveryArchiveVerificationReport(
         jobId: jobId,
         disposition: PluginRecoveryArchiveVerificationDisposition.unsupportedFormat,
+        expectedDigest: record.integrity.digest,
+        actualDigest: null,
+      );
+    }
+    if (record.job.schemaVersion != PluginLifecycleRecoveryJob.currentSchemaVersion) {
+      return PluginRecoveryArchiveVerificationReport(
+        jobId: jobId,
+        disposition: PluginRecoveryArchiveVerificationDisposition.unsupportedJobSchema,
         expectedDigest: record.integrity.digest,
         actualDigest: null,
       );
