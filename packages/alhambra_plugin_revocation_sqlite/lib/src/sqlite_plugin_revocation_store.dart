@@ -118,12 +118,32 @@ final class SqlitePluginRevocationStore
     _db.execute('PRAGMA user_version = 1');
     }
     if (version < 2) {
-      _db.execute('ALTER TABLE plugin_revocation_outbox ADD COLUMN replay_of_event_id TEXT');
-      _db.execute('ALTER TABLE plugin_revocation_outbox ADD COLUMN replay_generation INTEGER NOT NULL DEFAULT 0');
-      _db.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_revocation_replay_generation ON plugin_revocation_outbox(replay_of_event_id, replay_generation) WHERE replay_generation > 0''');
-      _db.execute('''CREATE TABLE IF NOT EXISTS plugin_revocation_operator_action (action_id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, reason TEXT NOT NULL, approval_reference TEXT NOT NULL, target_event_id TEXT NOT NULL, replay_event_id TEXT NOT NULL UNIQUE, replay_generation INTEGER NOT NULL CHECK (replay_generation >= 1), occurred_at TEXT NOT NULL, FOREIGN KEY(target_event_id) REFERENCES plugin_revocation_outbox(event_id), FOREIGN KEY(replay_event_id) REFERENCES plugin_revocation_outbox(event_id))''');
-      _db.execute('CREATE INDEX IF NOT EXISTS idx_plugin_revocation_operator_target ON plugin_revocation_operator_action(target_event_id, replay_generation)');
-      _db.execute('PRAGMA user_version = 2');
+      _transaction(() {
+        _db.execute('ALTER TABLE plugin_revocation_outbox ADD COLUMN replay_of_event_id TEXT');
+        _db.execute('ALTER TABLE plugin_revocation_outbox ADD COLUMN replay_generation INTEGER NOT NULL DEFAULT 0');
+        _db.execute('''
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_revocation_replay_generation
+          ON plugin_revocation_outbox(replay_of_event_id, replay_generation)
+          WHERE replay_generation > 0
+        ''');
+        _db.execute('''
+          CREATE TABLE IF NOT EXISTS plugin_revocation_operator_action (
+            action_id TEXT PRIMARY KEY,
+            actor_id TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            approval_reference TEXT NOT NULL,
+            target_event_id TEXT NOT NULL REFERENCES plugin_revocation_outbox(event_id),
+            replay_event_id TEXT NOT NULL UNIQUE REFERENCES plugin_revocation_outbox(event_id),
+            replay_generation INTEGER NOT NULL CHECK (replay_generation >= 1),
+            occurred_at TEXT NOT NULL
+          )
+        ''');
+        _db.execute('''
+          CREATE INDEX IF NOT EXISTS idx_plugin_revocation_operator_target
+          ON plugin_revocation_operator_action(target_event_id, replay_generation)
+        ''');
+        _db.execute('PRAGMA user_version = 2');
+      });
     }
   }
 
