@@ -320,6 +320,13 @@ class InMemoryInstalledPluginStore implements FencedTransactionalInstalledPlugin
   }
 
   @override
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  }) async =>
+      _acceptFence(operationId, fencingToken);
+
+  @override
   Future<bool> createIfAbsentFenced(
     InstalledPluginRecord plugin, {
     required String operationId,
