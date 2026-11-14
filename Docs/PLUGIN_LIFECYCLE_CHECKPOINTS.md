@@ -366,7 +366,8 @@ remain host responsibilities.
 ## Recovery archive integrity, restore, and retention governance
 
 Archived jobs carry an integrity envelope containing a format version, digest
-algorithm identifier, and digest of a canonical versioned snapshot. The
+algorithm identifier, and digest of a canonical versioned snapshot. The archive
+timestamp is included in the digest as well as the complete job snapshot. The
 canonical snapshot includes the full recovery job identity, ordered plugin
 steps, checkpoint preconditions, execution IDs, timestamps, sanitized failure
 metadata, cancellation/expiration metadata, and revision. The codec is
@@ -395,8 +396,9 @@ preservation always block purge, even after the nominal retention deadline.
 
 Purge is a separate explicit operation against an archive adapter that
 implements `PluginLifecycleRecoveryJobArchivePurgeStore`. It requires
-host-provided authorization evidence, an expected archive digest, an eligible
-retention decision, and a fresh successful integrity verification. A durable
+host-provided authorization evidence validated by a host authorization adapter,
+an expected archive digest, an eligible retention decision, and a fresh
+successful integrity verification against the same archive adapter being purged. A durable
 purge-intent audit event is written before the adapter's atomic
 delete-if-digest-matches operation. If audit persistence fails, the archive is
 not deleted. The operational job record is never purged by this API.
