@@ -18,7 +18,9 @@ import 'jsonl_sparse_lifecycle_index.dart';
 /// processes writing the same file require an external lock or a different
 /// storage adapter.
 final class JsonlCompositionLifecycleEventStore
-    implements CompositionLifecycleEventStore, CompositionLifecycleStorageMaintenanceProvider {
+    implements
+        CompositionLifecycleEventStore,
+        CompositionLifecycleStorageMaintenanceProvider {
   final File file;
   final CompositionLifecycleEventJsonCodec codec;
 
