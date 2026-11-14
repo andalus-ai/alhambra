@@ -384,7 +384,6 @@ final class PostgresPluginRevocationStore
   }
 
   @override
-  @override
   Future<PluginRevocationReplayResult?> replayDeadLetter(
     PluginRevocationReplayRequest request,
   ) async {
