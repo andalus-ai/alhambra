@@ -267,3 +267,9 @@ abstract interface class FencedTransactionalInstalledPluginStore
     required int fencingToken,
   });
 }
+
+
+/// Recovery journal that atomically enforces fencing tokens on both writes
+/// and compare-and-set claims.
+abstract interface class FencedPluginInstallRecoveryJournal
+    implements PluginInstallRecoveryJournal, FencedPluginInstallJournal {}
