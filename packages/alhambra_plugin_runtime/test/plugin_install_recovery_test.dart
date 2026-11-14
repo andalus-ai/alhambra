@@ -9,6 +9,11 @@ class _Journal implements FencedPluginInstallRecoveryJournal {
   final Map<String, PluginInstallJournalEntry> entries = {};
   final Map<String, int> _highestFence = {};
 
+  void _assertFence(PluginInstallStaging staging) {
+    final highest = _highestFence[staging.operationId] ?? 0;
+    if (staging.fencingToken < highest) throw StateError('Stale filesystem fencing token.');
+  }
+
   @override
   Future<bool> advanceFence({
     required String operationId,
@@ -87,12 +92,16 @@ class _FileSystem implements FencedPluginInstallFileSystem {
     required String pluginId,
     required String version,
     int fencingToken = 0,
-  }) async => PluginInstallStaging(
+  }) async {
+    final highest = _highestFence[operationId] ?? 0;
+    if (fencingToken < highest) throw StateError('Stale filesystem fencing token.');
+    return PluginInstallStaging(
         operationId: operationId,
         pluginId: pluginId,
         opaqueHandle: 'stage-$operationId',
         fencingToken: fencingToken,
       );
+  }
 
   @override
   Future<void> createDirectory(
@@ -143,6 +152,7 @@ class _FileSystem implements FencedPluginInstallFileSystem {
 
   @override
   Future<void> discardStaging(PluginInstallStaging staging) async {
+    _assertFence(staging);
     calls.add('discard');
     stagingExists = false;
   }
