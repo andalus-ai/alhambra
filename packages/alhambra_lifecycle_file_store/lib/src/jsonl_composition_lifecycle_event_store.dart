@@ -56,6 +56,7 @@ final class JsonlCompositionLifecycleEventStore
 
   @override
   Future<CompositionLifecycleStorageHealth> inspectHealth() async {
+    await _writeTail;
     try {
       final exists = await file.exists();
       final primaryBytes = exists ? await file.length() : 0;
