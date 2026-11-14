@@ -289,6 +289,9 @@ class InMemoryTransactionalPluginRevocationStore
     if (source == null || source.state != PluginRevocationOutboxState.deadLetter) {
       return null;
     }
+    if (source.event.scopeId != request.scopeId) {
+      throw StateError('Dead-letter event is outside the requested scope.');
+    }
     final generation = _operatorActions.values
         .where((action) => action.targetEventId == request.targetEventId)
         .fold<int>(0, (value, action) => value > action.replayGeneration ? value : action.replayGeneration) + 1;
