@@ -387,6 +387,7 @@ final class PostgresPluginRevocationStore
   Future<PluginRevocationReplayResult?> replayDeadLetter(PluginRevocationReplayRequest request) async {
     _assertOpen();
     return _pool.runTx((tx) async {
+      await tx.execute(r'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', parameters: [request.actionId]);
       final priorRows = await tx.execute(r'SELECT * FROM alhambra_plugin_revocation_operator_action WHERE action_id = $1', parameters: [request.actionId]);
       if (priorRows.isNotEmpty) {
         final row = priorRows.first.toColumnMap();
