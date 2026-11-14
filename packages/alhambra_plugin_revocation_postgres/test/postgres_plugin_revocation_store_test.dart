@@ -35,9 +35,10 @@ void main() {
   test('migration applies schema v4 scope ownership', () async {
     final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
     await store.migrate();
-    addTearDown(store.close);
+    final admin = Pool.withUrl(databaseUrl!);
+    addTearDown(() async { await store.close(); await admin.close(); });
 
-    final rows = await Pool.withUrl(databaseUrl!).execute(
+    final rows = await admin.execute(
       'SELECT MAX(version) AS version FROM alhambra_plugin_revocation_schema',
     );
     expect(rows.first.toColumnMap()['version'], 4);
@@ -47,9 +48,9 @@ void main() {
       'alhambra_plugin_revocation_journal',
       'alhambra_plugin_revocation_outbox',
     ]) {
-      final columns = await Pool.withUrl(databaseUrl!).execute(
-        'SELECT column_name FROM information_schema.columns WHERE table_name = @table AND column_name = @column',
-        substitutionValues: {'table': table, 'column': 'scope_id'},
+      final columns = await admin.execute(
+        r'SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND column_name = $2',
+        parameters: [table, 'scope_id'],
       );
       expect(columns, isNotEmpty);
     }
