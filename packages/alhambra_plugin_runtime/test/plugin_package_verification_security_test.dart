@@ -183,6 +183,7 @@ void main() {
             keyId: 'key-1',
             algorithm: 'ed25519',
             publicKey: 'public-key',
+            publisherId: 'publisher.example',
           )),
         integrityVerifier: const _Integrity(),
         signatureVerifier: _SignatureVerifier(valid: false),
