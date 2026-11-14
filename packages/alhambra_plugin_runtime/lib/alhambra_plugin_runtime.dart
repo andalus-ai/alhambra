@@ -149,3 +149,5 @@ export 'src/plugins/plugin_lifecycle_recovery_batch.dart';
 export 'src/packaging/transactional_plugin_installer.dart';
 
 export 'src/plugins/plugin_lifecycle_recovery_batch_validation.dart';
+export 'src/packaging/plugin_install_recovery_planner.dart';
+export 'src/packaging/plugin_install_recovery_executor.dart';
