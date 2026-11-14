@@ -4,7 +4,7 @@ PostgreSQL implementation of Alhambra plugin revocation execution, journal and a
 
 ## Why a separate package?
 
-The core `alhambra_plugin_runtime` package defines the contracts and remains database-neutral. This optional adapter provides multi-instance persistence using PostgreSQL transactions, uniqueness constraints, and row-level worker claims.
+The core `alhambra_plugin_runtime` package defines the contracts and remains database-neutral. This optional adapter provides multi-instance persistence using PostgreSQL transactions, uniqueness constraints, and row-level worker claims. It also implements the read-only `PluginRevocationOutboxInspectionStore` contract via `readAllOutbox()`; inspection does not claim or mutate messages.
 
 ## Bootstrap
 
