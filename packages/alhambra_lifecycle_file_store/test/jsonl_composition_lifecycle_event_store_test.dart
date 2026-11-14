@@ -357,7 +357,7 @@ void main() {
     await store.append(_event('new', DateTime.utc(2026, 1, 2)));
 
     final result = await store.maintain(
-      const CompositionLifecycleStorageMaintenanceRequest(
+      CompositionLifecycleStorageMaintenanceRequest(
         retainFrom: DateTime.utc(2026, 1, 2),
         checkpoint: true,
       ),
