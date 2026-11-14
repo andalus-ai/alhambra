@@ -444,29 +444,6 @@ class PluginLifecycleRecoveryRunner {
               ? request.compiledPlugins[id]
               : null,
         );
-        if (journal != null) {
-          final currentJob = journal!;
-          final now = _clock().toUtc();
-          final updatedSteps = currentJob.steps.toList();
-          updatedSteps[index] = updatedSteps[index].copyWith(
-            status: PluginRecoveryJobStepStatus.completed,
-            completedAt: now,
-          );
-          final updatedJob = currentJob.next(
-            status: PluginRecoveryJobStatus.running,
-            at: now,
-            steps: updatedSteps,
-          );
-          if (!await jobStore!.compareAndSet(
-            jobId: currentJob.jobId,
-            expectedRevision: currentJob.revision,
-            replacement: updatedJob,
-          )) {
-            throw StateError('Plugin "$id" completed but its job outcome could not be persisted; inspect before retrying.');
-          }
-          journal = updatedJob;
-        }
-        completed.add(id);
       } catch (error, stackTrace) {
         if (journal != null) {
           final currentJob = journal!;
@@ -510,6 +487,44 @@ class PluginLifecycleRecoveryRunner {
           stackTrace: stackTrace,
         );
       }
+
+      // Deliberately outside the execution catch: if the plugin side effect
+      // succeeded but this write fails, retain the running claim for inspection.
+      if (journal != null) {
+        final currentJob = journal!;
+        final now = _clock().toUtc();
+        final updatedSteps = currentJob.steps.toList();
+        updatedSteps[index] = updatedSteps[index].copyWith(
+          status: PluginRecoveryJobStepStatus.completed,
+          completedAt: now,
+        );
+        final updatedJob = currentJob.next(
+          status: PluginRecoveryJobStatus.running,
+          at: now,
+          steps: updatedSteps,
+        );
+        try {
+          if (!await jobStore!.compareAndSet(
+            jobId: currentJob.jobId,
+            expectedRevision: currentJob.revision,
+            replacement: updatedJob,
+          )) {
+            throw StateError('Plugin "$id" completed but its job outcome could not be persisted; inspect before retrying.');
+          }
+          journal = updatedJob;
+        } catch (error, stackTrace) {
+          return PluginLifecycleRecoveryBatchReport(
+            succeeded: false,
+            orderedPluginIds: orderedIds,
+            completedPluginIds: completed,
+            skippedPluginIds: orderedIds.skip(index + 1),
+            failedPluginId: id,
+            error: error,
+            stackTrace: stackTrace,
+          );
+        }
+      }
+      completed.add(id);
     }
 
     if (journal != null) {
