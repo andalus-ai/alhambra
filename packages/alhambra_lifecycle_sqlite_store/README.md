@@ -66,6 +66,24 @@ database when `close()` is called.
 Run the shared behavioral contract and adapter-specific tests with
 `dart test` from this package.
 
+## Retention and compaction
+
+The direct SQLite adapter and isolate worker expose `compact`, matching the
+JSONL adapter's retention policy:
+
+- `retainFrom` is an inclusive UTC boundary; older events are deleted.
+- `maxEvents` keeps the newest N events ordered by timestamp and event ID.
+- When both are supplied, the time filter is applied first, then the count cap.
+- At least one policy is required and `maxEvents` must be greater than zero.
+- Event deletion and owner-association cleanup run in one transaction; the
+  method returns the number of deleted events.
+
+SQLite compaction deletes rows but does not automatically run `VACUUM` or
+truncate the WAL. This avoids surprising long-running maintenance work during
+retention. Use the explicit WAL checkpoint API for checkpointing; schedule
+`VACUUM` separately during a controlled maintenance window if reclaiming the
+main database file's disk space is required.
+
 ## Performance checks
 
 Run the local smoke benchmark from this package:
