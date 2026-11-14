@@ -77,7 +77,7 @@ class _Preflight implements PluginInstallPreflight {
   }
 }
 
-class _FileSystem implements PluginInstallFileSystem {
+class _FileSystem implements FencedPluginInstallFileSystem {
   final List<String> calls = [];
   final List<String> files = [];
   bool failPromote = false;
@@ -87,12 +87,14 @@ class _FileSystem implements PluginInstallFileSystem {
     required String operationId,
     required String pluginId,
     required String version,
+    int fencingToken = 0,
   }) async {
     calls.add('createStaging');
     return PluginInstallStaging(
       operationId: operationId,
       pluginId: pluginId,
       opaqueHandle: 'stage-$operationId',
+      fencingToken: fencingToken,
     );
   }
 
@@ -169,11 +171,18 @@ class _FileSystem implements PluginInstallFileSystem {
       );
 }
 
-class _Journal implements PluginInstallJournal {
+class _Journal implements FencedPluginInstallJournal {
   final List<PluginInstallJournalEntry> entries = [];
+  final Map<String, int> _highestFence = {};
 
   @override
   Future<void> write(PluginInstallJournalEntry entry) async {
+    final token = entry.fencingToken;
+    if (token != null) {
+      final highest = _highestFence[entry.operationId] ?? 0;
+      if (token < highest) throw StateError('Stale install fencing token.');
+      _highestFence[entry.operationId] = token;
+    }
     entries.add(entry);
   }
 
