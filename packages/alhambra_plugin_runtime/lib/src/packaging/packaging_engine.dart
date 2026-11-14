@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 
 /// In-memory trust store for public keys and publisher IDs.
@@ -133,7 +131,7 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
       return PackageVerificationFailed([
         VerificationIssue(
           code: 'INTEGRITY_CHECK_FAILED',
-          message: 'Payload digest computation failed: $error',
+          message: 'Payload digest computation failed.',
         ),
       ]);
     }
@@ -185,7 +183,7 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
         ),
       ]);
     }
-    if (key.notAfter != null && !now.isBefore(key.notAfter!)) {
+    if (key.notBefore != null &&\n        key.notAfter != null &&\n        !key.notAfter!.isAfter(key.notBefore!)) {\n      return PackageVerificationFailed(const [\n        VerificationIssue(\n          code: 'INVALID_SIGNING_KEY_VALIDITY',\n          message: 'Signing key validity interval is invalid.',\n        ),\n      ]);\n    }\n    if (key.notAfter != null && !now.isBefore(key.notAfter!)) {
       return PackageVerificationFailed(const [
         VerificationIssue(
           code: 'SIGNING_KEY_EXPIRED',
@@ -193,7 +191,7 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
         ),
       ]);
     }
-    if (publisher != null && key.publisherId != publisher.id) {
+    if ((publisher != null || key.publisherId != null) &&\n        key.publisherId != publisher?.id) {
       return PackageVerificationFailed(const [
         VerificationIssue(
           code: 'SIGNING_KEY_PUBLISHER_MISMATCH',
@@ -223,7 +221,7 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
       return PackageVerificationFailed([
         VerificationIssue(
           code: 'SIGNATURE_CHECK_FAILED',
-          message: 'Cryptographic signature verification failed: $error',
+          message: 'Cryptographic signature verification failed.',
         ),
       ]);
     }
