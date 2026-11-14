@@ -13,6 +13,28 @@ final class _OutboxInspectionStore
     reads++;
     return List.unmodifiable(messages);
   }
+  test('fails closed when the access audit sink is unavailable', () async {
+    final outbox = _OutboxInspectionStore([]);
+    final actionStore = _OperatorActionStore([]);
+    final service = PluginRevocationAdminOperationsService(
+      operations: PluginRevocationOperationsService(
+        journalStore: InMemoryPluginRevocationJournalStore(),
+        outboxStore: outbox,
+      ),
+      operatorActionStore: actionStore,
+      scopeResolver: _ScopeResolver(),
+      authorizer: _Authorizer(true),
+      accessAuditStore: _FailingAccessAuditStore(),
+    );
+
+    await expectLater(
+      service.inspect(principal: principal, scopeId: 'tenant-blue'),
+      throwsStateError,
+    );
+    expect(outbox.reads, 0);
+    expect(actionStore.reads, 0);
+  });
+
 }
 
 final class _OperatorActionStore
@@ -107,6 +129,15 @@ PluginRevocationOperatorAction _action({
       replayGeneration: 1,
       occurredAt: DateTime.utc(2026, 11, 14, 11),
     );
+
+
+final class _FailingAccessAuditStore
+    implements PluginRevocationOperationsAccessAuditStore {
+  @override
+  Future<void> append(PluginRevocationOperationsAccessAudit audit) async {
+    throw StateError('audit sink unavailable');
+  }
+}
 
 void main() {
   final principal =
