@@ -48,7 +48,7 @@ suite.validateDiscoveryGraph(discovered.map((item) => item.manifest))
 The suite checks manifest identity and version fields, host API bounds,
 duplicate/self dependencies, capability and platform declarations, lockfile
 key/ID consistency, and package header consistency. Discovery validation
-delegates to `PluginLoader.resolveDependencyOrder`, covering the current
+delegates to `PluginDependencyResolver.resolve`, covering the current
 required-ID-only dependency graph. It does not implement resolution of the
 richer version-constrained package dependency model.
 
