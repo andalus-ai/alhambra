@@ -1,6 +1,7 @@
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 
 import 'plugin_dependency_resolver.dart';
+import 'plugin_lifecycle_checkpoint.dart';
 import 'plugin_loader.dart';
 import 'plugin_manager.dart';
 import 'plugin_runtime_health.dart';
@@ -68,14 +69,26 @@ class PluginShutdownCoordinator {
   final PluginManager manager;
   final PluginDependencyResolver dependencyResolver;
   final PluginRuntimeHealthRegistry? healthRegistry;
+  final PluginLifecycleCheckpointStore? checkpointStore;
+  final PluginLifecycleOperationIdFactory? operationIdFactory;
 
   const PluginShutdownCoordinator({
     required this.manager,
     this.dependencyResolver = const PluginDependencyResolver(),
     this.healthRegistry,
+    this.checkpointStore,
+    this.operationIdFactory,
   });
 
   Future<PluginShutdownReport> shutdown({
+    required Iterable<DiscoveredPlugin> discoveredPlugins,
+  }) {
+    return manager.runExclusiveLifecycleBatch(
+      () => _shutdown(discoveredPlugins: discoveredPlugins),
+    );
+  }
+
+  Future<PluginShutdownReport> _shutdown({
     required Iterable<DiscoveredPlugin> discoveredPlugins,
   }) async {
     late final List<DiscoveredPlugin> shutdownPlan;
@@ -124,6 +137,34 @@ class PluginShutdownCoordinator {
     final attempted = <String>[];
     final deactivated = <String>[];
     final failures = <PluginShutdownFailure>[];
+    final checkpointWriter = checkpointStore == null
+        ? null
+        : PluginLifecycleCheckpointWriter(
+            store: checkpointStore!,
+            operationId: operationIdFactory?.call() ??
+                'shutdown-${DateTime.now().microsecondsSinceEpoch}',
+          );
+
+    // Record the intended shutdown set before the first deactivation.
+    try {
+      for (final item in shutdownPlan) {
+        final id = item.manifest.id.trim();
+        if (!activeById.containsKey(id)) continue;
+        await checkpointWriter?.record(
+          pluginId: id,
+          operation: PluginLifecycleOperation.shutdown,
+          state: PluginLifecycleCheckpointState.planned,
+          dependencyIds: item.manifest.dependencies,
+        );
+      }
+    } catch (error, stackTrace) {
+      return PluginShutdownReport(
+        succeeded: false,
+        untouchedActivePluginIds: List<String>.unmodifiable(untouchedActiveIds),
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
 
     for (final item in shutdownPlan.reversed) {
       final id = item.manifest.id.trim();
@@ -145,9 +186,21 @@ class PluginShutdownCoordinator {
         );
       }
       try {
+        await checkpointWriter?.record(
+          pluginId: id,
+          operation: PluginLifecycleOperation.shutdown,
+          state: PluginLifecycleCheckpointState.stopping,
+          dependencyIds: item.manifest.dependencies,
+        );
         // Use the plugin's original metadata ID because PluginManager keys
         // lifecycle state by that exact value.
         await manager.deactivate(plugin.metadata.id);
+        await checkpointWriter?.record(
+          pluginId: id,
+          operation: PluginLifecycleOperation.shutdown,
+          state: PluginLifecycleCheckpointState.stopped,
+          dependencyIds: item.manifest.dependencies,
+        );
         health?.transition(
           pluginId: id,
           next: PluginRuntimeState.stopped,
@@ -155,6 +208,19 @@ class PluginShutdownCoordinator {
         );
         deactivated.add(id);
       } catch (error, stackTrace) {
+        try {
+          await checkpointWriter?.record(
+            pluginId: id,
+            operation: PluginLifecycleOperation.shutdown,
+            state: PluginLifecycleCheckpointState.failed,
+            dependencyIds: item.manifest.dependencies,
+            failureCode: error.runtimeType.toString(),
+            failureSummary: 'Shutdown operation failed',
+          );
+        } catch (_) {
+          // Preserve the shutdown/checkpoint failure. An in-flight checkpoint
+          // remains a signal for host recovery.
+        }
         health?.transition(
           pluginId: id,
           next: PluginRuntimeState.failed,

@@ -1,6 +1,7 @@
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 
 import 'plugin_dependency_resolver.dart';
+import 'plugin_lifecycle_checkpoint.dart';
 import 'plugin_loader.dart';
 import 'plugin_manager.dart';
 import 'plugin_runtime_health.dart';
@@ -64,14 +65,30 @@ class PluginStartupCoordinator {
   final PluginManager manager;
   final PluginDependencyResolver dependencyResolver;
   final PluginRuntimeHealthRegistry? healthRegistry;
+  final PluginLifecycleCheckpointStore? checkpointStore;
+  final PluginLifecycleOperationIdFactory? operationIdFactory;
 
   const PluginStartupCoordinator({
     required this.manager,
     this.dependencyResolver = const PluginDependencyResolver(),
     this.healthRegistry,
+    this.checkpointStore,
+    this.operationIdFactory,
   });
 
   Future<PluginStartupBatchReport> start({
+    required Iterable<DiscoveredPlugin> discoveredPlugins,
+    required Map<String, AlhambraPlugin> compiledPlugins,
+  }) {
+    return manager.runExclusiveLifecycleBatch(
+      () => _start(
+        discoveredPlugins: discoveredPlugins,
+        compiledPlugins: compiledPlugins,
+      ),
+    );
+  }
+
+  Future<PluginStartupBatchReport> _start({
     required Iterable<DiscoveredPlugin> discoveredPlugins,
     required Map<String, AlhambraPlugin> compiledPlugins,
   }) async {
@@ -158,6 +175,33 @@ class PluginStartupCoordinator {
     }
 
     final activated = <AlhambraPlugin>[];
+    final checkpointWriter = checkpointStore == null
+        ? null
+        : PluginLifecycleCheckpointWriter(
+            store: checkpointStore!,
+            operationId: operationIdFactory?.call() ??
+                'startup-${DateTime.now().microsecondsSinceEpoch}',
+          );
+
+    // Persist the complete plan before invoking plugin code.
+    try {
+      for (final item in plan) {
+        final id = item.manifest.id.trim();
+        if (previouslyActiveIds.contains(id)) continue;
+        await checkpointWriter?.record(
+          pluginId: id,
+          operation: PluginLifecycleOperation.startup,
+          state: PluginLifecycleCheckpointState.planned,
+          dependencyIds: item.manifest.dependencies,
+        );
+      }
+    } catch (error, stackTrace) {
+      return PluginStartupBatchReport(
+        succeeded: false,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
 
     for (final item in plan) {
       final id = item.manifest.id.trim();
@@ -165,6 +209,12 @@ class PluginStartupCoordinator {
 
       final plugin = pluginsById[id]!;
       try {
+        await checkpointWriter?.record(
+          pluginId: id,
+          operation: PluginLifecycleOperation.startup,
+          state: PluginLifecycleCheckpointState.starting,
+          dependencyIds: item.manifest.dependencies,
+        );
         health?.transition(
           pluginId: id,
           next: PluginRuntimeState.starting,
@@ -172,12 +222,31 @@ class PluginStartupCoordinator {
         );
         await manager.activate(plugin);
         activated.add(plugin);
+        await checkpointWriter?.record(
+          pluginId: id,
+          operation: PluginLifecycleOperation.startup,
+          state: PluginLifecycleCheckpointState.active,
+          dependencyIds: item.manifest.dependencies,
+        );
         health?.transition(
           pluginId: id,
           next: PluginRuntimeState.active,
           reason: 'Plugin activation completed',
         );
       } catch (error, stackTrace) {
+        try {
+          await checkpointWriter?.record(
+            pluginId: id,
+            operation: PluginLifecycleOperation.startup,
+            state: PluginLifecycleCheckpointState.failed,
+            dependencyIds: item.manifest.dependencies,
+            failureCode: error.runtimeType.toString(),
+            failureSummary: 'Startup operation failed',
+          );
+        } catch (_) {
+          // Keep the original failure; the last durable in-flight state
+          // remains a recovery signal.
+        }
         health?.transition(
           pluginId: id,
           next: PluginRuntimeState.failed,
@@ -189,12 +258,27 @@ class PluginStartupCoordinator {
         for (final started in activated.reversed) {
           final startedId = started.metadata.id.trim();
           try {
+            try {
+              await checkpointWriter?.record(
+                pluginId: startedId,
+                operation: PluginLifecycleOperation.startup,
+                state: PluginLifecycleCheckpointState.rollbackPending,
+              );
+            } catch (_) {
+              // Compensation must still run if the checkpoint backend fails.
+              // The last durable state remains available for host recovery.
+            }
             health?.transition(
               pluginId: startedId,
               next: PluginRuntimeState.stopping,
               reason: 'Startup rollback started',
             );
             await manager.deactivate(startedId);
+            await checkpointWriter?.record(
+              pluginId: startedId,
+              operation: PluginLifecycleOperation.startup,
+              state: PluginLifecycleCheckpointState.stopped,
+            );
             health?.transition(
               pluginId: startedId,
               next: PluginRuntimeState.stopped,
@@ -202,6 +286,17 @@ class PluginStartupCoordinator {
             );
             rolledBack.add(startedId);
           } catch (rollbackError, rollbackStackTrace) {
+            try {
+              await checkpointWriter?.record(
+                pluginId: startedId,
+                operation: PluginLifecycleOperation.startup,
+                state: PluginLifecycleCheckpointState.rollbackFailed,
+                failureCode: rollbackError.runtimeType.toString(),
+                failureSummary: 'Startup rollback failed',
+              );
+            } catch (_) {
+              // The last durable rollbackPending state requires recovery.
+            }
             final snapshot = health?.snapshotOf(startedId);
             if (snapshot?.state == PluginRuntimeState.stopping) {
               health?.transition(

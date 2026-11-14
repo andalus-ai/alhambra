@@ -180,6 +180,34 @@ void main() {
       expect(events, ['activate:core', 'deactivate:core']);
     });
 
+    test('projects successful and failed shutdown states', () async {
+      final events = <String>[];
+      final manager = PluginManager();
+      final registry = PluginRuntimeHealthRegistry();
+      final core = _RecordingPlugin('core', events);
+      final fragile = _RecordingPlugin('fragile', events, failDeactivation: true);
+      await manager.activate(core);
+      await manager.activate(fragile);
+
+      final report = await PluginShutdownCoordinator(
+        manager: manager,
+        healthRegistry: registry,
+      ).shutdown(
+        discoveredPlugins: [
+          _discovered('core'),
+          _discovered('fragile', dependencies: ['core']),
+        ],
+      );
+
+      expect(report.succeeded, isFalse);
+      expect(registry.snapshotOf('fragile')!.state, PluginRuntimeState.failed);
+      expect(registry.snapshotOf('core')!.state, PluginRuntimeState.stopped);
+      expect(registry.history.where((e) => e.pluginId == 'fragile').map((e) => e.current), [
+        PluginRuntimeState.stopping,
+        PluginRuntimeState.failed,
+      ]);
+    });
+
     test('returns immutable report collections', () async {
       final events = <String>[];
       final manager = PluginManager();

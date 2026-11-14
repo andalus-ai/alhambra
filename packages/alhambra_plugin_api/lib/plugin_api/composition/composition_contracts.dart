@@ -193,7 +193,14 @@ final class CompositionFailure extends CompositionResult {
   const CompositionFailure({required this.diagnostics});
 }
 
-enum CompositionOwnerState {\n  active,\n  deactivating,\n  inactive,\n  failed,\n}\n\nenum DeactivationStrategy {
+enum CompositionOwnerState {
+  active,
+  deactivating,
+  inactive,
+  failed,
+}
+
+enum DeactivationStrategy {
   reject,
   cascade,
   degrade,
@@ -237,7 +244,13 @@ enum CompositionLifecycleStatus {
 ///
 /// The event model deliberately contains primitive identifiers and error
 /// summaries only; it does not expose runtime internals or telemetry vendors.
+int _compositionLifecycleEventSequence = 0;
+
+String _newCompositionLifecycleEventId(DateTime timestamp) =>
+    'evt-${timestamp.toUtc().microsecondsSinceEpoch}-${++_compositionLifecycleEventSequence}';
+
 class CompositionLifecycleEvent {
+  final String eventId;
   final String correlationId;
   final CompositionLifecycleOperation operation;
   final CompositionLifecycleStatus status;
@@ -249,6 +262,7 @@ class CompositionLifecycleEvent {
   final String? errorMessage;
 
   CompositionLifecycleEvent({
+    String? eventId,
     required this.correlationId,
     required this.operation,
     required this.status,
@@ -258,7 +272,8 @@ class CompositionLifecycleEvent {
     this.duration,
     this.errorType,
     this.errorMessage,
-  })  : nodeIds = List.unmodifiable(nodeIds),
+  })  : eventId = eventId ?? _newCompositionLifecycleEventId(timestamp),
+        nodeIds = List.unmodifiable(nodeIds),
         ownerIds = List.unmodifiable(ownerIds);
 }
 

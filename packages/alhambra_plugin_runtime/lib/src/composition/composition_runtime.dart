@@ -3,9 +3,11 @@ import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'composition_graph.dart';
 import 'composition_plan.dart';
 import 'composition_transaction.dart';
+import 'composition_lifecycle_observability.dart';
 
-abstract interface class CompositionRuntime {
+abstract interface class CompositionRuntime implements CompositionLifecycleObservability {
   CompositionGraph get graph;
+  List<CompositionLifecycleEvent> get lifecycleEvents;
   Map<String, CompositionOwnerState> get ownerStates;
   CompositionOwnerState? ownerState(String ownerId);
   CompositionTransaction beginTransaction({
@@ -15,6 +17,7 @@ abstract interface class CompositionRuntime {
     CompositionLifecycleEventSink? onLifecycleEvent,
   });
   void deactivateOwner(String ownerId, [DeactivationStrategy strategy]);
+  void recoverOwner(String ownerId);
 }
 
 class DefaultCompositionRuntime implements CompositionRuntime {
@@ -23,13 +26,85 @@ class DefaultCompositionRuntime implements CompositionRuntime {
   final Map<String, CompositionLifecycle> _ownerLifecycles = {};
   final Map<String, CompositionOwnerState> _ownerStates = {};
   final CompositionLifecycleEventSink? onLifecycleEvent;
+  final int maxLifecycleEvents;
+  final int maxLifecycleEventSubscribers;
+  final int maxPendingLifecycleEventsPerSubscriber;
+  late final CompositionLifecycleObservabilityRuntime _observability =
+      CompositionLifecycleObservabilityRuntime(
+    ownerStatesProvider: () => _ownerStates,
+    maxHistoryEvents: maxLifecycleEvents,
+    maxSubscribers: maxLifecycleEventSubscribers,
+    maxPendingEventsPerSubscriber: maxPendingLifecycleEventsPerSubscriber,
+  );
   int _nextTransactionSequence = 0;
   bool _deactivationInProgress = false;
 
-  DefaultCompositionRuntime({this.onOwnerDeactivated, this.onLifecycleEvent});
+  DefaultCompositionRuntime({
+    this.onOwnerDeactivated,
+    this.onLifecycleEvent,
+    this.maxLifecycleEvents = 1000,
+    this.maxLifecycleEventSubscribers = 64,
+    this.maxPendingLifecycleEventsPerSubscriber = 128,
+  })  : assert(maxLifecycleEvents > 0),
+        assert(maxLifecycleEventSubscribers > 0),
+        assert(maxPendingLifecycleEventsPerSubscriber > 0);
 
   @override
   CompositionGraph get graph => _liveGraph;
+
+  /// Immutable, bounded in-memory history of lifecycle events.
+  @override
+  List<CompositionLifecycleEvent> get lifecycleEvents =>
+      _observability.lifecycleEvents;
+
+  @override
+  int get lifecycleEventSubscriberCount =>
+      _observability.lifecycleEventSubscriberCount;
+
+  @override
+  int get droppedLifecycleEventCount =>
+      _observability.droppedLifecycleEventCount;
+
+  @override
+  CompositionLifecycleEventSubscription subscribeLifecycleEvents(
+    CompositionLifecycleEventListener listener,
+  ) => _observability.subscribeLifecycleEvents(listener);
+
+  @override
+  List<CompositionLifecycleEvent> queryLifecycleEvents({
+    String? correlationId,
+    String? ownerId,
+    CompositionLifecycleOperation? operation,
+    CompositionLifecycleStatus? status,
+    DateTime? from,
+    DateTime? to,
+    DateTime? before,
+    int limit = 100,
+  }) => _observability.queryLifecycleEvents(
+    correlationId: correlationId,
+    ownerId: ownerId,
+    operation: operation,
+    status: status,
+    from: from,
+    to: to,
+    before: before,
+    limit: limit,
+  );
+
+  @override
+  List<CompositionLifecycleEvent> timelineForCorrelation(
+    String correlationId, {DateTime? from, DateTime? to, int limit = 100}
+  ) => _observability.timelineForCorrelation(
+    correlationId, from: from, to: to, limit: limit,
+  );
+
+  @override
+  CompositionLifecycleOwnerSummary? ownerLifecycleSummary(String ownerId) =>
+      _observability.ownerLifecycleSummary(ownerId);
+
+  @override
+  List<CompositionLifecycleOwnerSummary> get ownerLifecycleSummaries =>
+      _observability.ownerLifecycleSummaries;
 
   @override
   Map<String, CompositionOwnerState> get ownerStates =>
@@ -80,9 +155,86 @@ class DefaultCompositionRuntime implements CompositionRuntime {
       },
       lifecycle: lifecycle,
       correlationId: correlationId ?? 'composition-${++_nextTransactionSequence}',
-      onLifecycleEvent: onLifecycleEvent ?? this.onLifecycleEvent,
+      onLifecycleEvent: (event) => _recordLifecycleEvent(
+        event,
+        onLifecycleEvent ?? this.onLifecycleEvent,
+      ),
     );
     return transaction;
+  }
+
+  /// Re-establishes a failed owner's contributions using its registered
+  /// lifecycle. Recovery is explicit: failed owners remain unavailable until
+  /// both preparation and activation complete successfully.
+  @override
+  void recoverOwner(String ownerId) {
+    if (_deactivationInProgress) {
+      throw StateError('A composition owner operation is already in progress.');
+    }
+    if (_ownerStates[ownerId] != CompositionOwnerState.failed) {
+      throw StateError(
+        'Cannot recover owner "$ownerId" from state '
+        '"${_ownerStates[ownerId]?.name ?? 'unknown'}".',
+      );
+    }
+
+    final ownedNodes = _liveGraph.nodes.values
+        .where((node) => node.ownerId == ownerId)
+        .toList(growable: false);
+    if (ownedNodes.isEmpty) {
+      throw StateError('Cannot recover owner "$ownerId": no contributions are registered.');
+    }
+    final lifecycle = _ownerLifecycles[ownerId];
+    if (lifecycle == null) {
+      throw StateError(
+        'Cannot recover owner "$ownerId": no lifecycle is registered.',
+      );
+    }
+
+    final diagnostics = _liveGraph.validate();
+    if (diagnostics.isNotEmpty) {
+      throw StateError(
+        'Cannot recover owner "$ownerId": composition graph is invalid: '
+        '${diagnostics.map((diagnostic) => diagnostic.message).join('; ')}',
+      );
+    }
+
+    final orderedNodes = _liveGraph.topologicalSort()
+        .where((node) => node.ownerId == ownerId)
+        .toList(growable: false);
+    final correlationId =
+        'composition-recovery-${++_nextTransactionSequence}';
+    _deactivationInProgress = true;
+    try {
+      _runLifecycleHook(
+        correlationId,
+        CompositionLifecycleOperation.prepare,
+        orderedNodes,
+        () => lifecycle.prepare(orderedNodes),
+      );
+      _runLifecycleHook(
+        correlationId,
+        CompositionLifecycleOperation.activate,
+        orderedNodes,
+        () => lifecycle.activate(orderedNodes),
+      );
+      _ownerStates[ownerId] = CompositionOwnerState.active;
+    } catch (error, stackTrace) {
+      try {
+        _runLifecycleHook(
+          correlationId,
+          CompositionLifecycleOperation.compensate,
+          orderedNodes,
+          () => lifecycle.compensate(orderedNodes, error, stackTrace),
+        );
+      } catch (_) {
+        // Keep the original recovery error and leave the owner failed.
+      }
+      _ownerStates[ownerId] = CompositionOwnerState.failed;
+      rethrow;
+    } finally {
+      _deactivationInProgress = false;
+    }
   }
 
   /// Deactivates every composition node contributed by [ownerId].
@@ -295,6 +447,14 @@ class DefaultCompositionRuntime implements CompositionRuntime {
     CompositionLifecycleEventSink? sink,
     CompositionLifecycleEvent event,
   ) {
+    _recordLifecycleEvent(event, sink);
+  }
+
+  void _recordLifecycleEvent(
+    CompositionLifecycleEvent event,
+    CompositionLifecycleEventSink? sink,
+  ) {
+    _observability.record(event);
     if (sink == null) return;
     try {
       sink(event);
