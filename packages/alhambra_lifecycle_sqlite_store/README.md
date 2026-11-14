@@ -71,6 +71,31 @@ database when `close()` is called.
 Run the shared behavioral contract and adapter-specific tests with
 `dart test` from this package.
 
+## Recovery and operations
+
+- Place the database in an application-private directory and monitor free
+  space for the database, its `-wal` file, and temporary maintenance overhead.
+- On a reported append/transaction failure, treat the operation as failed:
+  SQLite rolls back the active transaction, but the host should still report
+  the error and avoid acknowledging the event as durably accepted.
+- After an unexpected process exit, reopen the database normally. WAL recovery
+  is performed by SQLite; do not delete `-wal` or `-shm` files manually.
+- Before attempting repair on a database that reports corruption, make a
+  byte-for-byte backup of the database and any accompanying WAL/SHM files
+  while the database is closed. Run `PRAGMA integrity_check` on a copy first
+  and preserve its output for diagnosis.
+- Keep reader transactions short. If a PASSIVE checkpoint cannot advance all
+  frames, inspect its counters and retry after long-lived readers finish.
+  Do not assume that a successful checkpoint means the main database file has
+  been compacted; `VACUUM` is a separate maintenance operation.
+- Schedule retention and `VACUUM` separately from latency-sensitive UI work.
+  The direct adapter uses synchronous SQLite calls; Flutter hosts should use
+  the isolate worker for database operations.
+
+The adapter does not promise that a storage device will survive power loss,
+hardware failure, or filesystem corruption. Maintain backups for records that
+must be recoverable independently of the local database.
+
 ## Retention and compaction
 
 The direct SQLite adapter and isolate worker expose `compact`, matching the
@@ -105,3 +130,8 @@ The 100K and 1M profiles are intended for local scale characterization and
 should not be treated as CI thresholds. Compare runs only when Dart/SQLite
 versions, machine, filesystem, and event count are recorded. The adapter tests
 also inspect `EXPLAIN QUERY PLAN` for the combined status/operation query path.
+
+
+## Health and diagnostics
+
+Both `SqliteCompositionLifecycleEventStore` and `SqliteLifecycleEventStoreWorker` implement `CompositionLifecycleStorageHealthProvider`. Their `inspectHealth()` snapshots report the record count, SQLite page-count footprint, freelist pages, and WAL byte size when the database path is available. The last successful write and last append error are scoped to the current adapter instance. The worker obtains the snapshot inside its isolate and transfers only primitive values to the host. A null WAL size means that the adapter could not determine a WAL file size; it does not mean the WAL is guaranteed absent. The health query is observational and does not run an integrity check, checkpoint, or `VACUUM`.

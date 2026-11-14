@@ -240,8 +240,8 @@ The job must be created with the exact dependency order, expected checkpoint
 operation ID/sequence for each plugin, and a reserved unique execution
 operation ID per step. The host should persist that planned job before
 calling `executeBatchWithJob()`. The supplied request's operation ID factory
-must return those reserved IDs. This API does not yet provide a standalone
-read-only `planBatch()` builder; that is the next planning/approval surface.
+must return those reserved IDs. The read-only planning API described below
+provides the canonical way to assemble this intent.
 
 The job store's compare-and-set implementation must be atomic across processes.
 The in-memory implementation is not a distributed lock or durable store. The
@@ -278,3 +278,24 @@ planning. `executeBatchWithJob()` independently repeats preflight and rejects
 a job whose action, ordered targets, checkpoint snapshots, or reserved
 operation IDs no longer match. The host owns authorization, persistence,
 idempotency-key policy, and any approval audit trail.
+
+
+## Recovery plan freshness validation
+
+`PluginLifecycleRecoveryBatchPlanner.validatePlan()` lets a host check a
+reviewed plan again before presenting its final approval action or persisting
+the job. It rebuilds the current snapshot using the plan's existing reserved
+operation IDs, then compares the dependency order and complete checkpoint
+snapshots (including state, sequence, attempt, timestamps, dependencies, and
+sanitized failure metadata).
+
+The validation is read-only: it does not regenerate operation IDs, write
+checkpoints or jobs, mutate the manager, or invoke plugin hooks. A stale or
+blocked result includes blockers and, when available, the newly observed plan
+for host review. The host must obtain fresh approval if the plan changed.
+
+This is an additional review aid, not an approval token or execution lock.
+State can change immediately after validation. `executeBatchWithJob()` remains
+responsible for its own independent preflight and job-intent checks before
+plugin code runs. Hosts continue to own authorization, approval policy, and
+durable audit records.

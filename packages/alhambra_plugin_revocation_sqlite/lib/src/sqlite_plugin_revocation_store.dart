@@ -55,7 +55,7 @@ final class SqlitePluginRevocationStore
   void _migrate() {
     final version =
         _db.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > 2) {
+    if (version > 3) {
       throw UnsupportedError(
         'Database schema version $version is newer than this adapter supports.',
       );
@@ -357,29 +357,116 @@ final class SqlitePluginRevocationStore
   }
 
   @override
-  Future<PluginRevocationReplayResult?> replayDeadLetter(PluginRevocationReplayRequest request) async =>
+  Future<PluginRevocationReplayResult?> replayDeadLetter(
+    PluginRevocationReplayRequest request,
+  ) async =>
       _transaction(() {
-        final prior = _db.select('SELECT * FROM plugin_revocation_operator_action WHERE action_id = ?', [request.actionId]);
-        if (prior.isNotEmpty) {
-          final row = Map<String, Object?>.from(prior.first);
-          if (row['target_event_id'] != request.targetEventId || row['actor_id'] != request.actorId || row['reason'] != request.reason || row['approval_reference'] != request.approvalReference) throw StateError('Operator action ID was already used with different replay details.');
-          final replayRows = _db.select('SELECT * FROM plugin_revocation_outbox WHERE event_id = ?', [row['replay_event_id']]);
-          if (replayRows.isEmpty) throw StateError('Recorded replay event is missing.');
-          return PluginRevocationReplayResult(PluginRevocationOperatorAction(actionId: row['action_id']! as String, actorId: row['actor_id']! as String, reason: row['reason']! as String, approvalReference: row['approval_reference']! as String, targetEventId: row['target_event_id']! as String, replayEventId: row['replay_event_id']! as String, replayGeneration: row['replay_generation']! as int, occurredAt: _parseDate(row['occurred_at'])), _message(Map<String, Object?>.from(replayRows.first)));
+        final priorRows = _db.select(
+          'SELECT * FROM plugin_revocation_operator_action WHERE action_id = ?',
+          [request.actionId],
+        );
+        if (priorRows.isNotEmpty) {
+          final row = Map<String, Object?>.from(priorRows.first);
+          if (row['target_event_id'] != request.targetEventId ||
+              row['actor_id'] != request.actorId ||
+              row['scope_id'] != request.scopeId ||
+              row['reason'] != request.reason ||
+              row['approval_reference'] != request.approvalReference) {
+            throw StateError(
+              'Operator action ID was already used with different replay details.',
+            );
+          }
+          final replayRows = _db.select(
+            'SELECT * FROM plugin_revocation_outbox WHERE event_id = ?',
+            [row['replay_event_id']],
+          );
+          if (replayRows.isEmpty) {
+            throw StateError('Recorded replay event is missing.');
+          }
+          final audit = PluginRevocationOperatorAction(
+            actionId: row['action_id']! as String,
+            actorId: row['actor_id']! as String,
+            scopeId: row['scope_id']! as String,
+            reason: row['reason']! as String,
+            approvalReference: row['approval_reference']! as String,
+            targetEventId: row['target_event_id']! as String,
+            replayEventId: row['replay_event_id']! as String,
+            replayGeneration: row['replay_generation']! as int,
+            occurredAt: _parseDate(row['occurred_at']),
+          );
+          return PluginRevocationReplayResult(
+            audit,
+            _message(Map<String, Object?>.from(replayRows.first)),
+          );
         }
-        final sourceRows = _db.select("SELECT * FROM plugin_revocation_outbox WHERE event_id = ? AND state = 'deadLetter'", [request.targetEventId]);
+        final sourceRows = _db.select(
+          "SELECT * FROM plugin_revocation_outbox WHERE event_id = ? AND state = 'deadLetter'",
+          [request.targetEventId],
+        );
         if (sourceRows.isEmpty) return null;
         final source = Map<String, Object?>.from(sourceRows.first);
-        final generation = (_db.select('SELECT COALESCE(MAX(replay_generation), 0) AS generation FROM plugin_revocation_operator_action WHERE target_event_id = ?', [request.targetEventId]).first['generation'] as int) + 1;
+        final generation = (_db.select(
+          'SELECT COALESCE(MAX(replay_generation), 0) AS generation '
+          'FROM plugin_revocation_operator_action WHERE target_event_id = ?',
+          [request.targetEventId],
+        ).first['generation'] as int) + 1;
         final sourceEventId = source['event_id']! as String;
-        final replayEventId = sourceEventId + ':replay:' + generation.toString();
-        final replayKey = (source['idempotency_key'] as String) + ':replay:' + generation.toString();
+        final replayEventId = '$sourceEventId:replay:$generation';
+        final replayKey = '${source['idempotency_key']}:replay:$generation';
         final at = _date(request.occurredAt);
-        _db.execute('INSERT INTO plugin_revocation_outbox (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id, action, outcome, occurred_at, detail, state, attempts, next_attempt_at, replay_of_event_id, replay_generation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, \'pending\', 0, ?, ?, ?)', [replayEventId, replayKey, source['operation_id'], source['plugin_id'], source['provider_owner_id'], source['action'], source['outcome'], at, source['detail'], at, sourceEventId, generation]);
-        _db.execute('INSERT INTO plugin_revocation_operator_action (action_id, actor_id, reason, approval_reference, target_event_id, replay_event_id, replay_generation, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [request.actionId, request.actorId, request.reason, request.approvalReference, sourceEventId, replayEventId, generation, at]);
-        final audit = PluginRevocationOperatorAction(actionId: request.actionId, actorId: request.actorId, reason: request.reason, approvalReference: request.approvalReference, targetEventId: sourceEventId, replayEventId: replayEventId, replayGeneration: generation, occurredAt: request.occurredAt.toUtc());
-        final event = PluginRevocationAuditEvent(eventId: replayEventId, idempotencyKey: replayKey, operationId: source['operation_id']! as String, pluginId: source['plugin_id']! as String, providerOwnerId: source['provider_owner_id']! as String, action: source['action']! as String, outcome: source['outcome']! as String, occurredAt: request.occurredAt.toUtc(), detail: source['detail'] as String?, replayOfEventId: sourceEventId, replayGeneration: generation);
-        return PluginRevocationReplayResult(audit, PluginRevocationOutboxMessage(event: event, state: PluginRevocationOutboxState.pending, attempts: 0, nextAttemptAt: request.occurredAt.toUtc()));
+        _db.execute('''
+          INSERT INTO plugin_revocation_outbox
+          (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
+           action, outcome, occurred_at, detail, state, attempts, next_attempt_at,
+           replay_of_event_id, replay_generation)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+        ''', [
+          replayEventId, replayKey, source['operation_id'], source['plugin_id'],
+          source['provider_owner_id'], source['action'], source['outcome'],
+          at, source['detail'], at, sourceEventId, generation,
+        ]);
+        _db.execute('''
+          INSERT INTO plugin_revocation_operator_action
+          (action_id, actor_id, scope_id, reason, approval_reference, target_event_id,
+           replay_event_id, replay_generation, occurred_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', [
+          request.actionId, request.actorId, request.scopeId, request.reason,
+          request.approvalReference, sourceEventId, replayEventId, generation, at,
+        ]);
+        final audit = PluginRevocationOperatorAction(
+          actionId: request.actionId,
+          actorId: request.actorId,
+          scopeId: request.scopeId,
+          reason: request.reason,
+          approvalReference: request.approvalReference,
+          targetEventId: sourceEventId,
+          replayEventId: replayEventId,
+          replayGeneration: generation,
+          occurredAt: request.occurredAt.toUtc(),
+        );
+        final event = PluginRevocationAuditEvent(
+          eventId: replayEventId,
+          idempotencyKey: replayKey,
+          operationId: source['operation_id']! as String,
+          pluginId: source['plugin_id']! as String,
+          providerOwnerId: source['provider_owner_id']! as String,
+          action: source['action']! as String,
+          outcome: source['outcome']! as String,
+          occurredAt: request.occurredAt.toUtc(),
+          detail: source['detail'] as String?,
+          replayOfEventId: sourceEventId,
+          replayGeneration: generation,
+        );
+        return PluginRevocationReplayResult(
+          audit,
+          PluginRevocationOutboxMessage(
+            event: event,
+            state: PluginRevocationOutboxState.pending,
+            attempts: 0,
+            nextAttemptAt: request.occurredAt.toUtc(),
+          ),
+        );
       });
 
   Future<List<PluginRevocationOperatorAction>> readOperatorActions() async {

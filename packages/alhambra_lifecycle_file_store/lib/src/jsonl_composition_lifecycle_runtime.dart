@@ -47,6 +47,32 @@ final class JsonlCompositionLifecycleRuntime {
   /// Last asynchronous persistence failure, if any.
   Object? get lastWriteError => journal.lastError;
 
+  /// Combines backend footprint with the runtime journal's live queue state.
+  Future<CompositionLifecycleStorageHealth> inspectHealth() async {
+    final storage = await store.inspectHealth();
+    final pending = pendingEventCount;
+    final rejected = rejectedEventCount;
+    final degraded = storage.state != CompositionLifecycleStorageHealthState.healthy ||
+        lastWriteError != null ||
+        rejected > 0;
+    return CompositionLifecycleStorageHealth(
+      state: degraded
+          ? (storage.state == CompositionLifecycleStorageHealthState.unavailable
+              ? CompositionLifecycleStorageHealthState.unavailable
+              : CompositionLifecycleStorageHealthState.degraded)
+          : CompositionLifecycleStorageHealthState.healthy,
+      checkedAt: storage.checkedAt,
+      lastSuccessfulWriteAt: storage.lastSuccessfulWriteAt,
+      lastError: lastWriteError?.toString() ?? storage.lastError,
+      pendingWrites: pending,
+      rejectedWrites: rejected,
+      recordCount: storage.recordCount,
+      primaryStorageBytes: storage.primaryStorageBytes,
+      auxiliaryStorageBytes: storage.auxiliaryStorageBytes,
+      metrics: storage.metrics,
+    );
+  }
+
   /// Waits until all currently accepted lifecycle events are persisted.
   Future<void> flush() => journal.flush();
 

@@ -137,6 +137,16 @@ final class PostgresPluginRevocationStore
         await tx.execute('CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_operator_target ON alhambra_plugin_revocation_operator_action(target_event_id, replay_generation)');
         await tx.execute('INSERT INTO alhambra_plugin_revocation_schema (version) VALUES (2) ON CONFLICT (version) DO NOTHING');
       }
+      if (currentVersion < 3) {
+        await tx.execute(
+          "ALTER TABLE alhambra_plugin_revocation_operator_action "
+          "ADD COLUMN IF NOT EXISTS scope_id TEXT NOT NULL DEFAULT 'default'",
+        );
+        await tx.execute(
+          'INSERT INTO alhambra_plugin_revocation_schema (version) '
+          'VALUES (3) ON CONFLICT (version) DO NOTHING',
+        );
+      }
     });
   }
 
@@ -384,32 +394,112 @@ final class PostgresPluginRevocationStore
   }
 
   @override
-  Future<PluginRevocationReplayResult?> replayDeadLetter(PluginRevocationReplayRequest request) async {
+  Future<PluginRevocationReplayResult?> replayDeadLetter(
+    PluginRevocationReplayRequest request,
+  ) async {
     _assertOpen();
     return _pool.runTx((tx) async {
-      await tx.execute(r'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', parameters: [request.actionId]);
-      final priorRows = await tx.execute(r'SELECT * FROM alhambra_plugin_revocation_operator_action WHERE action_id = $1', parameters: [request.actionId]);
+      await tx.execute(
+        r'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        parameters: [request.actionId],
+      );
+      final priorRows = await tx.execute(
+        r'SELECT * FROM alhambra_plugin_revocation_operator_action WHERE action_id = $1',
+        parameters: [request.actionId],
+      );
       if (priorRows.isNotEmpty) {
         final row = priorRows.first.toColumnMap();
-        if (row['target_event_id'] != request.targetEventId || row['actor_id'] != request.actorId || row['reason'] != request.reason || row['approval_reference'] != request.approvalReference) throw StateError('Operator action ID was already used with different replay details.');
-        final replayRows = await tx.execute(r'SELECT * FROM alhambra_plugin_revocation_outbox WHERE event_id = $1', parameters: [row['replay_event_id']]);
-        if (replayRows.isEmpty) throw StateError('Recorded replay event is missing.');
-        final audit = PluginRevocationOperatorAction(actionId: row['action_id'] as String, actorId: row['actor_id'] as String, reason: row['reason'] as String, approvalReference: row['approval_reference'] as String, targetEventId: row['target_event_id'] as String, replayEventId: row['replay_event_id'] as String, replayGeneration: row['replay_generation'] as int, occurredAt: _date(row['occurred_at']));
-        return PluginRevocationReplayResult(audit, _message(replayRows.first.toColumnMap()));
+        if (row['target_event_id'] != request.targetEventId ||
+            row['actor_id'] != request.actorId ||
+            row['reason'] != request.reason ||
+            row['approval_reference'] != request.approvalReference) {
+          throw StateError(
+            'Operator action ID was already used with different replay details.',
+          );
+        }
+        final replayRows = await tx.execute(
+          r'SELECT * FROM alhambra_plugin_revocation_outbox WHERE event_id = $1',
+          parameters: [row['replay_event_id']],
+        );
+        if (replayRows.isEmpty) {
+          throw StateError('Recorded replay event is missing.');
+        }
+        final audit = PluginRevocationOperatorAction(
+          actionId: row['action_id'] as String,
+          actorId: row['actor_id'] as String,
+          scopeId: row['scope_id'] as String,
+          reason: row['reason'] as String,
+          approvalReference: row['approval_reference'] as String,
+          targetEventId: row['target_event_id'] as String,
+          replayEventId: row['replay_event_id'] as String,
+          replayGeneration: row['replay_generation'] as int,
+          occurredAt: _date(row['occurred_at']),
+        );
+        return PluginRevocationReplayResult(
+          audit,
+          _message(replayRows.first.toColumnMap()),
+        );
       }
-      final sourceRows = await tx.execute(r"SELECT * FROM alhambra_plugin_revocation_outbox WHERE event_id = $1 AND state = 'deadLetter' FOR UPDATE", parameters: [request.targetEventId]);
+      final sourceRows = await tx.execute(
+        r"SELECT * FROM alhambra_plugin_revocation_outbox "
+        r"WHERE event_id = $1 AND state = 'deadLetter' FOR UPDATE",
+        parameters: [request.targetEventId],
+      );
       if (sourceRows.isEmpty) return null;
       final source = sourceRows.first.toColumnMap();
-      final generationRows = await tx.execute(r'SELECT COALESCE(MAX(replay_generation), 0) AS generation FROM alhambra_plugin_revocation_operator_action WHERE target_event_id = $1', parameters: [request.targetEventId]);
-      final generation = (generationRows.first.toColumnMap()['generation'] as int) + 1;
+      final generationRows = await tx.execute(
+        r'SELECT COALESCE(MAX(replay_generation), 0) AS generation '
+        r'FROM alhambra_plugin_revocation_operator_action WHERE target_event_id = $1',
+        parameters: [request.targetEventId],
+      );
+      final generation =
+          (generationRows.first.toColumnMap()['generation'] as int) + 1;
       final sourceEventId = source['event_id'] as String;
-      final replayEventId = sourceEventId + ':replay:' + generation.toString();
-      final replayKey = (source['idempotency_key'] as String) + ':replay:' + generation.toString();
+      final replayEventId = '$sourceEventId:replay:$generation';
+      final replayKey = '${source['idempotency_key']}:replay:$generation';
       final at = request.occurredAt.toUtc();
-      final inserted = await tx.execute(r'''INSERT INTO alhambra_plugin_revocation_outbox (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id, action, outcome, occurred_at, detail, state, attempts, next_attempt_at, replay_of_event_id, replay_generation) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',0,$8,$10,$11) RETURNING *''', parameters: [replayEventId, replayKey, source['operation_id'], source['plugin_id'], source['provider_owner_id'], source['action'], source['outcome'], at, source['detail'], sourceEventId, generation]);
-      await tx.execute(r'''INSERT INTO alhambra_plugin_revocation_operator_action (action_id, actor_id, reason, approval_reference, target_event_id, replay_event_id, replay_generation, occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)''', parameters: [request.actionId, request.actorId, request.reason, request.approvalReference, sourceEventId, replayEventId, generation, at]);
-      final audit = PluginRevocationOperatorAction(actionId: request.actionId, actorId: request.actorId, reason: request.reason, approvalReference: request.approvalReference, targetEventId: sourceEventId, replayEventId: replayEventId, replayGeneration: generation, occurredAt: at);
-      return PluginRevocationReplayResult(audit, _message(inserted.first.toColumnMap()));
+      final inserted = await tx.execute(
+        r'''
+          INSERT INTO alhambra_plugin_revocation_outbox
+          (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
+           action, outcome, occurred_at, detail, state, attempts, next_attempt_at,
+           replay_of_event_id, replay_generation)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 0, $8, $10, $11)
+          RETURNING *
+        ''',
+        parameters: [
+          replayEventId, replayKey, source['operation_id'], source['plugin_id'],
+          source['provider_owner_id'], source['action'], source['outcome'],
+          at, source['detail'], sourceEventId, generation,
+        ],
+      );
+      await tx.execute(
+        r'''
+          INSERT INTO alhambra_plugin_revocation_operator_action
+          (action_id, actor_id, scope_id, reason, approval_reference, target_event_id,
+           replay_event_id, replay_generation, occurred_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ''',
+        parameters: [
+          request.actionId, request.actorId, request.scopeId, request.reason,
+          request.approvalReference, sourceEventId, replayEventId, generation, at,
+        ],
+      );
+      final audit = PluginRevocationOperatorAction(
+        actionId: request.actionId,
+        actorId: request.actorId,
+        scopeId: request.scopeId,
+        reason: request.reason,
+        approvalReference: request.approvalReference,
+        targetEventId: sourceEventId,
+        replayEventId: replayEventId,
+        replayGeneration: generation,
+        occurredAt: at,
+      );
+      return PluginRevocationReplayResult(
+        audit,
+        _message(inserted.first.toColumnMap()),
+      );
     });
   }
 

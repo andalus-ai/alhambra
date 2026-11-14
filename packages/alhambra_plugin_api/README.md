@@ -20,3 +20,8 @@ The composition API defines:
 Hosts may implement these contracts with in-memory, JSONL, database, or remote
 telemetry adapters. Runtime implementations should isolate observer failures
 from composition correctness and make event loss/backpressure observable.
+
+
+## Lifecycle storage health
+
+`CompositionLifecycleStorageHealthProvider` is an optional capability for adapters that can report storage health. Its immutable snapshot distinguishes healthy, degraded, unavailable, and unknown states. Unsupported measurements remain null rather than being reported as zero. The common model can carry write-queue counts, record count, primary/auxiliary byte footprints, last successful write time, and backend-specific metrics without requiring every `CompositionLifecycleEventStore` implementation to support them.

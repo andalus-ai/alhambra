@@ -273,6 +273,7 @@ class InMemoryTransactionalPluginRevocationStore
     if (existingAction != null) {
       if (existingAction.targetEventId != request.targetEventId ||
           existingAction.actorId != request.actorId ||
+          existingAction.scopeId != request.scopeId ||
           existingAction.reason != request.reason ||
           existingAction.approvalReference != request.approvalReference) {
         throw StateError('Operator action ID was already used with different replay details.');
@@ -317,6 +318,7 @@ class InMemoryTransactionalPluginRevocationStore
     final audit = PluginRevocationOperatorAction(
       actionId: request.actionId,
       actorId: request.actorId,
+      scopeId: request.scopeId,
       reason: request.reason,
       approvalReference: request.approvalReference,
       targetEventId: source.event.eventId,
