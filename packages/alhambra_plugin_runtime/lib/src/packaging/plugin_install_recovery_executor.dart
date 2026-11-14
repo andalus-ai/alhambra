@@ -108,6 +108,26 @@ final class PluginInstallRecoveryExecutor {
 
     try {
     await ensureLease();
+    if (lease != null) {
+      final token = lease!.fencingToken;
+      final journalReady =
+          await (journal as FencedPluginInstallRecoveryJournal).advanceFence(
+        operationId: entry.operationId,
+        fencingToken: token,
+      );
+      final filesystemReady =
+          await (fileSystem as FencedPluginInstallFileSystem).advanceFence(
+        operationId: entry.operationId,
+        fencingToken: token,
+      );
+      if (!journalReady || !filesystemReady) {
+        throw const PluginInstallRecoveryException(
+          'RECOVERY_FENCE_REJECTED',
+          'A host adapter has already accepted a newer fencing token.',
+          reconciliationRequired: true,
+        );
+      }
+    }
     final freshReport = await PluginInstallRecoveryPlanner(
       journal: journal,
       fileSystem: fileSystem,
@@ -164,7 +184,7 @@ final class PluginInstallRecoveryExecutor {
               operationId: entry.operationId,
               pluginId: entry.pluginId,
               opaqueHandle: entry.stagingHandle!,
-              fencingToken: entry.fencingToken ?? 0,
+              fencingToken: claimed.fencingToken ?? 0,
             );
       switch (finding.action) {
         case PluginInstallRecoveryAction.discardStaging:
