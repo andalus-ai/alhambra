@@ -60,6 +60,31 @@ The adapter is intentionally separate from `alhambra_plugin_api` and
 `alhambra_plugin_runtime`: it uses `dart:io` and is suitable for native
 Dart/Flutter hosts, not web builds.
 
+## Recovery and operations
+
+- Keep the JSONL file and its sparse-index sidecar in an application-private,
+  writable directory with enough free space for normal appends and a temporary
+  full-file replacement during compaction.
+- If the process stops during an append, an unterminated final line is ignored
+  by reads and removed before the next append. A newline-terminated malformed
+  record is not auto-discarded: treat it as corruption and preserve a copy of
+  the original file before attempting manual recovery.
+- If an append or compaction reports an I/O error, stop scheduling maintenance,
+  retain the original log and any `.compact-*` backup artifacts, and surface
+  the error to the host. Do not delete the authoritative JSONL file to repair
+  the rebuildable sparse index.
+- After restoring filesystem access and free space, reopen the adapter and
+  query a small page. The sidecar can be rebuilt from the authoritative log;
+  verify event counts and representative event IDs before resuming writes.
+- Compaction temporarily needs space for a replacement log. Schedule it when
+  sufficient free space is available and keep an external backup for data
+  that must survive device or filesystem failure.
+- This adapter is single-process-writer only. For multiple processes, use an
+  external coordination mechanism or the SQLite adapter.
+
+These procedures do not provide power-loss durability or filesystem-level
+atomicity guarantees beyond the host filesystem's documented behavior.
+
 ## Guarantees and limits
 
 - Appends are serialized within one store instance and flushed before return.
