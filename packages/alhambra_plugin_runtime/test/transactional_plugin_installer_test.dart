@@ -308,6 +308,19 @@ void main() {
       expect(nextOwner!.fencingToken, 2);
     });
 
+
+    test('fails closed when lease mode is configured with an unfenced store',
+        () async {
+      await expectLater(
+        _installer(
+          leaseStore: InMemoryPluginInstallOperationLeaseStore(),
+          workerId: 'installer-a',
+          store: _FailingStore(),
+        ).install(_Package()),
+        throwsArgumentError,
+      );
+    });
+
     test('refuses an operation already leased by another worker', () async {
       final leases = InMemoryPluginInstallOperationLeaseStore();
       await leases.acquire(
