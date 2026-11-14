@@ -75,6 +75,7 @@ durable history after flushing accepted journal events.
 - `alhambra_plugin_api`: stable plugin and observability contracts.
 - `alhambra_plugin_runtime`: in-memory composition runtime and observability.
 - `alhambra_lifecycle_file_store`: optional durable JSONL adapter.
+- `alhambra_plugin_install_sqlite`: optional SQLite-backed plugin installation journal with append-only transition history and atomic recovery claims.
 
 ## Plugin package integrity and trust
 
@@ -157,3 +158,6 @@ similarity. `finalizePromotion`, `rollbackPromotion` and
 `discardStaging` must have documented idempotency behavior. See
 [Transactional Plugin Installation](../../Docs/TRANSACTIONAL_PLUGIN_INSTALLATION.md)
 for the complete recovery protocol and its limitations.
+
+
+For a durable SQLite implementation of `PluginInstallRecoveryJournal`, see [`alhambra_plugin_install_sqlite`](../alhambra_plugin_install_sqlite/README.md). The adapter persists a current operation projection and append-only history, but does not provide filesystem atomicity or worker leases.
