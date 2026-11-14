@@ -78,6 +78,16 @@ final class _TestPurgeAuditSink implements PluginRecoveryArchivePurgeAuditSink {
   }
 }
 
+
+final class _AllowPurgeAuthorizer implements PluginRecoveryArchivePurgeAuthorizer {
+  @override
+  Future<bool> authorize({
+    required String jobId,
+    required String archiveDigest,
+    required PluginRecoveryArchivePurgeAuthorization authorization,
+  }) async => true;
+}
+
 final class _FailingPurgeAuditSink implements PluginRecoveryArchivePurgeAuditSink {
   @override
   Future<void> record(PluginRecoveryArchivePurgeAuditEvent event) async {
@@ -517,6 +527,7 @@ void main() {
         archive: archive,
         inspector: inspector,
         auditSink: _TestPurgeAuditSink((_) => auditWritten = true),
+        authorizer: _AllowPurgeAuthorizer(),
         verifier: PluginLifecycleRecoveryJobArchiveVerifier(
           archive: archive,
           digestProvider: digests,
@@ -567,6 +578,7 @@ void main() {
         archive: archive,
         inspector: PluginLifecycleRecoveryJobRetentionInspector(archive: archive),
         auditSink: _FailingPurgeAuditSink(),
+        authorizer: _AllowPurgeAuthorizer(),
         verifier: PluginLifecycleRecoveryJobArchiveVerifier(
           archive: archive,
           digestProvider: digests,
