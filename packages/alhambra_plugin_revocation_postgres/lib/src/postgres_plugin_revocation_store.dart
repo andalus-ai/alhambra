@@ -10,7 +10,7 @@ import 'package:postgres/postgres.dart';
 /// workers do not claim the same row.
 final class PostgresPluginRevocationStore
     implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore {
-  final Pool _pool;
+  final Pool<dynamic> _pool;
   final Random _random;
   bool _closed = false;
 
