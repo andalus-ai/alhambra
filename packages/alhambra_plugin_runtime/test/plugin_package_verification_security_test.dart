@@ -191,6 +191,21 @@ void main() {
       expect((invalid as PackageVerificationFailed).issues.single.code,
           'INVALID_SIGNATURE');
     });
+
+    test('installation does not stage a package when integrity verification is unavailable', () async {
+      final catalog = InMemoryPluginCatalog();
+      final store = InMemoryInstalledPluginStore();
+      final manager = DefaultPluginLifecycleManager(
+        verifier: DefaultPluginPackageVerifier(),
+        dependencyResolver: DefaultPluginDependencyResolver(catalog: catalog),
+        store: store,
+      );
+
+      await expectLater(manager.install(_Package()), throwsA(isA<StateError>()));
+      expect(manager.installed, isEmpty);
+      expect(await store.all(), isEmpty);
+    });
+
     test('ExtensionRuntime shares its trust store and accepts injected adapters', () async {
       final runtime = ExtensionRuntime(
         pluginPayloadIntegrityVerifier: const _Integrity(),
