@@ -296,6 +296,13 @@ class PluginLifecycleRecoveryRunner {
           }
           journal = claimedJob;
         } catch (error, stackTrace) {
+          final latest = await jobStore!.read(currentJob.jobId);
+          if (latest?.status == PluginRecoveryJobStatus.cancellationRequested) {
+            // Cancellation won the revision race before this step was claimed.
+            // No plugin code ran; the next loop boundary finalizes cancellation.
+            journal = latest;
+            continue;
+          }
           return PluginLifecycleRecoveryBatchReport(
             succeeded: false,
             orderedPluginIds: orderedIds,
