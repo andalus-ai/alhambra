@@ -1,0 +1,20 @@
+name: alhambra_lifecycle_store_benchmark
+description: Comparative observational benchmarks for Alhambra lifecycle stores.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  alhambra_plugin_api:
+    path: ../alhambra_plugin_api
+  alhambra_plugin_runtime:
+    path: ../alhambra_plugin_runtime
+  alhambra_lifecycle_file_store:
+    path: ../alhambra_lifecycle_file_store
+  alhambra_lifecycle_sqlite_store:
+    path: ../alhambra_lifecycle_sqlite_store
+
+dev_dependencies:
+  test: ^1.25.0
