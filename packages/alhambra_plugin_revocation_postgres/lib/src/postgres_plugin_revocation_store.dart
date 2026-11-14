@@ -50,6 +50,19 @@ final class PostgresPluginRevocationStore
     _assertOpen();
     await _pool.runTx((tx) async {
       await tx.execute('''
+        CREATE TABLE IF NOT EXISTS alhambra_plugin_revocation_schema (
+          version INTEGER PRIMARY KEY,
+          applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      ''');
+      final schema = await tx.execute(
+        'SELECT COALESCE(MAX(version), 0) AS version FROM alhambra_plugin_revocation_schema',
+      );
+      final currentVersion = schema.first.toColumnMap()['version'] as int;
+      if (currentVersion > 1) {
+        throw UnsupportedError('Database schema version $currentVersion is newer than this adapter supports.');
+      }
+      await tx.execute('''
         CREATE TABLE IF NOT EXISTS alhambra_plugin_revocation_execution (
           idempotency_key TEXT PRIMARY KEY,
           operation_id TEXT NOT NULL,
@@ -107,12 +120,6 @@ final class PostgresPluginRevocationStore
         CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_outbox_expired_lease
         ON alhambra_plugin_revocation_outbox (lease_until, occurred_at, event_id)
         WHERE state = 'leased'
-      ''');
-      await tx.execute('''
-        CREATE TABLE IF NOT EXISTS alhambra_plugin_revocation_schema (
-          version INTEGER PRIMARY KEY,
-          applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
       ''');
       await tx.execute('''
         INSERT INTO alhambra_plugin_revocation_schema (version)
@@ -278,7 +285,7 @@ final class PostgresPluginRevocationStore
     await _pool.runTx((tx) => _enqueue(tx, record));
   }
 
-  Future<void> _enqueue(dynamic tx, PluginRevocationExecutionRecord record) async {
+  Future<void> _enqueue(TxSession tx, PluginRevocationExecutionRecord record) async {
     await tx.execute(
       r'''
         INSERT INTO alhambra_plugin_revocation_outbox
