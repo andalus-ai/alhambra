@@ -42,6 +42,24 @@ final class PluginLifecycleRecoveryJobArchiver {
       throw StateError('Recovery job in state "${job.status.name}" is not eligible for archival.');
     }
 
+    final existing = await archive.read(jobId);
+    if (existing != null) {
+      if (!_sameJobSnapshot(existing.job, job) ||
+          existing.integrity.formatVersion !=
+              PluginLifecycleRecoveryJobSnapshotCodec.formatVersion ||
+          existing.integrity.algorithm != digestAlgorithm) {
+        throw StateError('An archive with a different snapshot or digest algorithm already exists.');
+      }
+      final existingDigest = await digestProvider.digest(
+        algorithm: existing.integrity.algorithm,
+        canonicalPayload: codec.encode(job, archivedAt: existing.archivedAt),
+      );
+      if (existingDigest != existing.integrity.digest) {
+        throw StateError('Existing archive integrity verification failed.');
+      }
+      return existing;
+    }
+
     final archivedAt = _clock().toUtc();
     final payload = codec.encode(job, archivedAt: archivedAt);
     final digest = await digestProvider.digest(
@@ -51,18 +69,6 @@ final class PluginLifecycleRecoveryJobArchiver {
     if (digest.trim().isEmpty) {
       throw StateError('Digest provider returned an empty digest.');
     }
-    final existing = await archive.read(jobId);
-    if (existing != null) {
-      if (!_sameJobSnapshot(existing.job, job) ||
-          existing.integrity.formatVersion !=
-              PluginLifecycleRecoveryJobSnapshotCodec.formatVersion ||
-          existing.integrity.algorithm != digestAlgorithm ||
-          existing.integrity.digest != digest) {
-        throw StateError('An archive with a different snapshot or digest already exists.');
-      }
-      return existing;
-    }
-
     final record = PluginLifecycleRecoveryJobArchiveRecord(
       job: job,
       archivedAt: archivedAt,
@@ -78,13 +84,16 @@ final class PluginLifecycleRecoveryJobArchiver {
           _sameJobSnapshot(raced.job, job) &&
           raced.integrity.formatVersion ==
               PluginLifecycleRecoveryJobSnapshotCodec.formatVersion &&
-          raced.integrity.algorithm == digestAlgorithm &&
-          raced.integrity.digest == digest) {
-        return raced;
+          raced.integrity.algorithm == digestAlgorithm) {
+        final racedDigest = await digestProvider.digest(
+          algorithm: raced.integrity.algorithm,
+          canonicalPayload: codec.encode(job, archivedAt: raced.archivedAt),
+        );
+        if (racedDigest == raced.integrity.digest) return raced;
       }
-      throw StateError('A conflicting archive record was written concurrently.');
+      throw StateError('A conflicting or invalid archive record was written concurrently.');
     }
-    return record;
+
   }
 
   bool _isArchivable(PluginRecoveryJobStatus status) => switch (status) {
