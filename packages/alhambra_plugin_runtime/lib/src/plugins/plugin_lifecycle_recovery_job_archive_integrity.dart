@@ -153,6 +153,11 @@ final class PluginLifecycleRecoveryJobArchiveRestorer {
     }
     final record = await archive.read(jobId);
     if (record == null) throw StateError('Archive "$jobId" disappeared during restore.');
+    if (record.integrity.digest != verification.expectedDigest ||
+        record.integrity.formatVersion !=
+            PluginLifecycleRecoveryJobSnapshotCodec.formatVersion) {
+      throw StateError('Archive changed between verification and restore.');
+    }
     final existing = await jobStore.read(jobId);
     if (existing != null) {
       if (const _ArchiveSnapshotEquality().matches(existing, record.job)) {
