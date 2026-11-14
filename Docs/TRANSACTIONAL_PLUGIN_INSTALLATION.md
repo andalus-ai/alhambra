@@ -111,8 +111,10 @@ The planner proposes only narrowly supported cases:
   outcome is ambiguous.
 
 The journal must persist the package content hash. The filesystem inspection
-must prove destination ownership using operation-bound metadata (for example
-a durable operation marker); a matching path string is not proof of ownership.
+must prove staging and destination ownership using operation-bound metadata
+(for example a durable operation marker); a matching path string is not proof
+of ownership. The planner treats an interrupted rollback or recovery claim as
+manual review because its previous side effects may be incomplete.
 
 ### Explicitly approved execution
 
@@ -124,7 +126,11 @@ and atomically claims the operation using
 `PluginInstallRecoveryJournal.compareAndSet`.
 
 The claim records the operator identity and approval ID in the journal before
-performing one action. The executor then writes a terminal outcome with another
+performing one action. Approval IDs must be unique within the host's audit
+scope; the durable journal adapter should enforce uniqueness and retain the
+attribution. Journal compare-and-set must fence both the expected status and
+its observed update timestamp/revision, and `unresolved()` must return only
+the latest non-terminal entry for each operation. The executor then writes a terminal outcome with another
 compare-and-set. If a side effect or outcome write fails, the journal remains
 `needsReconciliation` or `recoveryStarted`; another worker must not blindly
 repeat the action. A new host inspection and explicit resolution are required.
