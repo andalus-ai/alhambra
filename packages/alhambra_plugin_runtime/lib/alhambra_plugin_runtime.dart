@@ -47,6 +47,7 @@ export 'src/plugins/plugin_startup_pipeline.dart';
 export 'src/plugins/plugin_shutdown_coordinator.dart';
 export 'src/plugins/plugin_revocation_coordinator.dart';
 export 'src/plugins/plugin_revocation_outbox.dart';
+export 'src/plugins/plugin_revocation_operations.dart';
 export 'src/plugins/plugin_revocation_journal.dart';
 export 'src/plugins/plugin_revocation_recovery_planner.dart';
 export 'src/plugins/plugin_revocation_reconciler.dart';
