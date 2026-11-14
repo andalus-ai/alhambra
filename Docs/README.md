@@ -48,3 +48,5 @@ Start here:
 Distinguish implemented behavior from proposals and experimental work. State host
 responsibilities, failure semantics, security boundaries and concrete adapter guarantees.
 Update this index whenever an architecture or developer document is added.
+
+- [Transactional plugin installation](TRANSACTIONAL_PLUGIN_INSTALLATION.md) — verified package staging, bounded extraction, reversible promotion, journaling and rollback.
