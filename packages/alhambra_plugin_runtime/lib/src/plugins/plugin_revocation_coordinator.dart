@@ -40,7 +40,7 @@ final class PluginRevocationExecutionRecord {
     required this.status,
     required this.updatedAt,
     this.detail,
-  });
+  }) : assert(scopeId != '');
 }
 
 /// Persistence boundary for idempotency records.
@@ -75,8 +75,12 @@ class InMemoryPluginRevocationExecutionStore
 
   @override
   Future<void> complete(PluginRevocationExecutionRecord record) async {
-    if (!_records.containsKey(record.idempotencyKey)) {
+    final current = _records[record.idempotencyKey];
+    if (current == null) {
       throw StateError('No pending revocation record for this idempotency key.');
+    }
+    if (current.scopeId != record.scopeId) {
+      throw StateError('Revocation scope cannot change after the execution claim.');
     }
     _records[record.idempotencyKey] = record;
   }
