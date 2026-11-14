@@ -7,6 +7,7 @@ Start here:
 - [Repository agent instructions](../AGENTS.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Developer guidelines](DEVELOPER_GUIDELINES.md)
+- [Plugin developer guide](PLUGIN_DEVELOPER_GUIDE.md)
 - [Repository overview](../README.md)
 
 ## Architecture and ownership
@@ -16,6 +17,7 @@ Start here:
 - [Layout plugin extensibility](LAYOUT_PLUGIN_EXTENSIBILITY.md) — layout extension contracts and compatibility.
 
 ## Plugin contracts and lifecycle
+- [Plugin developer guide](PLUGIN_DEVELOPER_GUIDE.md) — implement, compose, test and operate a plugin.
 - [Plugin capability negotiation](PLUGIN_CAPABILITY_NEGOTIATION.md) — version compatibility and required/optional resolution.
 - [Dynamic capability activation](DYNAMIC_CAPABILITY_ACTIVATION.md) — runtime capability activation boundaries.
 - [Plugin startup capability gate](PLUGIN_STARTUP_CAPABILITY_GATE.md) — startup preconditions and capability checks.
