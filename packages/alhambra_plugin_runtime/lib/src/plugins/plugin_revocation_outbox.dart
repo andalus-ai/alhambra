@@ -4,6 +4,7 @@ import 'plugin_revocation_operator_actions.dart';
 /// Stable, sanitized audit payload created when a revocation reaches an outcome.
 final class PluginRevocationAuditEvent {
   final String eventId;
+  final String scopeId;
   final String idempotencyKey;
   final String operationId;
   final String pluginId;
@@ -17,6 +18,7 @@ final class PluginRevocationAuditEvent {
 
   const PluginRevocationAuditEvent({
     required this.eventId,
+    this.scopeId = 'default',
     required this.idempotencyKey,
     required this.operationId,
     required this.pluginId,
@@ -132,6 +134,7 @@ class InMemoryTransactionalPluginRevocationStore
     _messages.putIfAbsent(eventId, () {
       final event = PluginRevocationAuditEvent(
         eventId: eventId,
+        scopeId: record.scopeId,
         idempotencyKey: record.idempotencyKey,
         operationId: record.operationId,
         pluginId: record.pluginId,
@@ -298,6 +301,7 @@ class InMemoryTransactionalPluginRevocationStore
     final at = request.occurredAt.toUtc();
     final event = PluginRevocationAuditEvent(
       eventId: replayEventId,
+      scopeId: source.event.scopeId,
       idempotencyKey: replayKey,
       operationId: source.event.operationId,
       pluginId: source.event.pluginId,
