@@ -243,18 +243,36 @@ abstract interface class PluginInstallRecoveryJournal
 /// The token is carried by [PluginInstallJournalEntry.fencingToken]. A fenced
 /// implementation must reject stale tokens atomically with its write.
 abstract interface class FencedPluginInstallJournal
-    implements PluginInstallJournal {}
+    implements PluginInstallJournal {
+  /// Atomically advances the highest accepted token before work begins.
+  /// Returns false if a newer token has already been registered.
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  });
+}
 
 /// Marker for filesystem adapters that enforce [PluginInstallStaging.fencingToken]
 /// on every mutating operation, including extraction, promotion, rollback,
 /// finalization and staging cleanup. The highest token must be persisted in
 /// operation-owned metadata and lower tokens rejected.
 abstract interface class FencedPluginInstallFileSystem
-    implements PluginInstallFileSystem {}
+    implements PluginInstallFileSystem {
+  /// Atomically persists the highest accepted token in operation-owned state.
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  });
+}
 
 /// Installed-record adapter that atomically rejects stale operation tokens.
 abstract interface class FencedTransactionalInstalledPluginStore
     implements TransactionalInstalledPluginStore {
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  });
+
   Future<bool> createIfAbsentFenced(
     InstalledPluginRecord plugin, {
     required String operationId,
