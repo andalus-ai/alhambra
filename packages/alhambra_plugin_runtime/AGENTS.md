@@ -32,3 +32,9 @@ alhambra_plugin_api.
 - Use fake clocks, deterministic IDs and injected stores/publishers.
 - Use adapter integration tests to prove database transactions and cross-process concurrency; in-memory tests cannot prove those properties.
 - Update the public barrel export only for intentional public APIs.
+
+- Package verification must fail closed when payload integrity or required signature adapters are unavailable.
+- Do not implement cryptographic primitives in the runtime; use injected, vetted adapters.
+- Keep payload canonicalization explicit and consistent between packagers and verifiers.
+- A valid signature does not by itself imply publisher trust; enforce publisher/key binding and host trust policy.
+- Treat the in-memory trust store as a reference implementation, not production key management.
