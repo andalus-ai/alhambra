@@ -135,3 +135,8 @@ also inspect `EXPLAIN QUERY PLAN` for the combined status/operation query path.
 ## Health and diagnostics
 
 Both `SqliteCompositionLifecycleEventStore` and `SqliteLifecycleEventStoreWorker` implement `CompositionLifecycleStorageHealthProvider`. Their `inspectHealth()` snapshots report the record count, SQLite page-count footprint, freelist pages, and WAL byte size when the database path is available. The last successful write and last append error are scoped to the current adapter instance. The worker obtains the snapshot inside its isolate and transfers only primitive values to the host. A null WAL size means that the adapter could not determine a WAL file size; it does not mean the WAL is guaranteed absent. The health query is observational and does not run an integrity check, checkpoint, or `VACUUM`.
+
+## Explicit maintenance API
+
+`SqliteCompositionLifecycleEventStore` and `SqliteLifecycleEventStoreWorker` implement `CompositionLifecycleStorageMaintenanceProvider`. Use `maintain()` to apply retention and optionally run a passive WAL checkpoint. The result includes deleted-record count, checkpoint completion, busy/log/checkpointed frame counters, and warnings when SQLite cannot checkpoint every frame. A successful checkpoint does not shrink the main database file; `VACUUM` remains a separate, potentially expensive operation and is intentionally not automated. The host owns scheduling, policy, and maintenance windows.
+

@@ -18,7 +18,10 @@ import 'jsonl_sparse_lifecycle_index.dart';
 /// processes writing the same file require an external lock or a different
 /// storage adapter.
 final class JsonlCompositionLifecycleEventStore
-    implements CompositionLifecycleEventStore, CompositionLifecycleStorageHealthProvider {
+    implements
+        CompositionLifecycleEventStore,
+        CompositionLifecycleStorageHealthProvider,
+        CompositionLifecycleStorageMaintenanceProvider {
   final File file;
   final CompositionLifecycleEventJsonCodec codec;
 
@@ -171,6 +174,37 @@ final class JsonlCompositionLifecycleEventStore
           retainFrom: retainFrom,
           maxEvents: maxEvents,
         ));
+  }
+
+  @override
+  Future<CompositionLifecycleStorageMaintenanceResult> maintain(
+    CompositionLifecycleStorageMaintenanceRequest request,
+  ) async {
+    final startedAt = DateTime.now().toUtc();
+    int? removed;
+    final warnings = <String>[];
+    if (request.retainFrom != null || request.maxEvents != null) {
+      removed = await compact(
+        retainFrom: request.retainFrom,
+        maxEvents: request.maxEvents,
+      );
+    }
+    if (request.checkpoint) {
+      warnings.add('WAL checkpointing is not applicable to the JSONL adapter.');
+    }
+    return CompositionLifecycleStorageMaintenanceResult(
+      startedAt: startedAt,
+      completedAt: DateTime.now().toUtc(),
+      recordsRemoved: removed,
+      checkpointRequested: request.checkpoint,
+      checkpointCompleted: null,
+      warnings: warnings,
+      metrics: const {
+        'adapter': 'jsonl',
+        'compactionSupported': true,
+        'checkpointSupported': false,
+      },
+    );
   }
 
   Future<int> _compactOne({

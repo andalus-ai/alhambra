@@ -121,3 +121,8 @@ atomicity guarantees beyond the host filesystem's documented behavior.
 ## Health and diagnostics
 
 `JsonlCompositionLifecycleEventStore` implements the optional `CompositionLifecycleStorageHealthProvider` capability. Call `inspectHealth()` to obtain the current JSONL byte size, sparse-index sidecar size, last successful append observed by this store instance, and the most recent append error. The `JsonlCompositionLifecycleRuntime` facade additionally reports pending and rejected journal writes. A degraded snapshot signals a known write error or rejected journal events; an unavailable snapshot means the health inspection itself could not read the backing files. Health inspection does not scan the full log, validate every record, predict free disk space, or guarantee the next append.
+
+## Explicit maintenance API
+
+`JsonlCompositionLifecycleEventStore` implements `CompositionLifecycleStorageMaintenanceProvider`. Use `maintain()` to apply the existing inclusive time/count retention rules. The operation is serialized with appends through the store's write queue. JSONL has no WAL, so a requested checkpoint is reported as unsupported in the result warnings rather than silently treated as success. Scheduling and maintenance windows remain the host's responsibility.
+
