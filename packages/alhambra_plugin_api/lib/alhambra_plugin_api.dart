@@ -85,3 +85,4 @@ export 'plugin_api/packaging/packaging_contracts.dart';
 export 'plugin_api/discovery/discovery_contracts.dart';
 export 'plugin_api/di/service_graph_contracts.dart';
 export 'plugin_api/packaging/integrity_contracts.dart';
+export 'plugin_api/packaging/installation_contracts.dart';
