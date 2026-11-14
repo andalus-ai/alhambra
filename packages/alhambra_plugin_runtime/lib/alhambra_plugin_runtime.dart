@@ -141,3 +141,5 @@ export 'src/plugins/plugin_lifecycle_recovery_job.dart';
 export 'src/plugins/plugin_lifecycle_recovery_job_planner.dart';
 
 export 'src/plugins/plugin_lifecycle_recovery_batch_planner.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_batch.dart';
