@@ -52,6 +52,13 @@ final class PluginRevocationOutboxMessage {
   });
 }
 
+/// Read-only inspection capability for operational dashboards and support tools.
+abstract interface class PluginRevocationOutboxInspectionStore {
+  /// Returns a stable snapshot of persisted messages ordered by the adapter.
+  /// Implementations must not claim, lease, acknowledge or otherwise mutate rows.
+  Future<List<PluginRevocationOutboxMessage>> readAllOutbox();
+}
+
 /// Persistence contract for leased outbox delivery.
 abstract interface class PluginRevocationOutboxStore {
   Future<List<PluginRevocationOutboxMessage>> claim({
@@ -80,7 +87,7 @@ abstract interface class PluginRevocationOutboxStore {
 /// Single-isolate reference implementation for tests only. A real adapter
 /// needs database transactions, uniqueness constraints and row-level claims.
 class InMemoryTransactionalPluginRevocationStore
-    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore {
+    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore {
   final Map<String, PluginRevocationExecutionRecord> _executions = {};
   final Map<String, PluginRevocationOutboxMessage> _messages = {};
 
@@ -251,6 +258,11 @@ class InMemoryTransactionalPluginRevocationStore
     );
     return true;
   }
+
+  @override
+  Future<List<PluginRevocationOutboxMessage>> readAllOutbox() async =>
+      List.unmodifiable(_messages.values.toList()
+        ..sort((a, b) => a.event.occurredAt.compareTo(b.event.occurredAt)));
 
   Future<List<PluginRevocationOutboxMessage>> snapshot() async =>
       List.unmodifiable(_messages.values);

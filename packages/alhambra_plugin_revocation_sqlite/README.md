@@ -6,6 +6,7 @@ Durable SQLite implementation for Alhambra plugin revocation.
 
 - `TransactionalPluginRevocationStore`: atomically create pending execution + journal records and commit terminal execution outcomes + journal revision/status + audit outbox event.
 - `PluginRevocationOutboxStore`: claim events using expiring leases, retry scheduling, and lease-token fencing.
+- `PluginRevocationOutboxInspectionStore`: read-only `readAllOutbox()` snapshots; inspection never claims or mutates messages.
 - `PluginRevocationJournalStore`: revisioned journal reads, insert-if-absent, and compare-and-set updates, exposed through `store.journalStore`.
 
 The adapter is an optional package. The neutral `alhambra_plugin_runtime` package remains database-independent.

@@ -54,6 +54,11 @@ void main() {
       expect(journal?.revision, 2);
       expect(journal?.detail, terminal.detail);
 
+      final inspected = await store.readAllOutbox();
+      expect(inspected, hasLength(1));
+      expect(inspected.single.state, PluginRevocationOutboxState.pending);
+      expect(inspected.single.attempts, 0);
+
       final claimed = await store.claim(
         workerId: 'worker-a',
         now: DateTime.utc(2026, 1, 1, 0, 2),

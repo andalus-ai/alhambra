@@ -54,6 +54,13 @@ void main() {
     expect((await store.journalStore.read(key))?.status,
         PluginRevocationJournalStatus.completed);
 
+    final inspected = await store.readAllOutbox();
+    expect(inspected.where((item) => item.event.idempotencyKey == key), hasLength(1));
+    final inspectedMessage =
+        inspected.singleWhere((item) => item.event.idempotencyKey == key);
+    expect(inspectedMessage.state, PluginRevocationOutboxState.pending);
+    expect(inspectedMessage.attempts, 0);
+
     final claimed = await store.claim(
       workerId: 'integration-worker',
       now: DateTime.utc(2026, 1, 1, 0, 2),
