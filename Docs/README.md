@@ -22,7 +22,7 @@ Start here:
 
 ## Plugin contracts and lifecycle
 - [Plugin developer guide](PLUGIN_DEVELOPER_GUIDE.md) — implement, compose, test and operate a plugin.
-- [Plugin test utilities](../packages/alhambra_plugin_test/README.md) — in-process test host, lifecycle failure checks and contribution snapshots.
+- [Plugin test utilities](../packages/alhambra_plugin_test/README.md) — in-process test host, lifecycle failure checks, metadata validation and conformance checks.
 - [Plugin capability negotiation](PLUGIN_CAPABILITY_NEGOTIATION.md) — version compatibility and required/optional resolution.
 - [Dynamic capability activation](DYNAMIC_CAPABILITY_ACTIVATION.md) — runtime capability activation boundaries.
 - [Plugin startup capability gate](PLUGIN_STARTUP_CAPABILITY_GATE.md) — startup preconditions and capability checks.
