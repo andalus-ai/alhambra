@@ -21,12 +21,14 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
 
   SqlitePluginInstallJournal.memory() : _db = sq.sqlite3.openInMemory() {
     _db.execute('PRAGMA foreign_keys = ON');
+    _db.execute('PRAGMA synchronous = FULL');
     _migrate();
   }
 
   void _configure(String path) {
     _db.execute('PRAGMA busy_timeout = 5000');
     if (path != ':memory:') _db.execute('PRAGMA journal_mode = WAL');
+    _db.execute('PRAGMA synchronous = FULL');
     _db.execute('PRAGMA foreign_keys = ON');
   }
 
