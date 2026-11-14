@@ -11,6 +11,8 @@ Durable SQLite implementation for Alhambra plugin revocation.
 
 The adapter is an optional package. The neutral `alhambra_plugin_runtime` package remains database-independent.
 
+The current adapter does **not yet** implement `PluginRevocationDeadLetterReplayStore`. The in-memory runtime reference implementation is not a substitute for durable operator audit. Do not enable production dead-letter replay until a later adapter release provides one-transaction audit insertion + new replay outbox insertion.
+
 ## Bootstrap
 
 ```dart
