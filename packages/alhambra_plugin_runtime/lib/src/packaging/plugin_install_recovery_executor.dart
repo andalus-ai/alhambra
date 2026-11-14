@@ -93,6 +93,7 @@ final class PluginInstallRecoveryExecutor {
     final didClaim = await journal.compareAndSet(
       operationId: entry.operationId,
       expectedStatus: entry.status,
+      expectedUpdatedAt: entry.updatedAt,
       replacement: claimed,
     );
     if (!didClaim) {
@@ -168,6 +169,7 @@ final class PluginInstallRecoveryExecutor {
       final saved = await journal.compareAndSet(
         operationId: entry.operationId,
         expectedStatus: PluginInstallJournalStatus.recoveryStarted,
+        expectedUpdatedAt: claimed.updatedAt,
         replacement: completed,
       );
       if (!saved) {
@@ -183,6 +185,7 @@ final class PluginInstallRecoveryExecutor {
         await journal.compareAndSet(
           operationId: entry.operationId,
           expectedStatus: PluginInstallJournalStatus.recoveryStarted,
+          expectedUpdatedAt: claimed.updatedAt,
           replacement: _entry(
             claimed,
             status: PluginInstallJournalStatus.needsReconciliation,
