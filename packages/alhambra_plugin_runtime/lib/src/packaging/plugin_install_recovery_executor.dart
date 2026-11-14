@@ -58,6 +58,13 @@ final class PluginInstallRecoveryExecutor {
 
     final entry = finding.journalEntry;
     PluginInstallOperationLease? lease;
+    if (leaseStore != null &&
+        (journal is! FencedPluginInstallRecoveryJournal ||
+            fileSystem is! FencedPluginInstallFileSystem)) {
+      throw ArgumentError(
+        'Recovery lease mode requires fenced recovery-journal and filesystem adapters.',
+      );
+    }
     if (leaseStore != null) {
       final owner = workerId;
       if (owner == null || owner.trim().isEmpty) {
@@ -134,6 +141,7 @@ final class PluginInstallRecoveryExecutor {
       failureCode: 'RECOVERY_APPROVED',
       approvedBy: approvedBy.trim(),
       approvalId: approvalId.trim(),
+      fencingToken: lease?.fencingToken,
     );
     await ensureLease();
     final didClaim = await journal.compareAndSet(
@@ -156,6 +164,7 @@ final class PluginInstallRecoveryExecutor {
               operationId: entry.operationId,
               pluginId: entry.pluginId,
               opaqueHandle: entry.stagingHandle!,
+              fencingToken: entry.fencingToken ?? 0,
             );
       switch (finding.action) {
         case PluginInstallRecoveryAction.discardStaging:
@@ -288,6 +297,7 @@ final class PluginInstallRecoveryExecutor {
     required String failureCode,
     String? approvedBy,
     String? approvalId,
+    int? fencingToken,
   }) =>
       PluginInstallJournalEntry(
         operationId: source.operationId,
@@ -301,6 +311,7 @@ final class PluginInstallRecoveryExecutor {
         contentHash: source.contentHash,
         approvedBy: approvedBy ?? source.approvedBy,
         approvalId: approvalId ?? source.approvalId,
+        fencingToken: fencingToken ?? source.fencingToken,
       );
 
   bool _sameJournal(
@@ -317,5 +328,6 @@ final class PluginInstallRecoveryExecutor {
       left.contentHash == right.contentHash &&
       left.failureCode == right.failureCode &&
       left.approvedBy == right.approvedBy &&
-      left.approvalId == right.approvalId;
+      left.approvalId == right.approvalId &&
+      left.fencingToken == right.fencingToken;
 }
