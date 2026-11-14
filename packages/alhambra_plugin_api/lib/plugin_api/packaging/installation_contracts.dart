@@ -113,7 +113,6 @@ enum PluginInstallJournalStatus {
   failed,
   needsReconciliation,
   recoveryStarted,
-  recovered,
 }
 
 /// [unresolved] returns exactly the latest non-terminal entry per operation ID.
