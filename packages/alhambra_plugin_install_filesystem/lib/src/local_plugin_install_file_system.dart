@@ -91,10 +91,17 @@ final class LocalPluginInstallFileSystem
   Future<T> _withLock<T>(String operationId, Future<T> Function() action) async {
     await initialize();
     final lock = Directory(_lockPath(operationId));
-    try {
-      await lock.create();
-    } on FileSystemException {
-      throw StateError('Installation operation is locked; inspect the owner and reconcile before retrying.');
+    final stopwatch = Stopwatch()..start();
+    while (true) {
+      try {
+        await lock.create();
+        break;
+      } on FileSystemException {
+        if (stopwatch.elapsed >= lockWait) {
+          throw StateError('Installation operation is locked; inspect the owner and reconcile before retrying.');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
     }
     try {
       return await action();
@@ -312,6 +319,7 @@ final class LocalPluginInstallFileSystem
         final source = _resolveStaging(staging);
         await _assertNoSymlink(source);
         await _assertNoSymlink(p.dirname(expected));
+        await _assertNoSymlink(expected);
         await Directory(p.dirname(expected)).create(recursive: true);
         if (await Directory(expected).exists() || await File(expected).exists()) {
           throw StateError('Refusing to overwrite an existing plugin destination.');
