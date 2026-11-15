@@ -96,16 +96,16 @@ void main() {
 
     test('rejects invalid run identifiers and writer counts', () async {
       final suite = const PluginRecoveryArchiveConformanceSuite();
-      expect(
-        () => suite.verify(
+      await expectLater(
+        suite.verify(
           archive: _Archive(),
           runId: 'not safe',
           fixtureBuilder: _fixture,
         ),
         throwsArgumentError,
       );
-      expect(
-        () => suite.verify(
+      await expectLater(
+        suite.verify(
           archive: _Archive(),
           runId: 'valid',
           concurrentWriters: 1,
