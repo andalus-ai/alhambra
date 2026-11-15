@@ -140,3 +140,28 @@ Both `SqliteCompositionLifecycleEventStore` and `SqliteLifecycleEventStoreWorker
 
 `SqliteCompositionLifecycleEventStore` and `SqliteLifecycleEventStoreWorker` implement `CompositionLifecycleStorageMaintenanceProvider`. Use `maintain()` to apply retention and optionally run a passive WAL checkpoint. The result includes deleted-record count, checkpoint completion, busy/log/checkpointed frame counters, and warnings when SQLite cannot checkpoint every frame. A successful checkpoint does not shrink the main database file; `VACUUM` remains a separate, potentially expensive operation and is intentionally not automated. The host owns scheduling, policy, and maintenance windows.
 
+
+## Maintenance audit history
+
+Use the dedicated audit adapter with the same SQLite connection as the event
+store:
+
+```dart
+final store = SqliteCompositionLifecycleEventStore.open(
+  path: '${supportDirectory.path}/alhambra/lifecycle.sqlite',
+);
+final audit = SqliteCompositionLifecycleStorageMaintenanceAuditStore(
+  database: store.database,
+);
+final coordinator = CompositionLifecycleStorageMaintenanceCoordinator(
+  auditLog: audit,
+);
+```
+
+Audit appends use `BEGIN IMMEDIATE`, a unique operation/status identity, and
+a partial unique index that permits at most one terminal outcome per operation.
+Identical retries are no-ops; conflicting payloads or terminal outcomes throw
+`CompositionLifecycleStorageMaintenanceAuditIdentityConflictException`.
+Queries use indexed time and operation-ID sort keys with deterministic keyset
+pagination. The adapter does not own or close the supplied database.
+
