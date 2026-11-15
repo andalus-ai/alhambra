@@ -44,6 +44,10 @@ final class LocalPluginInstallFileSystem
     if (rootType == FileSystemEntityType.link) {
       throw FileSystemException('Installation root must not be a symbolic link.', rootPath);
     }
+    final rootType = await FileSystemEntity.type(rootPath, followLinks: false);
+    if (rootType == FileSystemEntityType.link) {
+      throw FileSystemException('Installation root must not be a symbolic link.', rootPath);
+    }
     await Directory(rootPath).create(recursive: true);
     await _assertNoSymlink(rootPath);
     for (final path in [_stateRoot, _stagingRoot, _pluginRoot, _lockRoot, _operationRoot]) {
