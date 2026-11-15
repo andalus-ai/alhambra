@@ -42,6 +42,26 @@ void main() {
     expect(Directory(destination).existsSync(), isFalse);
   });
 
+  test('finalization retains durable ownership evidence for interrupted journal commit', () async {
+    await fileSystem.advanceFence(operationId: 'op-final', fencingToken: 7);
+    final staging = await fileSystem.createStaging(
+      operationId: 'op-final', pluginId: 'demo.plugin', version: '2.0.0', fencingToken: 7,
+    );
+    final destination = await fileSystem.destinationPathFor(
+      pluginId: 'demo.plugin', version: '2.0.0',
+    );
+    await fileSystem.promote(staging, destinationPath: destination);
+    await fileSystem.finalizePromotion(staging, promotedPath: destination);
+    final snapshot = await fileSystem.inspectOperation(
+      operationId: 'op-final', pluginId: 'demo.plugin',
+      stagingHandle: staging.opaqueHandle, destinationPath: destination,
+    );
+    expect(snapshot.destinationExists, isTrue);
+    expect(snapshot.destinationOwnedByOperation, isTrue);
+    expect(snapshot.rollbackAvailable, isFalse);
+    await fileSystem.finalizePromotion(staging, promotedPath: destination);
+  });
+
   test('stale worker cannot write after a newer fence is registered', () async {
     await fileSystem.advanceFence(operationId: 'op-2', fencingToken: 1);
     final stale = await fileSystem.createStaging(
