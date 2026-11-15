@@ -361,6 +361,7 @@ final class LocalPluginInstallFileSystem
         if (expected == null || p.normalize(promotedPath) != p.normalize(expected)) {
           throw StateError('Rollback path does not match operation metadata.');
         }
+        await _assertNoSymlink(expected);
         if (!await Directory(expected).exists()) return;
         if (!await _hasOwnerMarker(expected, staging.operationId, staging.fencingToken)) {
           throw StateError('Cannot roll back a destination without matching ownership evidence.');
