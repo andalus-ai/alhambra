@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:sqlite3/sqlite3.dart' as sq;
+
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_install_sqlite/alhambra_plugin_install_sqlite.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
@@ -152,6 +154,24 @@ void main() {
       ), isFalse);
       expect((await journal.read('install-1'))!.status,
           PluginInstallJournalStatus.verificationStarted);
+    });
+
+    test('migrates an existing schema-v1 journal database', () async {
+      final directory = await Directory.systemTemp.createTemp('alhambra-install-v1-');
+      final path = '${directory.path}/install.sqlite';
+      final legacy = sq.sqlite3.open(path);
+      legacy.execute('CREATE TABLE plugin_install_operation (operation_id TEXT PRIMARY KEY)');
+      legacy.execute('CREATE TABLE plugin_install_event (event_id INTEGER PRIMARY KEY)');
+      legacy.execute('PRAGMA user_version = 1');
+      legacy.dispose();
+
+      final journal = SqlitePluginInstallJournal(path);
+      addTearDown(() async {
+        journal.close();
+        await directory.delete(recursive: true);
+      });
+      expect(await journal.advanceFence(operationId: 'migrated-operation', fencingToken: 1), isTrue);
+      expect(await journal.advanceFence(operationId: 'migrated-operation', fencingToken: 0), throwsArgumentError);
     });
 
     test('approval identifiers are unique within the database', () async {
