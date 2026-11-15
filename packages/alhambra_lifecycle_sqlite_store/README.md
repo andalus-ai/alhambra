@@ -41,7 +41,8 @@ host retains ownership and `store.close()` does not dispose the database.
   one at a time inside transactions; a failed migration rolls back without
   advancing the version. Databases created by a newer schema are rejected.
 - Version 2 adds a composite status/operation/time index for combined filtered
-  history queries; version 1 databases upgrade automatically.
+  history queries. Version 3 adds the maintenance-audit table and indexes;
+  version 1 and version 2 databases upgrade automatically.
 - File-backed databases use WAL mode and a 5-second busy timeout.
 
 ## Operational considerations
