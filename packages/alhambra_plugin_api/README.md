@@ -87,7 +87,7 @@ coordinator's append-only audit sink with bounded queries by operation ID,
 status, inclusive time range, and an exclusive keyset cursor. Results are
 ordered oldest-first by `(startedAt, operationId, status.name)`. Implementors
 should make appends idempotent for an identical `(operationId, status)`
-record and reject conflicting reuse with\n`CompositionLifecycleStorageMaintenanceAuditIdentityConflictException`.
+record and reject conflicting reuse with `CompositionLifecycleStorageMaintenanceAuditIdentityConflictException`.
 
 `CompositionLifecycleStorageMaintenanceRecovery.classify` interprets the
 records for one operation without performing recovery or replay. A start
@@ -102,3 +102,9 @@ recorded failure. Hosts must reconcile unknown outcomes and require an
 executor/adapter-specific idempotency or reconciliation guarantee before
 replaying maintenance. The API does not claim exactly-once execution or a
 transaction spanning the maintenance backend and audit store.
+
+
+The versioned `CompositionLifecycleStorageMaintenanceAuditJsonCodec` is shared
+by the file and SQLite adapters. Maintenance audit metrics must contain
+JSON-compatible values; unsupported values fail encoding rather than being
+silently stringified. Concrete adapters are optional and host-owned.
