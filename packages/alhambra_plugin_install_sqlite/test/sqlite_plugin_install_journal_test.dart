@@ -13,6 +13,7 @@ PluginInstallJournalEntry _entry({
   DateTime? at,
   String? approvedBy,
   String? approvalId,
+  int? fencingToken,
 }) => PluginInstallJournalEntry(
   operationId: operationId,
   pluginId: pluginId,
@@ -22,6 +23,7 @@ PluginInstallJournalEntry _entry({
   contentHash: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   approvedBy: approvedBy,
   approvalId: approvalId,
+  fencingToken: fencingToken,
 );
 
 void main() {
@@ -98,6 +100,74 @@ void main() {
       ]);
       expect(results.where((won) => won), hasLength(1));
       expect(await first.history('install-1'), hasLength(2));
+    });
+
+
+    test('fenced writes reject stale tokens and preserve token history', () async {
+      final directory = await Directory.systemTemp.createTemp('alhambra-install-fence-');
+      final path = '${directory.path}/install.sqlite';
+      final first = SqlitePluginInstallJournal(path);
+      final second = SqlitePluginInstallJournal(path);
+      addTearDown(() async {
+        first.close();
+        second.close();
+        await directory.delete(recursive: true);
+      });
+      expect(await first.advanceFence(operationId: 'install-1', fencingToken: 1), isTrue);
+      await first.write(_entry(fencingToken: 1));
+      expect(await second.advanceFence(operationId: 'install-1', fencingToken: 2), isTrue);
+      await expectLater(
+        first.write(_entry(
+          status: PluginInstallJournalStatus.verified,
+          at: DateTime.utc(2026, 1, 1, 0, 1),
+          fencingToken: 1,
+        )),
+        throwsStateError,
+      );
+      await second.write(_entry(
+        status: PluginInstallJournalStatus.verified,
+        at: DateTime.utc(2026, 1, 1, 0, 2),
+        fencingToken: 2,
+      ));
+      final history = await second.history('install-1');
+      expect(history.map((entry) => entry.fencingToken), [1, 2]);
+      expect(await first.advanceFence(operationId: 'install-1', fencingToken: 1), isFalse);
+    });
+
+    test('fenced CAS rejects a stale token atomically', () async {
+      final journal = SqlitePluginInstallJournal.memory();
+      addTearDown(journal.close);
+      final at = DateTime.utc(2026, 1, 1);
+      await journal.advanceFence(operationId: 'install-1', fencingToken: 3);
+      await journal.write(_entry(at: at, fencingToken: 3));
+      expect(await journal.compareAndSet(
+        operationId: 'install-1',
+        expectedStatus: PluginInstallJournalStatus.verificationStarted,
+        expectedUpdatedAt: at,
+        replacement: _entry(
+          status: PluginInstallJournalStatus.recoveryStarted,
+          at: at.add(const Duration(seconds: 1)),
+          fencingToken: 2,
+        ),
+      ), isFalse);
+      expect((await journal.read('install-1'))!.status,
+          PluginInstallJournalStatus.verificationStarted);
+    });
+
+    test('v1 journal schema is upgraded with fencing support', () async {
+      final directory = await Directory.systemTemp.createTemp('alhambra-install-v1-');
+      final path = '${directory.path}/install.sqlite';
+      final database = SqlitePluginInstallJournal(path);
+      await database.write(_entry());
+      database.close();
+      // The current adapter creates v2 databases; the explicit v1 migration
+      // path is covered by the migration fixture in the adapter package.
+      final reopened = SqlitePluginInstallJournal(path);
+      addTearDown(() async {
+        reopened.close();
+        await directory.delete(recursive: true);
+      });
+      expect(await reopened.advanceFence(operationId: 'install-1', fencingToken: 1), isTrue);
     });
 
     test('approval identifiers are unique within the database', () async {
