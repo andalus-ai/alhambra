@@ -2,7 +2,7 @@ import 'package:alhambra_plugin_api/plugin_api/composition/composition_lifecycle
 
 /// Stable keyset cursor for maintenance audit history.
 ///
-/// Ordering is the composite tuple `(startedAt, operationId, status.index)`.
+/// Ordering is the composite tuple `(startedAt, operationId, status.name)`.
 /// All bounds are exclusive and results are oldest-first.
 final class CompositionLifecycleStorageMaintenanceAuditCursor {
   final DateTime startedAt;
@@ -57,7 +57,7 @@ final class CompositionLifecycleStorageMaintenanceAuditQuery {
 /// one operation, must fail with an identity-conflict error.
 ///
 /// Query results must be ordered oldest-first by
-/// `(startedAt, operationId, status.index)`, apply every query bound, and
+/// `(startedAt, operationId, status.name)`, apply every query bound, and
 /// contain at most [query.limit] records. A successful append must cross the
 /// adapter's documented durability boundary.
 abstract interface class CompositionLifecycleStorageMaintenanceAuditStore
