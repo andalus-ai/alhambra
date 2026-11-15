@@ -122,9 +122,13 @@ manual review because its previous side effects may be incomplete.
 
 The host must explicitly call
 `PluginInstallRecoveryExecutor.execute(finding, approvedBy:, approvalId:)`.
-Before side effects, the host must fence the original installer worker or
-prove its durable operation lease has expired. A recovery scan must never race
-a live installer. The executor re-reads the unresolved journal entry,
+Before side effects, configure the same `PluginInstallOperationLeaseStore`
+for installer and recovery workers. Lease-enabled execution fails closed unless
+journal and filesystem adapters implement the fenced contracts; installation
+also requires a fenced installed-record store. Each adapter must register the
+new fencing token and reject lower tokens atomically with every mutation. A
+recovery scan must never race a live installer. See
+[Plugin Installation Worker Leases and Fencing](PLUGIN_INSTALL_WORKER_LEASES_AND_FENCING.md). The executor re-reads the unresolved journal entry,
 re-inspects filesystem and installed metadata, compares them with the finding,
 and atomically claims the operation using
 `PluginInstallRecoveryJournal.compareAndSet`.
@@ -151,6 +155,10 @@ repeat the action. A new host inspection and explicit resolution are required.
   to the host's audit-retention policy.
 - Filesystem and journal adapters need crash-injection and multi-process tests.
   In-memory tests do not establish those guarantees.
+- When worker leases are enabled, the lease store must be durable and
+  linearizable per operation ID. Journal, filesystem and installed-record
+  adapters must persist their highest accepted fencing token and serialize
+  token advancement with every mutation; expiry checks alone are insufficient.
 
 The recovery executor does not activate plugins, rerun extraction, overwrite
 installed records, or automatically retry ambiguous operations.

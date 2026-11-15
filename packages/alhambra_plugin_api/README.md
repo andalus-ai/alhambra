@@ -30,3 +30,50 @@ from composition correctness and make event loss/backpressure observable.
 
 `CompositionLifecycleStorageMaintenanceProvider` is an optional capability for explicit retention and maintenance operations. Hosts provide a request with an inclusive retention timestamp, a maximum retained event count, and/or a checkpoint request. Maintenance is never scheduled implicitly. Results report records removed, checkpoint outcome when supported, warnings for unsupported or incomplete work, and backend-specific metrics. A partial result does not mean the requested operation was rolled back; inspect the reported actions and warnings.
 
+
+## Lifecycle maintenance policy planning
+
+`CompositionLifecycleStorageMaintenancePlanner` evaluates a declarative policy
+against a health snapshot and host-supplied maintenance history. It returns
+trigger reasons, unavailable metrics, minimum-interval gating, and an optional
+explicit maintenance request. The planner is deterministic and performs no
+I/O, scheduling, authorization, or execution.
+
+A retention age produces a periodic inclusive cutoff because the common health
+contract does not require adapters to report the oldest event timestamp. Event
+count and storage-footprint thresholds are evaluated only when their required
+measurements are available. The combined storage threshold requires both
+primary and auxiliary byte counts; unknown values are never treated as zero.
+A storage threshold is a trigger for review/maintenance, not a guarantee that
+a particular action will reclaim the reported amount of space.
+
+Hosts remain responsible for scheduling evaluations, persisting maintenance
+history, enforcing authorization, serializing operations, and executing the
+returned request through an adapter's optional maintenance capability.
+
+## Lifecycle maintenance coordination
+
+`CompositionLifecycleStorageMaintenanceCoordinator` is an explicit
+single-flight execution primitive for a host-defined store scope. A host
+supplies an operation ID, maintenance request, and executor callback. A second
+operation submitted through the same coordinator while one is active is
+rejected with `StateError`; this is an in-process, per-instance guard, not a
+cross-process lock.
+
+An optional `CompositionLifecycleStorageMaintenanceAuditLog` receives a
+started record before execution and a terminal record afterwards. Failure to
+persist the started record fails closed and prevents execution. Failure to
+persist the terminal record is exposed separately on the operation outcome so
+it cannot silently erase the execution result. Hosts should provide a durable
+audit implementation when durable history is required.
+
+Cancellation before the executor starts prevents execution. During execution,
+cancellation is cooperative: the executor receives a signal and must check it
+at safe boundaries. The coordinator does not interrupt an in-flight Future or
+claim that already-applied destructive work was rolled back. Executors should
+return a partial result with a warning when they stop after work has begun.
+
+The coordinator does not schedule operations, choose policy, inspect storage,
+or perform authorization. Hosts own those responsibilities and must provide
+stronger external locking when multiple coordinator instances or processes
+can target the same store.

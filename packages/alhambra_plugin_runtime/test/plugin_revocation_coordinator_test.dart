@@ -68,6 +68,40 @@ void main() {
       expect(audit.records, hasLength(1));
     });
 
+
+    test('propagates trusted scope and rejects cross-scope idempotency reuse', () async {
+      final store = InMemoryPluginRevocationExecutionStore();
+      final audit = InMemoryPluginRevocationAuditSink();
+      final coordinator = PluginRevocationCoordinator(
+        manager: PluginManager(),
+        executionStore: store,
+        auditSink: audit,
+        approve: (_) => true,
+      );
+
+      final report = await coordinator.execute(
+        operationId: 'provider-event-scoped',
+        scopeId: 'tenant-blue',
+        decisions: [decision(CapabilityImpactAction.notify)],
+      );
+
+      expect(report.records.single.scopeId, 'tenant-blue');
+      expect(
+        (await store.read(report.records.single.idempotencyKey))?.scopeId,
+        'tenant-blue',
+      );
+      expect(audit.records.single.scopeId, 'tenant-blue');
+
+      await expectLater(
+        coordinator.execute(
+          operationId: 'provider-event-scoped',
+          scopeId: 'tenant-red',
+          decisions: [decision(CapabilityImpactAction.notify)],
+        ),
+        throwsStateError,
+      );
+    });
+
     test('does not claim suspend support before lifecycle contract exists',
         () async {
       final coordinator = PluginRevocationCoordinator(

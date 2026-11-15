@@ -8,7 +8,7 @@ enum PluginRevocationJournalStatus { pending, completed, rejected, unsupported, 
 final class PluginRevocationJournalEntry {
   static const int currentSchemaVersion = 1;
   final int schemaVersion;
-  final String idempotencyKey, operationId, pluginId, providerOwnerId;
+  final String idempotencyKey, scopeId, operationId, pluginId, providerOwnerId;
   final CapabilityImpactAction action;
   final PluginRevocationJournalStatus status;
   final int revision;
@@ -17,14 +17,14 @@ final class PluginRevocationJournalEntry {
 
   PluginRevocationJournalEntry({
     this.schemaVersion = currentSchemaVersion,
-    required this.idempotencyKey, required this.operationId,
+    required this.idempotencyKey, this.scopeId = 'default', required this.operationId,
     required this.pluginId, required this.providerOwnerId,
     required this.action, required this.status, required this.revision,
     required this.createdAt, required this.updatedAt,
     this.correlationId, this.detail,
   }) {
     if (schemaVersion < 1) throw ArgumentError.value(schemaVersion, 'schemaVersion');
-    for (final field in [idempotencyKey, operationId, pluginId, providerOwnerId]) {
+    for (final field in [idempotencyKey, scopeId, operationId, pluginId, providerOwnerId]) {
       if (field.trim().isEmpty) throw ArgumentError('Journal identity fields must not be empty.');
     }
     if (revision < 1) throw ArgumentError.value(revision, 'revision');
@@ -43,7 +43,7 @@ final class PluginRevocationJournalEntry {
     String? detail,
   }) => PluginRevocationJournalEntry(
     schemaVersion: schemaVersion, idempotencyKey: idempotencyKey,
-    operationId: operationId, pluginId: pluginId, providerOwnerId: providerOwnerId,
+    scopeId: scopeId, operationId: operationId, pluginId: pluginId, providerOwnerId: providerOwnerId,
     action: action, status: status, revision: revision + 1,
     createdAt: createdAt,
     updatedAt: at.toUtc().isBefore(createdAt) ? createdAt : at.toUtc(),
@@ -86,7 +86,8 @@ class InMemoryPluginRevocationJournalStore implements PluginRevocationJournalSto
     final current = _entries[idempotencyKey];
     if (current == null || current.revision != expectedRevision ||
         replacement.revision != expectedRevision + 1 ||
-        replacement.idempotencyKey != idempotencyKey) return false;
+        replacement.idempotencyKey != idempotencyKey ||
+        replacement.scopeId != current.scopeId) return false;
     _entries[idempotencyKey] = replacement;
     return true;
   }
@@ -113,6 +114,7 @@ class JournalBackedPluginRevocationExecutionStore
   Future<bool> writePending(PluginRevocationExecutionRecord record) =>
       journal.insertIfAbsent(PluginRevocationJournalEntry(
         idempotencyKey: record.idempotencyKey,
+        scopeId: record.scopeId,
         operationId: record.operationId,
         pluginId: record.pluginId,
         providerOwnerId: record.providerOwnerId,
@@ -129,6 +131,9 @@ class JournalBackedPluginRevocationExecutionStore
     final current = await journal.read(record.idempotencyKey);
     if (current == null) {
       throw StateError('No journal entry for revocation operation.');
+    }
+    if (current.scopeId != record.scopeId) {
+      throw StateError('Revocation scope cannot change after the journal claim.');
     }
     final replacement = current.next(
       status: switch (record.status) {
@@ -175,6 +180,7 @@ class JournalBackedPluginRevocationExecutionStore
     };
     return PluginRevocationExecutionRecord(
       idempotencyKey: entry.idempotencyKey,
+      scopeId: entry.scopeId,
       operationId: entry.operationId,
       pluginId: entry.pluginId,
       providerOwnerId: entry.providerOwnerId,

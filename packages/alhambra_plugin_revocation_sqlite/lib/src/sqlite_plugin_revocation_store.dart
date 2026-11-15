@@ -56,7 +56,7 @@ final class SqlitePluginRevocationStore
   void _migrate() {
     final version =
         _db.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > 3) {
+    if (version > 4) {
       throw UnsupportedError(
         'Database schema version $version is newer than this adapter supports.',
       );
@@ -155,6 +155,16 @@ final class SqlitePluginRevocationStore
         _db.execute('PRAGMA user_version = 3');
       });
     }
+    if (version < 4) {
+      _transaction(() {
+        _db.execute("ALTER TABLE plugin_revocation_execution ADD COLUMN scope_id TEXT NOT NULL DEFAULT 'default'");
+        _db.execute("ALTER TABLE plugin_revocation_journal ADD COLUMN scope_id TEXT NOT NULL DEFAULT 'default'");
+        _db.execute("ALTER TABLE plugin_revocation_outbox ADD COLUMN scope_id TEXT NOT NULL DEFAULT 'default'");
+        _db.execute('CREATE INDEX IF NOT EXISTS idx_plugin_revocation_journal_scope_updated ON plugin_revocation_journal(scope_id, updated_at DESC, idempotency_key DESC)');
+        _db.execute('CREATE INDEX IF NOT EXISTS idx_plugin_revocation_outbox_scope_occurred ON plugin_revocation_outbox(scope_id, occurred_at DESC, event_id DESC)');
+        _db.execute('PRAGMA user_version = 4');
+      });
+    }
   }
 
   T _transaction<T>(T Function() action) {
@@ -179,6 +189,7 @@ final class SqlitePluginRevocationStore
   ) =>
       PluginRevocationExecutionRecord(
         idempotencyKey: row['idempotency_key']! as String,
+        scopeId: row['scope_id']! as String,
         operationId: row['operation_id']! as String,
         pluginId: row['plugin_id']! as String,
         providerOwnerId: row['provider_owner_id']! as String,
@@ -192,6 +203,7 @@ final class SqlitePluginRevocationStore
   static PluginRevocationAuditEvent _event(Map<String, Object?> row) =>
       PluginRevocationAuditEvent(
         eventId: row['event_id']! as String,
+        scopeId: row['scope_id']! as String,
         idempotencyKey: row['idempotency_key']! as String,
         operationId: row['operation_id']! as String,
         pluginId: row['plugin_id']! as String,
@@ -239,11 +251,12 @@ final class SqlitePluginRevocationStore
       _transaction(() {
         _db.execute('''
           INSERT OR IGNORE INTO plugin_revocation_execution
-          (idempotency_key, operation_id, plugin_id, provider_owner_id,
+          (idempotency_key, scope_id, operation_id, plugin_id, provider_owner_id,
            action, status, updated_at, detail)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', [
           record.idempotencyKey,
+          record.scopeId,
           record.operationId,
           record.pluginId,
           record.providerOwnerId,
@@ -258,12 +271,13 @@ final class SqlitePluginRevocationStore
 
         _db.execute('''
           INSERT INTO plugin_revocation_journal
-          (idempotency_key, schema_version, operation_id, plugin_id,
+          (idempotency_key, scope_id, schema_version, operation_id, plugin_id,
            provider_owner_id, action, status, revision, created_at,
            updated_at, detail)
-          VALUES (?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?)
         ''', [
           record.idempotencyKey,
+          record.scopeId,
           PluginRevocationJournalEntry.currentSchemaVersion,
           record.operationId,
           record.pluginId,
@@ -293,11 +307,12 @@ final class SqlitePluginRevocationStore
     final eventId = '${record.idempotencyKey}:terminal';
     _db.execute('''
       INSERT OR IGNORE INTO plugin_revocation_outbox
-      (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
+      (event_id, scope_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
        action, outcome, occurred_at, detail, state, attempts, next_attempt_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)
     ''', [
       eventId,
+      record.scopeId,
       record.idempotencyKey,
       record.operationId,
       record.pluginId,
@@ -317,10 +332,11 @@ final class SqlitePluginRevocationStore
     _transaction(() {
       _db.execute('''
         UPDATE plugin_revocation_execution
-        SET operation_id = ?, plugin_id = ?, provider_owner_id = ?,
+        SET scope_id = ?, operation_id = ?, plugin_id = ?, provider_owner_id = ?,
             action = ?, status = ?, updated_at = ?, detail = ?
-        WHERE idempotency_key = ?
+        WHERE idempotency_key = ? AND scope_id = ?
       ''', [
+        record.scopeId,
         record.operationId,
         record.pluginId,
         record.providerOwnerId,
@@ -329,6 +345,7 @@ final class SqlitePluginRevocationStore
         _date(record.updatedAt),
         record.detail,
         record.idempotencyKey,
+        record.scopeId,
       ]);
       final executionChanged =
           _db.select('SELECT changes() AS count').first['count'] as int;
@@ -339,12 +356,13 @@ final class SqlitePluginRevocationStore
       _db.execute('''
         UPDATE plugin_revocation_journal
         SET status = ?, revision = revision + 1, updated_at = ?, detail = ?
-        WHERE idempotency_key = ?
+        WHERE idempotency_key = ? AND scope_id = ?
       ''', [
         _journalStatus(record.status).name,
         _date(record.updatedAt),
         record.detail,
         record.idempotencyKey,
+        record.scopeId,
       ]);
       final journalChanged =
           _db.select('SELECT changes() AS count').first['count'] as int;
@@ -415,6 +433,9 @@ final class SqlitePluginRevocationStore
         );
         if (sourceRows.isEmpty) return null;
         final source = Map<String, Object?>.from(sourceRows.first);
+        if (source['scope_id'] != request.scopeId) {
+          throw StateError('Dead-letter event is outside the requested scope.');
+        }
         final generation = (_db.select(
           'SELECT COALESCE(MAX(replay_generation), 0) AS generation '
           'FROM plugin_revocation_operator_action WHERE target_event_id = ?',
@@ -426,12 +447,12 @@ final class SqlitePluginRevocationStore
         final at = _date(request.occurredAt);
         _db.execute('''
           INSERT INTO plugin_revocation_outbox
-          (event_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
+          (event_id, scope_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
            action, outcome, occurred_at, detail, state, attempts, next_attempt_at,
            replay_of_event_id, replay_generation)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
         ''', [
-          replayEventId, replayKey, source['operation_id'], source['plugin_id'],
+          replayEventId, source['scope_id'], replayKey, source['operation_id'], source['plugin_id'],
           source['provider_owner_id'], source['action'], source['outcome'],
           at, source['detail'], at, sourceEventId, generation,
         ]);
@@ -457,6 +478,7 @@ final class SqlitePluginRevocationStore
         );
         final event = PluginRevocationAuditEvent(
           eventId: replayEventId,
+          scopeId: source['scope_id']! as String,
           idempotencyKey: replayKey,
           operationId: source['operation_id']! as String,
           pluginId: source['plugin_id']! as String,
@@ -636,6 +658,7 @@ final class SqlitePluginRevocationStore
       PluginRevocationJournalEntry(
         schemaVersion: row['schema_version']! as int,
         idempotencyKey: row['idempotency_key']! as String,
+        scopeId: row['scope_id']! as String,
         operationId: row['operation_id']! as String,
         pluginId: row['plugin_id']! as String,
         providerOwnerId: row['provider_owner_id']! as String,
@@ -651,6 +674,7 @@ final class SqlitePluginRevocationStore
 
   static List<Object?> _journalValues(PluginRevocationJournalEntry entry) => [
         entry.idempotencyKey,
+        entry.scopeId,
         entry.schemaVersion,
         entry.operationId,
         entry.pluginId,
@@ -668,10 +692,10 @@ final class SqlitePluginRevocationStore
       _transaction(() {
         _db.execute('''
           INSERT OR IGNORE INTO plugin_revocation_journal
-          (idempotency_key, schema_version, operation_id, plugin_id,
+          (idempotency_key, scope_id, schema_version, operation_id, plugin_id,
            provider_owner_id, action, status, revision, created_at, updated_at,
            correlation_id, detail)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', _journalValues(entry));
         return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
       });
@@ -689,14 +713,15 @@ final class SqlitePluginRevocationStore
         final values = _journalValues(replacement);
         _db.execute('''
           UPDATE plugin_revocation_journal
-          SET schema_version = ?, operation_id = ?, plugin_id = ?,
+          SET scope_id = ?, schema_version = ?, operation_id = ?, plugin_id = ?,
               provider_owner_id = ?, action = ?, status = ?, revision = ?,
               created_at = ?, updated_at = ?, correlation_id = ?, detail = ?
-          WHERE idempotency_key = ? AND revision = ?
+          WHERE idempotency_key = ? AND revision = ? AND scope_id = ?
         ''', [
           ...values.skip(1),
           idempotencyKey,
           expectedRevision,
+          replacement.scopeId,
         ]);
         return (_db.select('SELECT changes() AS count').first['count'] as int) == 1;
       });
