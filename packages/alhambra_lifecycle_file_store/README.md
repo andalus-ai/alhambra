@@ -126,3 +126,24 @@ atomicity guarantees beyond the host filesystem's documented behavior.
 
 `JsonlCompositionLifecycleEventStore` implements `CompositionLifecycleStorageMaintenanceProvider`. Use `maintain()` to apply the existing inclusive time/count retention rules. The operation is serialized with appends through the store's write queue. JSONL has no WAL, so a requested checkpoint is reported as unsupported in the result warnings rather than silently treated as success. Scheduling and maintenance windows remain the host's responsibility.
 
+
+## Maintenance audit history
+
+Use `JsonlCompositionLifecycleStorageMaintenanceAuditStore` with a separate
+audit file when durable maintenance history is required:
+
+```dart
+final audit = JsonlCompositionLifecycleStorageMaintenanceAuditStore(
+  file: File('${supportDirectory.path}/alhambra/maintenance-audit.jsonl'),
+);
+final coordinator = CompositionLifecycleStorageMaintenanceCoordinator(
+  auditLog: audit,
+);
+```
+
+The store serializes writes within one instance, flushes each newline-terminated
+record, makes identical operation/status appends idempotent, and rejects
+conflicting terminal outcomes. It ignores an unterminated trailing fragment on
+read and repairs that fragment before the next append. It is single-process:
+use an external lock if multiple processes can write the same audit file.
+
