@@ -391,6 +391,12 @@ final class LocalPluginInstallFileSystem
   }) async {
     await initialize();
     final state = await _readState(operationId);
+    if (state['pluginId'] != null && state['pluginId'] != pluginId) {
+      throw StateError('Filesystem operation metadata belongs to a different plugin.');
+    }
+    if (stagingHandle != null && stagingHandle != _key(operationId)) {
+      throw StateError('Staging handle does not prove ownership of this operation.');
+    }
     final stagingPath = _stagingPath(operationId);
     final stageExists = await Directory(stagingPath).exists();
     final destination = destinationPath ?? state['destinationPath'] as String?;
