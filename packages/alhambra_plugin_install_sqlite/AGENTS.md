@@ -8,5 +8,7 @@
 - Keep approval-ID uniqueness across retained history, not just current rows.
 - Treat only committed, rolledBack and failed as terminal; ambiguous recovery
   states must remain queryable.
-- Do not claim filesystem atomicity, worker fencing, or exactly-once effects.
+- Enforce journal fencing tokens atomically on writes and CAS after fence registration.
+- Keep lease counters durable and monotonic across process restarts.
+- Do not claim filesystem atomicity, distributed transactions, or exactly-once effects.
 - Test reopen durability and competing independent database connections.
