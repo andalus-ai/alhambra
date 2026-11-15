@@ -154,6 +154,24 @@ void main() {
         CompositionLifecycleStorageMaintenanceRecoveryState.conflictingHistory);
   });
 
+  test('validates audit query bounds and limits', () {
+    expect(
+      () => CompositionLifecycleStorageMaintenanceAuditQuery(limit: 0),
+      throwsArgumentError,
+    );
+    expect(
+      () => CompositionLifecycleStorageMaintenanceAuditQuery(
+        from: DateTime.utc(2026, 11, 16),
+        to: DateTime.utc(2026, 11, 15),
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => CompositionLifecycleStorageMaintenanceAuditQuery(operationId: ' '),
+      throwsArgumentError,
+    );
+  });
+
   test('validates the requested operation identifier', () {
     expect(
       () => CompositionLifecycleStorageMaintenanceRecovery.classify(
