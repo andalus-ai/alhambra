@@ -16,7 +16,8 @@ final class SqliteLifecycleEventStoreWorker
     implements
         CompositionLifecycleEventStore,
         CompositionLifecycleStorageHealthProvider,
-        CompositionLifecycleStorageMaintenanceProvider,\n        CompositionLifecycleStorageMaintenanceAuditStore {
+        CompositionLifecycleStorageMaintenanceProvider,
+        CompositionLifecycleStorageMaintenanceAuditStore {
   final ReceivePort _responses;
   final ReceivePort _errors;
   final ReceivePort _exits;
