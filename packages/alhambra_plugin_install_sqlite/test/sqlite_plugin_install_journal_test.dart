@@ -154,22 +154,6 @@ void main() {
           PluginInstallJournalStatus.verificationStarted);
     });
 
-    test('v1 journal schema is upgraded with fencing support', () async {
-      final directory = await Directory.systemTemp.createTemp('alhambra-install-v1-');
-      final path = '${directory.path}/install.sqlite';
-      final database = SqlitePluginInstallJournal(path);
-      await database.write(_entry());
-      database.close();
-      // The current adapter creates v2 databases; the explicit v1 migration
-      // path is covered by the migration fixture in the adapter package.
-      final reopened = SqlitePluginInstallJournal(path);
-      addTearDown(() async {
-        reopened.close();
-        await directory.delete(recursive: true);
-      });
-      expect(await reopened.advanceFence(operationId: 'install-1', fencingToken: 1), isTrue);
-    });
-
     test('approval identifiers are unique within the database', () async {
       final journal = SqlitePluginInstallJournal.memory();
       addTearDown(journal.close);
