@@ -361,3 +361,49 @@ operational job. Production archive adapters must reject conflicting snapshots
 for an existing job ID and document their durability and concurrency
 guarantees. Retention, legal holds, access control, and any eventual purge
 remain host responsibilities.
+
+
+## Recovery archive integrity, restore, and retention governance
+
+Archived jobs carry an integrity envelope containing a format version, digest
+algorithm identifier, and digest of a canonical versioned snapshot. The archive
+timestamp is included in the digest as well as the complete job snapshot. The
+canonical snapshot includes the full recovery job identity, ordered plugin
+steps, checkpoint preconditions, execution IDs, timestamps, sanitized failure
+metadata, cancellation/expiration metadata, and revision. The codec is
+explicitly versioned; changes to persisted fields require a compatible codec
+evolution.
+
+Alhambra does not select or bundle a cryptographic implementation. The host
+supplies a `PluginLifecycleRecoveryJobDigestProvider`; production deployments
+should use a vetted cryptographic digest such as SHA-256 and pin the algorithm
+identifier. The test digest provider is test-only and must never be used for
+production integrity.
+
+`PluginLifecycleRecoveryJobArchiveVerifier` is read-only. It reports missing,
+unsupported-format, and digest-mismatch conditions without mutating data.
+`PluginLifecycleRecoveryJobArchiveRestorer` imports only a verified snapshot
+and uses the operational job store's insert-if-absent boundary. A matching
+existing snapshot is idempotent; a conflicting job ID or idempotency key is
+rejected. Restore does not execute plugin code, alter plugin checkpoints, or
+resume a job. Restored jobs retain their terminal state and require a separate
+host decision for any new recovery attempt.
+
+Retention policy is supplied by the host for each inspection. The inspector
+considers the retention deadline, legal hold, and audit-preservation flag; it
+does not infer legal requirements or persist policy. Legal hold and audit
+preservation always block purge, even after the nominal retention deadline.
+
+Purge is a separate explicit operation against an archive adapter that
+implements `PluginLifecycleRecoveryJobArchivePurgeStore`. It requires
+host-provided authorization evidence validated by a host authorization adapter,
+an expected archive digest, an eligible retention decision, and a fresh
+successful integrity verification against the same archive adapter being purged. A durable
+purge-intent audit event is written before the adapter's atomic
+delete-if-digest-matches operation. If audit persistence fails, the archive is
+not deleted. The operational job record is never purged by this API.
+
+Alhambra does not provide retention timers, automatic archival, legal-hold
+management, authorization, purge scheduling, or an archive backend. Hosts are
+responsible for durable audit sinks, archive adapter concurrency guarantees,
+retention policy, legal compliance, and review of any failed purge attempt.

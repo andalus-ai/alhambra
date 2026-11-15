@@ -1,43 +1,29 @@
 import 'plugin_lifecycle_recovery_job.dart';
-
-/// Immutable archive envelope. Archival preserves the complete job snapshot;
-/// it does not remove or mutate the operational job record.
-final class PluginLifecycleRecoveryJobArchiveRecord {
-  final PluginLifecycleRecoveryJob job;
-  final DateTime archivedAt;
-
-  PluginLifecycleRecoveryJobArchiveRecord({
-    required this.job,
-    required DateTime archivedAt,
-  }) : archivedAt = archivedAt.toUtc() {
-    if (this.archivedAt.isBefore(job.createdAt)) {
-      throw ArgumentError('archivedAt must not precede job creation.');
-    }
-  }
-}
-
-/// Host-provided archive boundary.
-///
-/// Implementations must make putIfAbsent idempotent by job ID and reject a
-/// conflicting snapshot for an already archived job. This contract does not
-/// prescribe a database, object store, or serialization format.
-abstract interface class PluginLifecycleRecoveryJobArchive {
-  Future<PluginLifecycleRecoveryJobArchiveRecord?> read(String jobId);
-
-  Future<bool> putIfAbsent(PluginLifecycleRecoveryJobArchiveRecord record);
-}
+import 'plugin_lifecycle_recovery_job_archive.dart';
+import 'plugin_lifecycle_recovery_job_archive_integrity.dart';
+import 'plugin_lifecycle_recovery_job_archive_integrity_metadata.dart';
 
 /// Explicit archive operation. It never deletes from the operational store.
 final class PluginLifecycleRecoveryJobArchiver {
   final PluginLifecycleRecoveryJobStore jobStore;
   final PluginLifecycleRecoveryJobArchive archive;
+  final PluginLifecycleRecoveryJobDigestProvider digestProvider;
+  final PluginLifecycleRecoveryJobSnapshotCodec codec;
+  final String digestAlgorithm;
   final DateTime Function() _clock;
 
   PluginLifecycleRecoveryJobArchiver({
     required this.jobStore,
     required this.archive,
+    required this.digestProvider,
+    this.codec = const PluginLifecycleRecoveryJobSnapshotCodec(),
+    required this.digestAlgorithm,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+  }) : _clock = clock ?? DateTime.now {
+    if (digestAlgorithm.trim().isEmpty) {
+      throw ArgumentError.value(digestAlgorithm, 'digestAlgorithm');
+    }
+  }
 
   Future<PluginLifecycleRecoveryJobArchiveRecord> archiveJob({
     required String jobId,
@@ -52,28 +38,61 @@ final class PluginLifecycleRecoveryJobArchiver {
     if (job.revision != expectedRevision) {
       throw StateError('Recovery job revision changed; refresh before archiving.');
     }
-    if (!_isArchivable(job.status)) {
-      throw StateError('Recovery job in state "${job.status.name}" is not eligible for archival.');
+    if (!_isArchivable(job.status) ||
+        job.steps.any((step) => step.status == PluginRecoveryJobStepStatus.running)) {
+      throw StateError('Recovery job is not in a safe terminal state for archival.');
     }
 
     final existing = await archive.read(jobId);
     if (existing != null) {
-      if (!_sameJobSnapshot(existing.job, job)) {
-        throw StateError('An archive with a different job snapshot already exists.');
+      if (!_sameJobSnapshot(existing.job, job) ||
+          existing.integrity.formatVersion !=
+              PluginLifecycleRecoveryJobSnapshotCodec.formatVersion ||
+          existing.integrity.algorithm != digestAlgorithm) {
+        throw StateError('An archive with a different snapshot or digest algorithm already exists.');
+      }
+      final existingDigest = await digestProvider.digest(
+        algorithm: existing.integrity.algorithm,
+        canonicalPayload: codec.encode(job, archivedAt: existing.archivedAt),
+      );
+      if (existingDigest != existing.integrity.digest) {
+        throw StateError('Existing archive integrity verification failed.');
       }
       return existing;
     }
 
+    final archivedAt = _clock().toUtc();
+    final payload = codec.encode(job, archivedAt: archivedAt);
+    final digest = await digestProvider.digest(
+      algorithm: digestAlgorithm,
+      canonicalPayload: payload,
+    );
+    if (digest.trim().isEmpty) {
+      throw StateError('Digest provider returned an empty digest.');
+    }
     final record = PluginLifecycleRecoveryJobArchiveRecord(
       job: job,
-      archivedAt: _clock(),
+      archivedAt: archivedAt,
+      integrity: PluginLifecycleRecoveryJobArchiveIntegrity(
+        formatVersion: PluginLifecycleRecoveryJobSnapshotCodec.formatVersion,
+        algorithm: digestAlgorithm,
+        digest: digest,
+      ),
     );
     if (!await archive.putIfAbsent(record)) {
       final raced = await archive.read(jobId);
-      if (raced != null && _sameJobSnapshot(raced.job, job)) {
-        return raced;
+      if (raced != null &&
+          _sameJobSnapshot(raced.job, job) &&
+          raced.integrity.formatVersion ==
+              PluginLifecycleRecoveryJobSnapshotCodec.formatVersion &&
+          raced.integrity.algorithm == digestAlgorithm) {
+        final racedDigest = await digestProvider.digest(
+          algorithm: raced.integrity.algorithm,
+          canonicalPayload: codec.encode(job, archivedAt: raced.archivedAt),
+        );
+        if (racedDigest == raced.integrity.digest) return raced;
       }
-      throw StateError('A conflicting archive record was written concurrently.');
+      throw StateError('A conflicting or invalid archive record was written concurrently.');
     }
     return record;
   }
@@ -95,45 +114,233 @@ final class PluginLifecycleRecoveryJobArchiver {
 bool _sameJobSnapshot(
   PluginLifecycleRecoveryJob left,
   PluginLifecycleRecoveryJob right,
-) {
-  if (left.schemaVersion != right.schemaVersion ||
-      left.jobId != right.jobId ||
-      left.idempotencyKey != right.idempotencyKey ||
-      left.operationId != right.operationId ||
-      left.action != right.action ||
-      left.status != right.status ||
-      left.revision != right.revision ||
-      left.createdAt != right.createdAt ||
-      left.updatedAt != right.updatedAt ||
-      left.initiatedBy != right.initiatedBy ||
-      left.correlationId != right.correlationId ||
-      left.failureCode != right.failureCode ||
-      left.failureSummary != right.failureSummary ||
-      left.cancellationRequestedAt != right.cancellationRequestedAt ||
-      left.expiresAt != right.expiresAt ||
-      left.expiredAt != right.expiredAt ||
-      left.orderedPluginIds.length != right.orderedPluginIds.length ||
-      left.steps.length != right.steps.length) {
-    return false;
+) => const PluginLifecycleRecoveryJobSnapshotCodec().encode(left) ==
+    const PluginLifecycleRecoveryJobSnapshotCodec().encode(right);
+
+/// Host-owned retention inputs. Alhambra does not persist or infer legal policy.
+final class PluginLifecycleRecoveryJobRetentionPolicy {
+  final DateTime retainUntil;
+  final bool legalHold;
+  final bool auditPreservationRequired;
+
+  PluginLifecycleRecoveryJobRetentionPolicy({
+    required DateTime retainUntil,
+    this.legalHold = false,
+    this.auditPreservationRequired = false,
+  }) : retainUntil = retainUntil.toUtc();
+}
+
+enum PluginRecoveryArchiveRetentionDisposition {
+  missing,
+  notTerminal,
+  retentionPeriodActive,
+  legalHold,
+  auditPreservationRequired,
+  eligibleForExplicitPurge,
+}
+
+final class PluginRecoveryArchiveRetentionReport {
+  final String jobId;
+  final PluginRecoveryArchiveRetentionDisposition disposition;
+  final DateTime evaluatedAt;
+  final DateTime retainUntil;
+  final bool legalHold;
+  final bool auditPreservationRequired;
+  final String? archiveDigest;
+
+  const PluginRecoveryArchiveRetentionReport({
+    required this.jobId,
+    required this.disposition,
+    required this.evaluatedAt,
+    required this.retainUntil,
+    required this.legalHold,
+    required this.auditPreservationRequired,
+    required this.archiveDigest,
+  });
+
+  bool get eligibleForPurge =>
+      disposition == PluginRecoveryArchiveRetentionDisposition.eligibleForExplicitPurge;
+}
+
+/// Read-only retention evaluation. It never deletes or modifies archive data.
+final class PluginLifecycleRecoveryJobRetentionInspector {
+  final PluginLifecycleRecoveryJobArchive archive;
+  final DateTime Function() _clock;
+
+  PluginLifecycleRecoveryJobRetentionInspector({
+    required this.archive,
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now;
+
+  Future<PluginRecoveryArchiveRetentionReport> inspect({
+    required String jobId,
+    required PluginLifecycleRecoveryJobRetentionPolicy policy,
+    DateTime? at,
+  }) async {
+    final instant = (at ?? _clock()).toUtc();
+    final record = await archive.read(jobId);
+    final PluginRecoveryJobArchiveRetentionDisposition disposition;
+    if (record == null) {
+      disposition = PluginRecoveryJobArchiveRetentionDisposition.missing;
+    } else if (!_isTerminal(record.job.status)) {
+      disposition = PluginRecoveryJobArchiveRetentionDisposition.notTerminal;
+    } else if (policy.legalHold) {
+      disposition = PluginRecoveryJobArchiveRetentionDisposition.legalHold;
+    } else if (policy.auditPreservationRequired) {
+      disposition = PluginRecoveryJobArchiveRetentionDisposition.auditPreservationRequired;
+    } else if (instant.isBefore(policy.retainUntil)) {
+      disposition = PluginRecoveryJobArchiveRetentionDisposition.retentionPeriodActive;
+    } else {
+      disposition = PluginRecoveryJobArchiveRetentionDisposition.eligibleForExplicitPurge;
+    }
+    return PluginRecoveryArchiveRetentionReport(
+      jobId: jobId,
+      disposition: disposition,
+      evaluatedAt: instant,
+      retainUntil: policy.retainUntil,
+      legalHold: policy.legalHold,
+      auditPreservationRequired: policy.auditPreservationRequired,
+      archiveDigest: record?.integrity.digest,
+    );
   }
-  for (var i = 0; i < left.orderedPluginIds.length; i++) {
-    if (left.orderedPluginIds[i] != right.orderedPluginIds[i]) return false;
-  }
-  for (var i = 0; i < left.steps.length; i++) {
-    final a = left.steps[i];
-    final b = right.steps[i];
-    if (a.pluginId != b.pluginId ||
-        a.ordinal != b.ordinal ||
-        a.status != b.status ||
-        a.expectedCheckpointOperationId != b.expectedCheckpointOperationId ||
-        a.expectedCheckpointSequence != b.expectedCheckpointSequence ||
-        a.executionOperationId != b.executionOperationId ||
-        a.startedAt != b.startedAt ||
-        a.completedAt != b.completedAt ||
-        a.failureCode != b.failureCode ||
-        a.failureSummary != b.failureSummary) {
-      return false;
+
+  bool _isTerminal(PluginRecoveryJobStatus status) => switch (status) {
+    PluginRecoveryJobStatus.completed ||
+    PluginRecoveryJobStatus.failed ||
+    PluginRecoveryJobStatus.partiallyCompleted ||
+    PluginRecoveryJobStatus.cancelled ||
+    PluginRecoveryJobStatus.expired => true,
+    PluginRecoveryJobStatus.planned ||
+    PluginRecoveryJobStatus.running ||
+    PluginRecoveryJobStatus.cancellationRequested ||
+    PluginRecoveryJobStatus.interrupted ||
+    PluginRecoveryJobStatus.manualReview => false,
+  };
+}
+
+/// Explicit approval evidence supplied by the host's authorization system.
+final class PluginRecoveryArchivePurgeAuthorization {
+  final String authorizedBy;
+  final String approvalReference;
+  final DateTime approvedAt;
+
+  PluginRecoveryArchivePurgeAuthorization({
+    required this.authorizedBy,
+    required this.approvalReference,
+    required DateTime approvedAt,
+  }) : approvedAt = approvedAt.toUtc() {
+    if (authorizedBy.trim().isEmpty || approvalReference.trim().isEmpty) {
+      throw ArgumentError('Purge authorization requires an actor and approval reference.');
     }
   }
-  return true;
+}
+
+final class PluginRecoveryArchivePurgeAuditEvent {
+  final String jobId;
+  final String archiveDigest;
+  final String authorizedBy;
+  final String approvalReference;
+  final DateTime approvedAt;
+  final DateTime purgeRequestedAt;
+
+  const PluginRecoveryArchivePurgeAuditEvent({
+    required this.jobId,
+    required this.archiveDigest,
+    required this.authorizedBy,
+    required this.approvalReference,
+    required this.approvedAt,
+    required this.purgeRequestedAt,
+  });
+}
+
+abstract interface class PluginRecoveryArchivePurgeAuditSink {
+  /// Must durably record the event before returning successfully.
+  Future<void> record(PluginRecoveryArchivePurgeAuditEvent event);
+}
+
+/// Host authorization adapter. A non-empty approval reference alone is not
+/// authorization; the host must validate its identity, scope, and permissions.
+abstract interface class PluginRecoveryArchivePurgeAuthorizer {
+  Future<bool> authorize({
+    required String jobId,
+    required String archiveDigest,
+    required PluginRecoveryArchivePurgeAuthorization authorization,
+  });
+}
+
+enum PluginRecoveryArchivePurgeDisposition { purged }
+
+/// Purges only an archived copy after explicit host approval and retention
+/// checks. The operational job store is never touched.
+final class PluginLifecycleRecoveryJobArchivePurger {
+  final PluginLifecycleRecoveryJobArchivePurgeStore archive;
+  final PluginLifecycleRecoveryJobRetentionInspector inspector;
+  final PluginRecoveryArchivePurgeAuditSink auditSink;
+  final PluginRecoveryArchivePurgeAuthorizer authorizer;
+  final PluginLifecycleRecoveryJobDigestProvider digestProvider;
+  final PluginLifecycleRecoveryJobSnapshotCodec codec;
+  final DateTime Function() _clock;
+
+  PluginLifecycleRecoveryJobArchivePurger({
+    required this.archive,
+    required this.inspector,
+    required this.auditSink,
+    required this.authorizer,
+    required this.digestProvider,
+    this.codec = const PluginLifecycleRecoveryJobSnapshotCodec(),
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now;
+
+  Future<PluginRecoveryArchivePurgeDisposition> purge({
+    required String jobId,
+    required PluginLifecycleRecoveryJobRetentionPolicy policy,
+    required PluginRecoveryArchivePurgeAuthorization authorization,
+    required String expectedDigest,
+    DateTime? at,
+  }) async {
+    if (jobId.trim().isEmpty || expectedDigest.trim().isEmpty) {
+      throw ArgumentError('jobId and expectedDigest are required.');
+    }
+    final report = await inspector.inspect(jobId: jobId, policy: policy, at: at);
+    if (!report.eligibleForPurge) {
+      throw StateError('Archive is not eligible for purge: ${report.disposition.name}.');
+    }
+    if (report.archiveDigest != expectedDigest) {
+      throw StateError('Archive digest changed; refresh and re-authorize purge.');
+    }
+    if (!await authorizer.authorize(
+      jobId: jobId,
+      archiveDigest: expectedDigest,
+      authorization: authorization,
+    )) {
+      throw StateError('Host authorization denied archive purge.');
+    }
+    final requestedAt = (at ?? _clock()).toUtc();
+    if (authorization.approvedAt.isAfter(requestedAt)) {
+      throw StateError('Purge approval timestamp cannot be in the future.');
+    }
+    final verification = await PluginLifecycleRecoveryJobArchiveVerifier(
+      archive: archive,
+      digestProvider: digestProvider,
+      codec: codec,
+    ).verify(jobId);
+    if (!verification.isValid || verification.expectedDigest != expectedDigest) {
+      throw StateError('Archive integrity verification failed; purge is blocked.');
+    }
+    await auditSink.record(PluginRecoveryArchivePurgeAuditEvent(
+      jobId: jobId,
+      archiveDigest: expectedDigest,
+      authorizedBy: authorization.authorizedBy,
+      approvalReference: authorization.approvalReference,
+      approvedAt: authorization.approvedAt,
+      purgeRequestedAt: requestedAt,
+    ));
+    if (!await archive.deleteIfDigestMatches(
+      jobId: jobId,
+      expectedDigest: expectedDigest,
+    )) {
+      throw StateError('Archive changed or disappeared before purge completed.');
+    }
+    return PluginRecoveryArchivePurgeDisposition.purged;
+  }
 }

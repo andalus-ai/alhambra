@@ -23,7 +23,7 @@ PluginLifecycleRecoveryJob _job({
   );
 }
 
-final class _MemoryArchive implements PluginLifecycleRecoveryJobArchive {
+final class _MemoryArchive implements PluginLifecycleRecoveryJobArchivePurgeStore {
   final Map<String, PluginLifecycleRecoveryJobArchiveRecord> records = {};
 
   @override
@@ -35,6 +35,63 @@ final class _MemoryArchive implements PluginLifecycleRecoveryJobArchive {
     if (records.containsKey(record.job.jobId)) return false;
     records[record.job.jobId] = record;
     return true;
+  }
+
+  @override
+  Future<bool> deleteIfDigestMatches({
+    required String jobId,
+    required String expectedDigest,
+  }) async {
+    final record = records[jobId];
+    if (record == null || record.integrity.digest != expectedDigest) return false;
+    records.remove(jobId);
+    return true;
+  }
+}
+
+final class _TestDigestProvider
+    implements PluginLifecycleRecoveryJobDigestProvider {
+  @override
+  Future<String> digest({
+    required String algorithm,
+    required String canonicalPayload,
+  }) async {
+    if (algorithm != 'test-fnv32') throw ArgumentError('Unsupported test algorithm.');
+    var hash = 0x811c9dc5;
+    for (final unit in canonicalPayload.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0xffffffff;
+    }
+    return hash.toRadixString(16).padLeft(8, '0');
+  }
+}
+
+
+
+final class _TestPurgeAuditSink implements PluginRecoveryArchivePurgeAuditSink {
+  final void Function(PluginRecoveryArchivePurgeAuditEvent) onRecord;
+  _TestPurgeAuditSink(this.onRecord);
+
+  @override
+  Future<void> record(PluginRecoveryArchivePurgeAuditEvent event) async {
+    onRecord(event);
+  }
+}
+
+
+final class _AllowPurgeAuthorizer implements PluginRecoveryArchivePurgeAuthorizer {
+  @override
+  Future<bool> authorize({
+    required String jobId,
+    required String archiveDigest,
+    required PluginRecoveryArchivePurgeAuthorization authorization,
+  }) async => true;
+}
+
+final class _FailingPurgeAuditSink implements PluginRecoveryArchivePurgeAuditSink {
+  @override
+  Future<void> record(PluginRecoveryArchivePurgeAuditEvent event) async {
+    throw StateError('audit unavailable');
   }
 }
 
@@ -244,6 +301,8 @@ void main() {
       final archiver = PluginLifecycleRecoveryJobArchiver(
         jobStore: store,
         archive: archive,
+        digestProvider: _TestDigestProvider(),
+        digestAlgorithm: 'test-fnv32',
         clock: () => DateTime.utc(2026, 11, 16),
       );
 
@@ -271,6 +330,8 @@ void main() {
       final archiver = PluginLifecycleRecoveryJobArchiver(
         jobStore: store,
         archive: archive,
+        digestProvider: _TestDigestProvider(),
+        digestAlgorithm: 'test-fnv32',
       );
 
       await expectLater(
@@ -281,6 +342,260 @@ void main() {
         throwsStateError,
       );
       expect(archive.records, isEmpty);
+    });
+  });
+
+  group('PluginLifecycleRecoveryJobArchiveVerifier and Restorer', () {
+    test('verifies and restores an archived terminal snapshot without execution', () async {
+      final operational = InMemoryPluginLifecycleRecoveryJobStore();
+      final base = _job();
+      final cancelled = base.next(
+        status: PluginRecoveryJobStatus.cancelled,
+        at: DateTime.utc(2026, 11, 14, 1),
+        cancellationRequestedAt: DateTime.utc(2026, 11, 14, 1),
+        steps: base.steps.map((step) => step.copyWith(
+          status: PluginRecoveryJobStepStatus.skipped,
+        )),
+      );
+      await operational.insertIfAbsent(cancelled);
+      final archive = _MemoryArchive();
+      final digests = _TestDigestProvider();
+      final archiver = PluginLifecycleRecoveryJobArchiver(
+        jobStore: operational,
+        archive: archive,
+        digestProvider: digests,
+        digestAlgorithm: 'test-fnv32',
+        clock: () => DateTime.utc(2026, 11, 16),
+      );
+      await archiver.archiveJob(
+        jobId: cancelled.jobId,
+        expectedRevision: cancelled.revision,
+      );
+
+      final restoredStore = InMemoryPluginLifecycleRecoveryJobStore();
+      final verifier = PluginLifecycleRecoveryJobArchiveVerifier(
+        archive: archive,
+        digestProvider: digests,
+      );
+      expect((await verifier.verify(cancelled.jobId)).isValid, isTrue);
+
+      final restorer = PluginLifecycleRecoveryJobArchiveRestorer(
+        archive: archive,
+        jobStore: restoredStore,
+        digestProvider: digests,
+      );
+      final result = await restorer.restore(jobId: cancelled.jobId);
+      expect(result.disposition, PluginLifecycleRecoveryJobRestoreDisposition.restored);
+      expect(result.job.status, PluginRecoveryJobStatus.cancelled);
+      expect((await restoredStore.read(cancelled.jobId))!.revision, cancelled.revision);
+      expect((await restorer.restore(jobId: cancelled.jobId)).disposition,
+          PluginLifecycleRecoveryJobRestoreDisposition.alreadyPresent);
+    });
+
+    test('detects a modified archived snapshot before restore', () async {
+      final store = InMemoryPluginLifecycleRecoveryJobStore();
+      final base = _job();
+      final cancelled = base.next(
+        status: PluginRecoveryJobStatus.cancelled,
+        at: DateTime.utc(2026, 11, 14, 1),
+        cancellationRequestedAt: DateTime.utc(2026, 11, 14, 1),
+        steps: base.steps.map((step) => step.copyWith(
+          status: PluginRecoveryJobStepStatus.skipped,
+        )),
+      );
+      await store.insertIfAbsent(cancelled);
+      final archive = _MemoryArchive();
+      final digests = _TestDigestProvider();
+      await PluginLifecycleRecoveryJobArchiver(
+        jobStore: store,
+        archive: archive,
+        digestProvider: digests,
+        digestAlgorithm: 'test-fnv32',
+      ).archiveJob(jobId: cancelled.jobId, expectedRevision: cancelled.revision);
+
+      final record = archive.records[cancelled.jobId]!;
+      final modified = record.job.next(
+        status: PluginRecoveryJobStatus.cancelled,
+        at: record.job.updatedAt.add(const Duration(seconds: 1)),
+        cancellationRequestedAt: record.job.cancellationRequestedAt,
+        steps: record.job.steps,
+      );
+      archive.records[cancelled.jobId] = PluginLifecycleRecoveryJobArchiveRecord(
+        job: modified,
+        archivedAt: record.archivedAt,
+        integrity: record.integrity,
+      );
+
+      final verifier = PluginLifecycleRecoveryJobArchiveVerifier(
+        archive: archive,
+        digestProvider: digests,
+      );
+      expect((await verifier.verify(cancelled.jobId)).disposition,
+          PluginRecoveryArchiveVerificationDisposition.invalidDigest);
+      final target = InMemoryPluginLifecycleRecoveryJobStore();
+      await expectLater(
+        PluginLifecycleRecoveryJobArchiveRestorer(
+          archive: archive,
+          jobStore: target,
+          digestProvider: digests,
+        ).restore(jobId: cancelled.jobId),
+        throwsStateError,
+      );
+      expect(await target.read(cancelled.jobId), isNull);
+    });
+  });
+
+  group('PluginLifecycleRecoveryJobRetentionInspector and Purger', () {
+    test('blocks purge for active retention, legal hold, and audit preservation', () async {
+      final store = InMemoryPluginLifecycleRecoveryJobStore();
+      final base = _job();
+      final cancelled = base.next(
+        status: PluginRecoveryJobStatus.cancelled,
+        at: DateTime.utc(2026, 11, 14, 1),
+        cancellationRequestedAt: DateTime.utc(2026, 11, 14, 1),
+        steps: base.steps.map((step) => step.copyWith(
+          status: PluginRecoveryJobStepStatus.skipped,
+        )),
+      );
+      await store.insertIfAbsent(cancelled);
+      final archive = _MemoryArchive();
+      final digests = _TestDigestProvider();
+      await PluginLifecycleRecoveryJobArchiver(
+        jobStore: store,
+        archive: archive,
+        digestProvider: digests,
+        digestAlgorithm: 'test-fnv32',
+      ).archiveJob(jobId: cancelled.jobId, expectedRevision: cancelled.revision);
+
+      final inspector = PluginLifecycleRecoveryJobRetentionInspector(
+        archive: archive,
+      );
+      final active = await inspector.inspect(
+        jobId: cancelled.jobId,
+        policy: PluginLifecycleRecoveryJobRetentionPolicy(
+          retainUntil: DateTime.utc(2026, 12, 1),
+        ),
+        at: DateTime.utc(2026, 11, 30),
+      );
+      final held = await inspector.inspect(
+        jobId: cancelled.jobId,
+        policy: PluginLifecycleRecoveryJobRetentionPolicy(
+          retainUntil: DateTime.utc(2026, 11, 1),
+          legalHold: true,
+        ),
+        at: DateTime.utc(2027),
+      );
+      final auditProtected = await inspector.inspect(
+        jobId: cancelled.jobId,
+        policy: PluginLifecycleRecoveryJobRetentionPolicy(
+          retainUntil: DateTime.utc(2026, 11, 1),
+          auditPreservationRequired: true,
+        ),
+        at: DateTime.utc(2027),
+      );
+
+      expect(active.disposition,
+          PluginRecoveryArchiveRetentionDisposition.retentionPeriodActive);
+      expect(held.disposition, PluginRecoveryArchiveRetentionDisposition.legalHold);
+      expect(auditProtected.disposition,
+          PluginRecoveryArchiveRetentionDisposition.auditPreservationRequired);
+    });
+
+    test('requires durable purge audit and explicit authorization before deleting archive', () async {
+      final store = InMemoryPluginLifecycleRecoveryJobStore();
+      final base = _job();
+      final cancelled = base.next(
+        status: PluginRecoveryJobStatus.cancelled,
+        at: DateTime.utc(2026, 11, 14, 1),
+        cancellationRequestedAt: DateTime.utc(2026, 11, 14, 1),
+        steps: base.steps.map((step) => step.copyWith(
+          status: PluginRecoveryJobStepStatus.skipped,
+        )),
+      );
+      await store.insertIfAbsent(cancelled);
+      final archive = _MemoryArchive();
+      final digests = _TestDigestProvider();
+      final record = await PluginLifecycleRecoveryJobArchiver(
+        jobStore: store,
+        archive: archive,
+        digestProvider: digests,
+        digestAlgorithm: 'test-fnv32',
+      ).archiveJob(jobId: cancelled.jobId, expectedRevision: cancelled.revision);
+      final inspector = PluginLifecycleRecoveryJobRetentionInspector(archive: archive);
+      var auditWritten = false;
+      final purger = PluginLifecycleRecoveryJobArchivePurger(
+        archive: archive,
+        inspector: inspector,
+        auditSink: _TestPurgeAuditSink((_) => auditWritten = true),
+        authorizer: _AllowPurgeAuthorizer(),
+        digestProvider: digests,
+        clock: () => DateTime.utc(2027),
+      );
+
+      await purger.purge(
+        jobId: cancelled.jobId,
+        policy: PluginLifecycleRecoveryJobRetentionPolicy(
+          retainUntil: DateTime.utc(2026, 12, 1),
+        ),
+        authorization: PluginRecoveryArchivePurgeAuthorization(
+          authorizedBy: 'operator',
+          approvalReference: 'change-123',
+          approvedAt: DateTime.utc(2026, 12, 2),
+        ),
+        expectedDigest: record.integrity.digest,
+      );
+
+      expect(auditWritten, isTrue);
+      expect(archive.records, isEmpty);
+      expect((await store.read(cancelled.jobId))!.status,
+          PluginRecoveryJobStatus.cancelled);
+    });
+
+    test('does not purge if audit persistence fails', () async {
+      final store = InMemoryPluginLifecycleRecoveryJobStore();
+      final base = _job();
+      final cancelled = base.next(
+        status: PluginRecoveryJobStatus.cancelled,
+        at: DateTime.utc(2026, 11, 14, 1),
+        cancellationRequestedAt: DateTime.utc(2026, 11, 14, 1),
+        steps: base.steps.map((step) => step.copyWith(
+          status: PluginRecoveryJobStepStatus.skipped,
+        )),
+      );
+      await store.insertIfAbsent(cancelled);
+      final archive = _MemoryArchive();
+      final digests = _TestDigestProvider();
+      final record = await PluginLifecycleRecoveryJobArchiver(
+        jobStore: store,
+        archive: archive,
+        digestProvider: digests,
+        digestAlgorithm: 'test-fnv32',
+      ).archiveJob(jobId: cancelled.jobId, expectedRevision: cancelled.revision);
+      final purger = PluginLifecycleRecoveryJobArchivePurger(
+        archive: archive,
+        inspector: PluginLifecycleRecoveryJobRetentionInspector(archive: archive),
+        auditSink: _FailingPurgeAuditSink(),
+        authorizer: _AllowPurgeAuthorizer(),
+        digestProvider: digests,
+      );
+
+      await expectLater(
+        purger.purge(
+          jobId: cancelled.jobId,
+          policy: PluginLifecycleRecoveryJobRetentionPolicy(
+            retainUntil: DateTime.utc(2026, 12, 1),
+          ),
+          authorization: PluginRecoveryArchivePurgeAuthorization(
+            authorizedBy: 'operator',
+            approvalReference: 'change-456',
+            approvedAt: DateTime.utc(2026, 12, 2),
+          ),
+          expectedDigest: record.integrity.digest,
+          at: DateTime.utc(2027),
+        ),
+        throwsStateError,
+      );
+      expect(archive.records, hasLength(1));
     });
   });
 }
