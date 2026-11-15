@@ -1,0 +1,16 @@
+name: alhambra_plugin_install_filesystem
+description: Fenced, crash-recoverable local filesystem adapter for Alhambra plugin installation.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.13.2 <4.0.0"
+
+dependencies:
+  alhambra_plugin_api:
+    path: ../alhambra_plugin_api
+  path: ^1.9.0
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^3.0.0
