@@ -9,8 +9,9 @@ import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 /// instances sharing the same local database are serialized by SQLite.
 ///
 /// Use a local filesystem with reliable SQLite locking. This adapter does not
-/// provide filesystem promotion atomicity or installer-worker leases.
-final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
+/// provide filesystem promotion atomicity. Worker leases are provided by the
+/// companion [SqlitePluginInstallOperationLeaseStore].
+final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJournal {
   final sq.Database _db;
   bool _closed = false;
 
@@ -44,7 +45,7 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
 
   void _migrate() {
     final version = _db.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > 1) {
+    if (version > 2) {
       throw UnsupportedError('Database schema version $version is newer than this adapter supports.');
     }
     if (version == 0) {
@@ -63,7 +64,8 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
             failure_code TEXT,
             content_hash TEXT,
             approved_by TEXT,
-            approval_id TEXT
+            approval_id TEXT,
+            fencing_token INTEGER
           )
         ''');
         _db.execute('''
@@ -100,12 +102,32 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
             content_hash TEXT,
             approved_by TEXT,
             approval_id TEXT,
+            fencing_token INTEGER,
             UNIQUE(operation_id, revision),
             FOREIGN KEY(operation_id) REFERENCES plugin_install_operation(operation_id)
           )
         ''');
         _db.execute('CREATE INDEX idx_plugin_install_event_history ON plugin_install_event(operation_id, revision)');
-        _db.execute('PRAGMA user_version = 1');
+        _db.execute('''
+          CREATE TABLE plugin_install_fence (
+            operation_id TEXT PRIMARY KEY,
+            highest_token INTEGER NOT NULL CHECK (highest_token >= 0)
+          )
+        ''');
+        _db.execute('PRAGMA user_version = 2');
+      });
+    }
+    if (version == 1) {
+      _transaction(() {
+        _db.execute('ALTER TABLE plugin_install_operation ADD COLUMN fencing_token INTEGER');
+        _db.execute('ALTER TABLE plugin_install_event ADD COLUMN fencing_token INTEGER');
+        _db.execute('''
+          CREATE TABLE plugin_install_fence (
+            operation_id TEXT PRIMARY KEY,
+            highest_token INTEGER NOT NULL CHECK (highest_token >= 0)
+          )
+        ''');
+        _db.execute('PRAGMA user_version = 2');
       });
     }
   }
@@ -123,7 +145,7 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
     }
   }
 
-  static const int _schemaVersion = 1;
+  static const int _schemaVersion = 2;
   static String _date(DateTime value) => value.toUtc().toIso8601String();
   static DateTime _parseDate(Object? value) => DateTime.parse(value! as String).toUtc();
 
@@ -140,11 +162,12 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
         contentHash: row['content_hash'] as String?,
         approvedBy: row['approved_by'] as String?,
         approvalId: row['approval_id'] as String?,
+        fencingToken: row['fencing_token'] as int?,
       );
 
   static const String _columns = '''
     operation_id, schema_version, plugin_id, version, status, updated_at,
-    staging_handle, promoted_path, failure_code, content_hash, approved_by, approval_id
+    staging_handle, promoted_path, failure_code, content_hash, approved_by, approval_id, fencing_token
   ''';
 
   void _recordApproval(PluginInstallJournalEntry entry) {
@@ -162,20 +185,68 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
       INSERT INTO plugin_install_event
       (operation_id, revision, schema_version, plugin_id, version, status,
        occurred_at, staging_handle, promoted_path, failure_code, content_hash,
-       approved_by, approval_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       approved_by, approval_id, fencing_token)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', [
       entry.operationId, revision, _schemaVersion, entry.pluginId, entry.version,
       entry.status.name, _date(entry.updatedAt), entry.stagingHandle,
       entry.promotedPath, entry.failureCode, entry.contentHash,
-      entry.approvedBy, entry.approvalId,
+      entry.approvedBy, entry.approvalId, entry.fencingToken,
     ]);
+  }
+
+  void _assertAcceptedFence(String operationId, int? token) {
+    final rows = _db.select(
+      'SELECT highest_token FROM plugin_install_fence WHERE operation_id = ?',
+      [operationId],
+    );
+    if (rows.isEmpty) {
+      if (token != null) {
+        throw StateError('A fencing token must be registered before journal writes.');
+      }
+      return;
+    }
+    if (token == null || rows.first['highest_token'] != token) {
+      throw StateError('Journal write rejected because its fencing token is stale or missing.');
+    }
+  }
+
+  @override
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  }) async {
+    if (operationId.trim().isEmpty || fencingToken < 1) {
+      throw ArgumentError('A non-empty operation ID and positive fencing token are required.');
+    }
+    return _transaction(() {
+      final rows = _db.select(
+        'SELECT highest_token FROM plugin_install_fence WHERE operation_id = ?',
+        [operationId],
+      );
+      if (rows.isNotEmpty) {
+        final highest = rows.first['highest_token']! as int;
+        if (fencingToken < highest) return false;
+        if (fencingToken == highest) return true;
+        _db.execute(
+          'UPDATE plugin_install_fence SET highest_token = ? WHERE operation_id = ?',
+          [fencingToken, operationId],
+        );
+      } else {
+        _db.execute(
+          'INSERT INTO plugin_install_fence(operation_id, highest_token) VALUES (?, ?)',
+          [operationId, fencingToken],
+        );
+      }
+      return true;
+    });
   }
 
   @override
   Future<void> write(PluginInstallJournalEntry entry) async {
     _validateEntry(entry);
     _transaction(() {
+      _assertAcceptedFence(entry.operationId, entry.fencingToken);
       final rows = _db.select(
         'SELECT * FROM plugin_install_operation WHERE operation_id = ?',
         [entry.operationId],
@@ -183,7 +254,7 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
       if (rows.isEmpty) {
         _db.execute('''
           INSERT INTO plugin_install_operation ($_columns, revision)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         ''', _values(entry));
         _recordApproval(entry);
         _insertEvent(entry, 1);
@@ -212,13 +283,13 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
       UPDATE plugin_install_operation SET
         schema_version = ?, plugin_id = ?, version = ?, status = ?, revision = ?,
         updated_at = ?, staging_handle = ?, promoted_path = ?, failure_code = ?,
-        content_hash = ?, approved_by = ?, approval_id = ?
+        content_hash = ?, approved_by = ?, approval_id = ?, fencing_token = ?
       WHERE operation_id = ?
     ''', [
       _schemaVersion, entry.pluginId, entry.version, entry.status.name, revision,
       _date(entry.updatedAt), entry.stagingHandle, entry.promotedPath,
       entry.failureCode, entry.contentHash, entry.approvedBy, entry.approvalId,
-      entry.operationId,
+      entry.fencingToken, entry.operationId,
     ]);
     _insertEvent(entry, revision);
   }
@@ -227,7 +298,7 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
     entry.operationId, _schemaVersion, entry.pluginId, entry.version,
     entry.status.name, _date(entry.updatedAt), entry.stagingHandle,
     entry.promotedPath, entry.failureCode, entry.contentHash,
-    entry.approvedBy, entry.approvalId,
+    entry.approvedBy, entry.approvalId, entry.fencingToken,
   ];
 
   static bool _isTerminal(PluginInstallJournalStatus status) =>
@@ -304,6 +375,7 @@ final class SqlitePluginInstallJournal implements PluginInstallRecoveryJournal {
         'SELECT * FROM plugin_install_operation WHERE operation_id = ?',
         [operationId],
       );
+      _assertAcceptedFence(operationId, replacement.fencingToken);
       if (rows.isEmpty) return false;
       final current = Map<String, Object?>.from(rows.first);
       if (current['status'] != expectedStatus.name ||

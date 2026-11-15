@@ -1,54 +1,68 @@
-# SQLite Plugin Installation Journal
+# SQLite Plugin Installation Journal and Leases
 
-The optional `alhambra_plugin_install_sqlite` package provides a durable
-implementation of the runtime's `PluginInstallRecoveryJournal` contract.
+The optional `alhambra_plugin_install_sqlite` package provides durable SQLite
+implementations for installation recovery journaling and worker leases.
 
 ## Storage model
 
-Schema version 1 stores:
+The journal schema is version 2. It stores:
+- `plugin_install_operation`: current operation projection, including revision,
+  status, package identity, timestamps, recovery metadata and fencing token.
+- `plugin_install_event`: append-only snapshots of accepted transitions,
+  including the fencing token used for each transition.
+- `plugin_install_fence`: highest accepted fencing token per operation ID.
 
-- `plugin_install_operation`: one current projection per operation ID,
-  including the current status, timestamp, database revision, package identity,
-  staging/destination handles, content hash and approval attribution.
-- `plugin_install_event`: append-only snapshots of every accepted transition,
-  uniquely keyed by operation ID and revision.
+The lease adapter stores `plugin_install_lease`, one current ownership row per
+operation. It retains the last fencing token even after release or expiry, so
+the next successful acquisition increments rather than reuses the token.
+The lease table is additive and can share the same SQLite database file as the
+journal; it does not use the database-global `PRAGMA user_version`.
 
-The current projection and history event are written in one SQLite transaction.
-Every update uses `BEGIN IMMEDIATE`, including recovery claims. The adapter
-uses an operation primary key and database revision to serialize independent
-connections. `unresolved()` reads the current projection and excludes only
-`committed`, `rolledBack` and `failed`; ambiguous statuses remain visible.
+The current projection and history event are committed in one transaction.
+Journal writes, recovery claims and lease mutations use `BEGIN IMMEDIATE` to
+serialize independent SQLite connections. Existing schema-v1 journal
+databases are upgraded by adding the token columns and fence table.
 
-## Recovery compare-and-set
+## Fencing and recovery claims
 
-`compareAndSet` verifies the current operation ID, expected status, exact UTC
-timestamp, and immutable plugin/version identity. The replacement timestamp
-must advance beyond the expected timestamp. A successful claim increments the
-database revision and appends its event atomically. Stale claims return false.
+Call `advanceFence(operationId, fencingToken)` before work starts. It
+atomically persists the highest accepted token. Once a fence exists, journal
+`write` and `compareAndSet` accept only that exact token. A stale worker
+cannot append an event or claim recovery after a higher token has registered.
 
-Approval identifiers are unique across the database's entire event history,
-not merely the current projection. Keep one database per host audit scope, or
-deliberately share it when approval identifiers must be globally unique across
-hosts.
+The lease store serializes acquisition, renewal and release per operation ID.
+A different owner cannot acquire an unexpired lease. A new acquisition after
+expiry/release receives a strictly higher token. Same-owner reacquisition
+during an active lease returns the existing lease without minting a token.
+Renewal requires the exact owner/token and a lease that has not expired.
+
+The lease API accepts a timestamp supplied by the host. For multi-host
+deployments, provide a shared authoritative clock (ideally database-derived);
+unsynchronized worker clocks are not safe for lease expiry decisions.
 
 ## Operational constraints
 
-- Use a local filesystem with reliable SQLite locking. Network filesystems and
+- Use a local filesystem with reliable SQLite locking; network filesystems and
   object stores are outside the supported concurrency assumptions.
-- The adapter enables WAL for file-backed databases, foreign keys and a
-  five-second busy timeout.
-- Back up and protect the database as security-sensitive audit data.
-- Close the store during host shutdown and reopen it to resume reconciliation.
-- The database is not a replacement for worker leases or filesystem ownership
-  markers. The host must fence the original installer before recovery.
-- SQLite cannot atomically commit a filesystem rename. Crash-safe staging,
-  promotion, rollback and finalization remain filesystem-adapter obligations.
-- The adapter does not establish exactly-once effects across the database and
-  filesystem, nor does it implement archive canonicalization.
+- File-backed databases enable WAL, foreign keys where applicable, full
+  synchronous durability and a five-second busy timeout.
+- Protect and back up the database as security-sensitive installation/audit
+  state. Close both store connections during host shutdown.
+- The lease store and journal may share one database file but maintain separate
+  connections and schema responsibilities.
+- The filesystem must independently implement
+  `FencedPluginInstallFileSystem` and atomically reject stale tokens for every
+  mutation. The installed-record store must implement
+  `FencedTransactionalInstalledPluginStore`.
+- SQLite cannot atomically commit a filesystem rename or installed-record
+  mutation. This package does not provide a distributed transaction, crash-safe
+  filesystem adapter, exactly-once external effects, or automatic retries of
+  ambiguous operations.
 
 ## Validation scope
 
-The package tests cover reopen persistence, append-only history ordering,
-concurrent CAS attempts over two connections, stale claims, approval-ID
-uniqueness and terminal-state protection. Run the package's Dart tests in a
-configured Flutter/Dart environment before production adoption.
+Tests cover journal reopen/history, independent-connection CAS contention,
+stale fenced writes and CAS, durable lease token progression across reopen,
+competing lease acquisition, same-owner idempotency and stale renewal. Run
+Dart tests, formatting and static analysis in a configured environment before
+production adoption.
