@@ -67,6 +67,22 @@ abstract interface class CompositionLifecycleStorageMaintenanceAuditStore
   );
 }
 
+/// Reusing an audit identity with a different maintenance record is a conflict.
+final class CompositionLifecycleStorageMaintenanceAuditIdentityConflictException
+    implements Exception {
+  final String operationId;
+  final CompositionLifecycleStorageMaintenanceOperationStatus status;
+
+  const CompositionLifecycleStorageMaintenanceAuditIdentityConflictException({
+    required this.operationId,
+    required this.status,
+  });
+
+  @override
+  String toString() =>
+      'Maintenance audit identity "$operationId/${status.name}" has a conflicting payload.';
+}
+
 /// Recovery interpretation of the durable audit records for one operation.
 enum CompositionLifecycleStorageMaintenanceRecoveryState {
   /// No matching audit records exist.
