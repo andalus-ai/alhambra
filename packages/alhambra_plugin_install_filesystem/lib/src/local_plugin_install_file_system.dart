@@ -114,7 +114,11 @@ final class LocalPluginInstallFileSystem
 
   Future<Map<String, Object?>> _readState(String operationId) async {
     final file = File(_statePath(operationId));
-    if (!await file.exists()) {
+    final fileType = await FileSystemEntity.type(file.path, followLinks: false);
+    if (fileType == FileSystemEntityType.link) {
+      throw StateError('Installation operation metadata must not be a symbolic link.');
+    }
+    if (fileType == FileSystemEntityType.notFound) {
       return <String, Object?>{
         'operationId': operationId,
         'fencingToken': 0,
@@ -132,8 +136,14 @@ final class LocalPluginInstallFileSystem
     final operationId = state['operationId']! as String;
     final target = File(_statePath(operationId));
     final temporary = File('${target.path}.tmp');
-    await _assertNoSymlink(target.parent.path);
-    if (await temporary.exists()) await temporary.delete();
+    await _assertNoSymlink(target.path);
+    final temporaryType = await FileSystemEntity.type(temporary.path, followLinks: false);
+    if (temporaryType == FileSystemEntityType.link) {
+      throw StateError('Temporary operation metadata must not be a symbolic link.');
+    }
+    if (temporaryType != FileSystemEntityType.notFound) {
+      await File(temporary.path).delete();
+    }
     await temporary.writeAsString(jsonEncode(state), flush: true);
     await temporary.rename(target.path);
   }
@@ -296,7 +306,9 @@ final class LocalPluginInstallFileSystem
 
   Future<bool> _hasOwnerMarker(String destination, String operationId, int token) async {
     final marker = File(p.join(destination, _ownerFileName));
-    if (!await marker.exists()) return false;
+    final markerType = await FileSystemEntity.type(marker.path, followLinks: false);
+    if (markerType == FileSystemEntityType.link) return false;
+    if (markerType == FileSystemEntityType.notFound) return false;
     try {
       final data = jsonDecode(await marker.readAsString()) as Map<String, dynamic>;
       return data['operationId'] == operationId && data['fencingToken'] == token;
@@ -406,6 +418,7 @@ final class LocalPluginInstallFileSystem
       throw StateError('Staging handle does not prove ownership of this operation.');
     }
     final stagingPath = _stagingPath(operationId);
+    await _assertNoSymlink(stagingPath);
     final stageExists = await Directory(stagingPath).exists();
     final destination = destinationPath ?? state['destinationPath'] as String?;
     var destinationExists = false;
