@@ -42,14 +42,11 @@ final class SqlitePluginInstallOperationLeaseStore
   }
 
   void _migrate() {
-    final version = _db.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > 1) {
-      throw UnsupportedError('Lease schema version $version is newer than this adapter supports.');
-    }
-    if (version == 0) {
-      _transaction(() {
+    // The lease table has its own additive, idempotent schema. Do not use
+    // PRAGMA user_version here: the journal shares that database-level value.
+    _transaction(() {
         _db.execute('''
-          CREATE TABLE plugin_install_lease (
+          CREATE TABLE IF NOT EXISTS plugin_install_lease (
             operation_id TEXT PRIMARY KEY,
             owner_id TEXT NOT NULL,
             fencing_token INTEGER NOT NULL CHECK (fencing_token >= 1),
@@ -57,9 +54,7 @@ final class SqlitePluginInstallOperationLeaseStore
             expires_at TEXT NOT NULL
           )
         ''');
-        _db.execute('PRAGMA user_version = 1');
       });
-    }
   }
 
   T _transaction<T>(T Function() action) {
