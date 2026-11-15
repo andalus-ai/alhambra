@@ -29,6 +29,7 @@ Start here:
 - [Dynamic capability activation](DYNAMIC_CAPABILITY_ACTIVATION.md) — runtime capability activation boundaries.
 - [Plugin startup capability gate](PLUGIN_STARTUP_CAPABILITY_GATE.md) — startup preconditions and capability checks.
 - [Plugin lifecycle checkpoints](PLUGIN_LIFECYCLE_CHECKPOINTS.md) — lifecycle persistence, reconciliation and explicit recovery.
+- [Recovery archive adapter conformance](RECOVERY_ARCHIVE_ADAPTER_CONFORMANCE.md) — behavioral checks and production guarantees for host-provided archive stores.
 - [Capability provider registry](CAPABILITY_PROVIDER_REGISTRY.md) — provider registration and ownership.
 - [Capability provider health and revocation](CAPABILITY_PROVIDER_HEALTH_AND_REVOCATION.md) — health signals and dependent capability impact.
 - [Governed plugin revocation execution](GOVERNED_PLUGIN_REVOCATION_EXECUTION.md) — approval and execution semantics.
