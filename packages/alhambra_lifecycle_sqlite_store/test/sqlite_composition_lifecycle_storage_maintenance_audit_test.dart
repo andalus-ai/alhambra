@@ -7,11 +7,15 @@ import 'package:test/test.dart';
 void main() {
   late Directory directory;
   late SqliteCompositionLifecycleEventStore store;
+  late SqliteCompositionLifecycleStorageMaintenanceAuditStore auditStore;
 
   setUp(() async {
     directory = await Directory.systemTemp.createTemp('alhambra-maintenance-audit-sqlite-');
     store = SqliteCompositionLifecycleEventStore.open(
       path: '${directory.path}/maintenance.sqlite',
+    );
+    auditStore = SqliteCompositionLifecycleStorageMaintenanceAuditStore(
+      database: store.database,
     );
   });
 
@@ -60,11 +64,11 @@ void main() {
   });
 
   test('persists audit records across database reopen', () async {
-    await store.append(record(
+    await auditStore.append(record(
       'sqlite-op',
       CompositionLifecycleStorageMaintenanceOperationStatus.started,
     ));
-    await store.append(record(
+    await auditStore.append(record(
       'sqlite-op',
       CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
       completedAt: startedAt.add(const Duration(seconds: 1)),
@@ -91,11 +95,11 @@ void main() {
     await store.append(start);
     await store.append(start);
     expect(
-      (await store.query(CompositionLifecycleStorageMaintenanceAuditQuery())).length,
+      (await auditStore.query(CompositionLifecycleStorageMaintenanceAuditQuery())).length,
       1,
     );
     expect(
-      () => store.append(record(
+      () => auditStore.append(record(
         'idempotent',
         CompositionLifecycleStorageMaintenanceOperationStatus.started,
         maxEvents: 999,
@@ -106,14 +110,14 @@ void main() {
 
   test('enforces a single terminal record and supports keyset pagination', () async {
     for (final id in ['d', 'b', 'a', 'c']) {
-      await store.append(record(
+      await auditStore.append(record(
         id,
         CompositionLifecycleStorageMaintenanceOperationStatus.started,
       ));
     }
-    final first = await store.query(CompositionLifecycleStorageMaintenanceAuditQuery(limit: 2));
+    final first = await auditStore.query(CompositionLifecycleStorageMaintenanceAuditQuery(limit: 2));
     expect(first.map((value) => value.operationId), ['a', 'b']);
-    final next = await store.query(CompositionLifecycleStorageMaintenanceAuditQuery(
+    final next = await auditStore.query(CompositionLifecycleStorageMaintenanceAuditQuery(
       after: CompositionLifecycleStorageMaintenanceAuditCursor(
         startedAt: startedAt,
         operationId: first.last.operationId,
@@ -123,13 +127,13 @@ void main() {
     ));
     expect(next.map((value) => value.operationId), ['c', 'd']);
 
-    await store.append(record(
+    await auditStore.append(record(
       'a',
       CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
       completedAt: startedAt.add(const Duration(seconds: 2)),
     ));
     expect(
-      () => store.append(record(
+      () => auditStore.append(record(
         'a',
         CompositionLifecycleStorageMaintenanceOperationStatus.failed,
         completedAt: startedAt.add(const Duration(seconds: 3)),
