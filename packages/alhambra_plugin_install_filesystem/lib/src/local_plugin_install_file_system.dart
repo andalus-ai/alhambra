@@ -181,7 +181,7 @@ final class LocalPluginInstallFileSystem
     int fencingToken = 0,
   }) =>
       _withLock(operationId, () async {
-        if (fencingToken > 0) await _requireFence(operationId, fencingToken);
+        await _requireFence(operationId, fencingToken);
         _validateSegment(pluginId, 'pluginId');
         _validateSegment(version, 'version');
         final path = _stagingPath(operationId);
@@ -305,6 +305,7 @@ final class LocalPluginInstallFileSystem
   }
 
   Future<bool> _hasOwnerMarker(String destination, String operationId, int token) async {
+    await _assertNoSymlink(destination);
     final marker = File(p.join(destination, _ownerFileName));
     final markerType = await FileSystemEntity.type(marker.path, followLinks: false);
     if (markerType == FileSystemEntityType.link) return false;
@@ -375,8 +376,11 @@ final class LocalPluginInstallFileSystem
         await _requireFence(staging.operationId, staging.fencingToken);
         final state = await _readState(staging.operationId);
         final expected = state['destinationPath'] as String?;
-        if (expected == null || p.normalize(promotedPath) != p.normalize(expected) ||
-            !await Directory(expected).exists() ||
+        if (expected == null || p.normalize(promotedPath) != p.normalize(expected)) {
+          throw StateError('Cannot finalize a destination not owned by this operation.');
+        }
+        await _assertNoSymlink(expected);
+        if (!await Directory(expected).exists() ||
             !await _hasOwnerMarker(expected, staging.operationId, staging.fencingToken)) {
           throw StateError('Cannot finalize a destination not owned by this operation.');
         }
@@ -433,6 +437,7 @@ final class LocalPluginInstallFileSystem
           rollbackAvailable: false,
         );
       }
+      await _assertNoSymlink(destination);
       destinationExists = await Directory(destination).exists();
       owned = destinationExists && await _hasOwnerMarker(
         destination,
