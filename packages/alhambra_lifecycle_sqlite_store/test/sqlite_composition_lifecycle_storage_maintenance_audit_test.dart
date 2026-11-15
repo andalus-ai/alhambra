@@ -76,8 +76,11 @@ void main() {
     final path = '${directory.path}/maintenance.sqlite';
     await store.close();
     store = SqliteCompositionLifecycleEventStore.open(path: path);
+    auditStore = SqliteCompositionLifecycleStorageMaintenanceAuditStore(
+      database: store.database,
+    );
 
-    final records = await store.query(
+    final records = await auditStore.query(
       CompositionLifecycleStorageMaintenanceAuditQuery(operationId: 'sqlite-op'),
     );
     expect(records.map((value) => value.status), [
@@ -92,8 +95,8 @@ void main() {
       'idempotent',
       CompositionLifecycleStorageMaintenanceOperationStatus.started,
     );
-    await store.append(start);
-    await store.append(start);
+    await auditStore.append(start);
+    await auditStore.append(start);
     expect(
       (await auditStore.query(CompositionLifecycleStorageMaintenanceAuditQuery())).length,
       1,
