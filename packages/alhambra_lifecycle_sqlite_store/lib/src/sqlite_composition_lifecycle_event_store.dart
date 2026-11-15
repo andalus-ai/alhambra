@@ -15,11 +15,12 @@ final class SqliteCompositionLifecycleEventStore
         CompositionLifecycleEventStore,
         CompositionLifecycleStorageHealthProvider,
         CompositionLifecycleStorageMaintenanceProvider {
-  static const int schemaVersion = 2;
+  static const int schemaVersion = 3;
 
   static final List<_SqliteSchemaMigration> _migrations = [
     _SqliteSchemaMigration(version: 1, apply: _createInitialSchema),
     _SqliteSchemaMigration(version: 2, apply: _addCombinedStatusOperationIndex),
+    _SqliteSchemaMigration(version: 3, apply: _createMaintenanceAuditSchema),
   ];
 
   final Database database;
@@ -134,65 +135,32 @@ final class SqliteCompositionLifecycleEventStore
   }
 
   /// Adds an index for the common status + operation + chronological query.
+  static void _createMaintenanceAuditSchema(Database database) {
+    database.execute('''
+      CREATE TABLE IF NOT EXISTS lifecycle_maintenance_audit (
+        operation_id TEXT NOT NULL,
+        operation_id_sort_key TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at_micros INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        PRIMARY KEY (operation_id, status)
+      )
+    ''');
+    database.execute(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_maintenance_one_terminal "
+      "ON lifecycle_maintenance_audit(operation_id) WHERE status != 'started'",
+    );
+    database.execute(
+      'CREATE INDEX IF NOT EXISTS idx_maintenance_audit_order '
+      'ON lifecycle_maintenance_audit(started_at_micros, operation_id_sort_key, status)',
+    );
+  }
+
   static void _addCombinedStatusOperationIndex(Database database) {
     database.execute(
       'CREATE INDEX IF NOT EXISTS idx_lifecycle_status_operation_time '
       'ON lifecycle_events(status, operation, timestamp_micros, event_id_sort_key)',
     );
-  }
-
-  @override
-  Future<void> append(CompositionLifecycleEvent event) async {
-    _ensureOpen();
-    final payload = codec.encode(event);
-    try {
-      database.execute('BEGIN IMMEDIATE');
-      try {
-        final existing = database.select(
-          'SELECT payload FROM lifecycle_events WHERE event_id = ?',
-          [event.eventId],
-        );
-        if (existing.isNotEmpty) {
-          if (existing.first['payload'] == payload) {
-            database.execute('COMMIT');
-            _lastSuccessfulWriteAt = DateTime.now().toUtc();
-            _lastWriteError = null;
-            return;
-          }
-          throw CompositionLifecycleEventIdentityConflictException(event.eventId);
-        }
-
-        database.execute(
-          'INSERT INTO lifecycle_events '
-          '(event_id, event_id_sort_key, correlation_id, operation, status, timestamp_micros, payload) '
-          'VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [
-            event.eventId,
-            _eventIdSortKey(event.eventId),
-            event.correlationId,
-            event.operation.name,
-            event.status.name,
-            event.timestamp.toUtc().microsecondsSinceEpoch,
-            payload,
-          ],
-        );
-        for (final ownerId in event.ownerIds.toSet()) {
-          database.execute(
-            'INSERT INTO lifecycle_event_owners (event_id, owner_id) VALUES (?, ?)',
-            [event.eventId, ownerId],
-          );
-        }
-        database.execute('COMMIT');
-        _lastSuccessfulWriteAt = DateTime.now().toUtc();
-        _lastWriteError = null;
-      } on Object {
-        database.execute('ROLLBACK');
-        rethrow;
-      }
-    } on Object catch (error) {
-      _lastWriteError = error;
-      rethrow;
-    }
   }
 
   @override

@@ -77,3 +77,34 @@ The coordinator does not schedule operations, choose policy, inspect storage,
 or perform authorization. Hosts own those responsibilities and must provide
 stronger external locking when multiple coordinator instances or processes
 can target the same store.
+
+
+## Lifecycle maintenance audit history and recovery
+
+Hosts that need durable, queryable history can implement the optional
+`CompositionLifecycleStorageMaintenanceAuditStore`. It extends the
+coordinator's append-only audit sink with bounded queries by operation ID,
+status, inclusive time range, and an exclusive keyset cursor. Results are
+ordered oldest-first by `(startedAt, operationId, status.name)`. Implementors
+should make appends idempotent for an identical `(operationId, status)`
+record and reject conflicting reuse with `CompositionLifecycleStorageMaintenanceAuditIdentityConflictException`.
+
+`CompositionLifecycleStorageMaintenanceRecovery.classify` interprets the
+records for one operation without performing recovery or replay. A start
+record without a terminal record is `outcomeUnknown`: the process may have
+stopped after destructive work was applied but before the terminal audit write.
+A terminal record without a start record is incomplete history. Duplicate or
+inconsistent records are conflicting history. Only a matching start and one
+terminal record establish a known terminal status.
+
+Audit history alone never authorizes automatic retry, including after a
+recorded failure. Hosts must reconcile unknown outcomes and require an
+executor/adapter-specific idempotency or reconciliation guarantee before
+replaying maintenance. The API does not claim exactly-once execution or a
+transaction spanning the maintenance backend and audit store.
+
+
+The versioned `CompositionLifecycleStorageMaintenanceAuditJsonCodec` is shared
+by the file and SQLite adapters. Maintenance audit metrics must contain
+JSON-compatible values; unsupported values fail encoding rather than being
+silently stringified. Concrete adapters are optional and host-owned.
