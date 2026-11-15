@@ -27,12 +27,18 @@ final class PluginInstallRecoveryExecutor {
   final PluginInstallRecoveryJournal journal;
   final PluginInstallFileSystem fileSystem;
   final InstalledPluginStore installedStore;
+  final PluginInstallOperationLeaseStore? leaseStore;
+  final String? workerId;
+  final Duration leaseDuration;
   final DateTime Function() clock;
 
   PluginInstallRecoveryExecutor({
     required this.journal,
     required this.fileSystem,
     required this.installedStore,
+    this.leaseStore,
+    this.workerId,
+    this.leaseDuration = const Duration(seconds: 30),
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
 
@@ -51,6 +57,77 @@ final class PluginInstallRecoveryExecutor {
     }
 
     final entry = finding.journalEntry;
+    PluginInstallOperationLease? lease;
+    if (leaseStore != null &&
+        (journal is! FencedPluginInstallRecoveryJournal ||
+            fileSystem is! FencedPluginInstallFileSystem)) {
+      throw ArgumentError(
+        'Recovery lease mode requires fenced recovery-journal and filesystem adapters.',
+      );
+    }
+    if (leaseStore != null) {
+      final owner = workerId;
+      if (owner == null || owner.trim().isEmpty) {
+        throw ArgumentError('workerId is required when a recovery lease store is configured.');
+      }
+      if (leaseDuration <= Duration.zero) {
+        throw ArgumentError.value(leaseDuration, 'leaseDuration', 'Must be positive.');
+      }
+      lease = await leaseStore!.acquire(
+        operationId: entry.operationId,
+        ownerId: owner,
+        now: clock().toUtc(),
+        leaseDuration: leaseDuration,
+      );
+      if (lease == null) {
+        throw const PluginInstallRecoveryException(
+          'RECOVERY_OPERATION_BUSY',
+          'Another worker currently owns this installation operation.',
+        );
+      }
+    }
+
+    Future<void> ensureLease() async {
+      final store = leaseStore;
+      final current = lease;
+      if (store == null || current == null) return;
+      final renewed = await store.renew(
+        lease: current,
+        now: clock().toUtc(),
+        leaseDuration: leaseDuration,
+      );
+      if (renewed == null) {
+        throw const PluginInstallRecoveryException(
+          'RECOVERY_LEASE_LOST',
+          'Recovery worker lost its operation lease.',
+          reconciliationRequired: true,
+        );
+      }
+      lease = renewed;
+    }
+
+    try {
+    await ensureLease();
+    if (lease != null) {
+      final token = lease!.fencingToken;
+      final journalReady =
+          await (journal as FencedPluginInstallRecoveryJournal).advanceFence(
+        operationId: entry.operationId,
+        fencingToken: token,
+      );
+      final filesystemReady =
+          await (fileSystem as FencedPluginInstallFileSystem).advanceFence(
+        operationId: entry.operationId,
+        fencingToken: token,
+      );
+      if (!journalReady || !filesystemReady) {
+        throw const PluginInstallRecoveryException(
+          'RECOVERY_FENCE_REJECTED',
+          'A host adapter has already accepted a newer fencing token.',
+          reconciliationRequired: true,
+        );
+      }
+    }
     final freshReport = await PluginInstallRecoveryPlanner(
       journal: journal,
       fileSystem: fileSystem,
@@ -84,7 +161,9 @@ final class PluginInstallRecoveryExecutor {
       failureCode: 'RECOVERY_APPROVED',
       approvedBy: approvedBy.trim(),
       approvalId: approvalId.trim(),
+      fencingToken: lease?.fencingToken,
     );
+    await ensureLease();
     final didClaim = await journal.compareAndSet(
       operationId: entry.operationId,
       expectedStatus: entry.status,
@@ -105,6 +184,7 @@ final class PluginInstallRecoveryExecutor {
               operationId: entry.operationId,
               pluginId: entry.pluginId,
               opaqueHandle: entry.stagingHandle!,
+              fencingToken: claimed.fencingToken ?? 0,
             );
       switch (finding.action) {
         case PluginInstallRecoveryAction.discardStaging:
@@ -115,6 +195,7 @@ final class PluginInstallRecoveryExecutor {
               reconciliationRequired: true,
             );
           }
+          await ensureLease();
           await fileSystem.discardStaging(staging);
           break;
         case PluginInstallRecoveryAction.rollbackPromotion:
@@ -125,6 +206,7 @@ final class PluginInstallRecoveryExecutor {
               reconciliationRequired: true,
             );
           }
+          await ensureLease();
           await fileSystem.rollbackPromotion(
             staging,
             promotedPath: entry.promotedPath!,
@@ -138,6 +220,7 @@ final class PluginInstallRecoveryExecutor {
               reconciliationRequired: true,
             );
           }
+          await ensureLease();
           await fileSystem.finalizePromotion(
             staging,
             promotedPath: entry.promotedPath!,
@@ -161,6 +244,7 @@ final class PluginInstallRecoveryExecutor {
         status: terminalStatus,
         failureCode: 'RECOVERED_BY_HOST',
       );
+      await ensureLease();
       final saved = await journal.compareAndSet(
         operationId: entry.operationId,
         expectedStatus: PluginInstallJournalStatus.recoveryStarted,
@@ -177,6 +261,7 @@ final class PluginInstallRecoveryExecutor {
       return completed;
     } catch (error) {
       try {
+        await ensureLease();
         await journal.compareAndSet(
           operationId: entry.operationId,
           expectedStatus: PluginInstallJournalStatus.recoveryStarted,
@@ -198,6 +283,17 @@ final class PluginInstallRecoveryExecutor {
         'An approved recovery operation failed; manual reconciliation is required.',
         reconciliationRequired: true,
       );
+    }
+    } finally {
+      final store = leaseStore;
+      final current = lease;
+      if (store != null && current != null) {
+        try {
+          await store.release(lease: current, now: clock().toUtc());
+        } catch (_) {
+          // Expiry remains the fallback if lease release cannot be persisted.
+        }
+      }
     }
   }
 
@@ -221,6 +317,7 @@ final class PluginInstallRecoveryExecutor {
     required String failureCode,
     String? approvedBy,
     String? approvalId,
+    int? fencingToken,
   }) =>
       PluginInstallJournalEntry(
         operationId: source.operationId,
@@ -234,6 +331,7 @@ final class PluginInstallRecoveryExecutor {
         contentHash: source.contentHash,
         approvedBy: approvedBy ?? source.approvedBy,
         approvalId: approvalId ?? source.approvalId,
+        fencingToken: fencingToken ?? source.fencingToken,
       );
 
   bool _sameJournal(
@@ -250,5 +348,6 @@ final class PluginInstallRecoveryExecutor {
       left.contentHash == right.contentHash &&
       left.failureCode == right.failureCode &&
       left.approvedBy == right.approvedBy &&
-      left.approvalId == right.approvalId;
+      left.approvalId == right.approvalId &&
+      left.fencingToken == right.fencingToken;
 }

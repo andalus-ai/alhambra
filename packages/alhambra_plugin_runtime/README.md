@@ -75,6 +75,7 @@ durable history after flushing accepted journal events.
 - `alhambra_plugin_api`: stable plugin and observability contracts.
 - `alhambra_plugin_runtime`: in-memory composition runtime and observability.
 - `alhambra_lifecycle_file_store`: optional durable JSONL adapter.
+- `alhambra_plugin_install_sqlite`: optional SQLite-backed plugin installation journal with append-only transition history and atomic recovery claims.
 
 ## Plugin package integrity and trust
 
@@ -157,3 +158,18 @@ similarity. `finalizePromotion`, `rollbackPromotion` and
 `discardStaging` must have documented idempotency behavior. See
 [Transactional Plugin Installation](../../Docs/TRANSACTIONAL_PLUGIN_INSTALLATION.md)
 for the complete recovery protocol and its limitations.
+
+
+For a durable SQLite implementation of `PluginInstallRecoveryJournal`, see [`alhambra_plugin_install_sqlite`](../alhambra_plugin_install_sqlite/README.md). The adapter persists a current operation projection and append-only history, but does not provide filesystem atomicity or worker leases.
+## Plugin installation worker leases
+
+The transactional installer and recovery executor accept an optional
+`PluginInstallOperationLeaseStore`. When configured, both require fenced
+journal/filesystem adapters; installation also requires a fenced installed
+record store. The runtime registers the monotonic token before side effects and
+renews it at operation boundaries and during archive streaming.
+
+`InMemoryPluginInstallOperationLeaseStore` is a single-process reference
+implementation only. Production hosts must supply a durable, atomic lease
+store and adapters that serialize their token checks with every mutation.
+See [Plugin installation worker leases and fencing](../../Docs/PLUGIN_INSTALL_WORKER_LEASES_AND_FENCING.md).

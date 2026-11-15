@@ -14,11 +14,10 @@ final class PluginRevocationOperationsPrincipal {
   }
 }
 
-/// Resolves record ownership from authoritative host data.
-///
-/// Journal and outbox records predate scope-aware persistence. Until those
-/// schemas carry scope IDs, hosts must resolve ownership using trusted
-/// operation/resource metadata rather than caller-supplied identifiers.
+/// Legacy compatibility hook for hosts whose adapters predate persisted scope.
+/// New adapters persist scopeId directly; administrative inspection uses that
+/// immutable value and does not infer ownership from plugin identifiers.
+@Deprecated('Use persisted scopeId on journal and outbox records.')
 abstract interface class PluginRevocationOperationsScopeResolver {
   Future<String?> resolveJournalScope(
     PluginRevocationJournalEntry entry,
@@ -102,13 +101,14 @@ final class PluginRevocationAdminOperationsSnapshot {
 /// Authenticated, scope-filtered administrative read boundary.
 ///
 /// Authorization is checked before reading operational state. Journal and
-/// outbox ownership is resolved through host-provided authoritative metadata.
-/// Operator replay history is filtered by the persisted scopeId. Access
+/// outbox ownership is enforced using persisted scopeId fields. Operator replay
+/// history is filtered by its persisted scopeId. Access
 /// decisions are audited before the service returns data or throws denial.
 final class PluginRevocationAdminOperationsService {
   final PluginRevocationOperationsService operations;
   final PluginRevocationOperatorActionInspectionStore operatorActionStore;
-  final PluginRevocationOperationsScopeResolver scopeResolver;
+  @Deprecated('Persisted record scopeId is authoritative.')
+  final PluginRevocationOperationsScopeResolver? scopeResolver;
   final PluginRevocationOperationsAuthorizer authorizer;
   final PluginRevocationOperationsAccessAuditStore accessAuditStore;
   final DateTime Function() clock;
@@ -116,7 +116,7 @@ final class PluginRevocationAdminOperationsService {
   PluginRevocationAdminOperationsService({
     required this.operations,
     required this.operatorActionStore,
-    required this.scopeResolver,
+    this.scopeResolver,
     required this.authorizer,
     required this.accessAuditStore,
     DateTime Function()? clock,
@@ -156,24 +156,12 @@ final class PluginRevocationAdminOperationsService {
     final raw = results[0] as PluginRevocationOperationsSnapshot;
     final actions = results[1] as List<PluginRevocationOperatorAction>;
 
-    final journalScopes = await Future.wait(
-      raw.journalEntries.map(scopeResolver.resolveJournalScope),
-    );
-    final outboxScopes = await Future.wait(
-      raw.outboxMessages.map(scopeResolver.resolveOutboxScope),
-    );
-    final journals = <PluginRevocationJournalEntry>[];
-    for (var index = 0; index < raw.journalEntries.length; index++) {
-      if (journalScopes[index] == scopeId) {
-        journals.add(raw.journalEntries[index]);
-      }
-    }
-    final messages = <PluginRevocationOutboxMessage>[];
-    for (var index = 0; index < raw.outboxMessages.length; index++) {
-      if (outboxScopes[index] == scopeId) {
-        messages.add(raw.outboxMessages[index]);
-      }
-    }
+    final journals = raw.journalEntries
+        .where((entry) => entry.scopeId == scopeId)
+        .toList(growable: false);
+    final messages = raw.outboxMessages
+        .where((message) => message.event.scopeId == scopeId)
+        .toList(growable: false);
     final scopedActions = actions
         .where((action) => action.scopeId == scopeId)
         .toList()

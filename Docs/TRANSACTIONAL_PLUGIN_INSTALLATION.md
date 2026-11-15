@@ -77,9 +77,11 @@ The filesystem and installed-record store cannot be assumed to share one
 atomic commit. A durable journal and reversible promotion are therefore
 required to recover ambiguous interruption windows.
 
-The repository supplies contracts and a coordinator, not a production archive
-reader, concrete filesystem adapter, durable journal or durable installed
-record store. The default operation ID is unique only within one installer
+The repository supplies contracts and a coordinator, plus an optional
+SQLite-backed durable journal in `alhambra_plugin_install_sqlite`. It does not
+supply a production archive reader, concrete filesystem adapter or durable
+installed-record store. See [SQLite Plugin Installation Journal](SQLITE_PLUGIN_INSTALL_JOURNAL.md)
+for the adapter's transaction and operational guarantees. The default operation ID is unique only within one installer
 instance/time sequence; production hosts should inject a globally unique ID
 factory and enforce uniqueness in the durable journal. An adapter claiming atomic promotion must prove it with
 platform-specific integration tests. In-memory test doubles do not establish
@@ -120,9 +122,13 @@ manual review because its previous side effects may be incomplete.
 
 The host must explicitly call
 `PluginInstallRecoveryExecutor.execute(finding, approvedBy:, approvalId:)`.
-Before side effects, the host must fence the original installer worker or
-prove its durable operation lease has expired. A recovery scan must never race
-a live installer. The executor re-reads the unresolved journal entry,
+Before side effects, configure the same `PluginInstallOperationLeaseStore`
+for installer and recovery workers. Lease-enabled execution fails closed unless
+journal and filesystem adapters implement the fenced contracts; installation
+also requires a fenced installed-record store. Each adapter must register the
+new fencing token and reject lower tokens atomically with every mutation. A
+recovery scan must never race a live installer. See
+[Plugin Installation Worker Leases and Fencing](PLUGIN_INSTALL_WORKER_LEASES_AND_FENCING.md). The executor re-reads the unresolved journal entry,
 re-inspects filesystem and installed metadata, compares them with the finding,
 and atomically claims the operation using
 `PluginInstallRecoveryJournal.compareAndSet`.
@@ -149,6 +155,10 @@ repeat the action. A new host inspection and explicit resolution are required.
   to the host's audit-retention policy.
 - Filesystem and journal adapters need crash-injection and multi-process tests.
   In-memory tests do not establish those guarantees.
+- When worker leases are enabled, the lease store must be durable and
+  linearizable per operation ID. Journal, filesystem and installed-record
+  adapters must persist their highest accepted fencing token and serialize
+  token advancement with every mutation; expiry checks alone are insufficient.
 
 The recovery executor does not activate plugins, rerun extraction, overwrite
 installed records, or automatically retry ambiguous operations.

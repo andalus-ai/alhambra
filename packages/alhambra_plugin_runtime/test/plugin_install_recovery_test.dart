@@ -5,11 +5,29 @@ import 'package:flutter_test/flutter_test.dart';
 const _hash =
     'sha256:0000000000000000000000000000000000000000000000000000000000000000';
 
-class _Journal implements PluginInstallRecoveryJournal {
+class _Journal implements FencedPluginInstallRecoveryJournal {
   final Map<String, PluginInstallJournalEntry> entries = {};
+  final Map<String, int> _highestFence = {};
+
+  @override
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  }) async {
+    final highest = _highestFence[operationId] ?? 0;
+    if (fencingToken < highest) return false;
+    _highestFence[operationId] = fencingToken;
+    return true;
+  }
 
   @override
   Future<void> write(PluginInstallJournalEntry entry) async {
+    final token = entry.fencingToken;
+    if (token != null) {
+      final highest = _highestFence[entry.operationId] ?? 0;
+      if (token < highest) throw StateError('Stale install fencing token.');
+      _highestFence[entry.operationId] = token;
+    }
     entries[entry.operationId] = entry;
   }
 
@@ -33,34 +51,65 @@ class _Journal implements PluginInstallRecoveryJournal {
     if (current == null ||
         current.status != expectedStatus ||
         current.updatedAt != expectedUpdatedAt) return false;
+    final token = replacement.fencingToken;
+    if (token != null) {
+      final highest = _highestFence[operationId] ?? 0;
+      if (token < highest) return false;
+      _highestFence[operationId] = token;
+    }
     entries[operationId] = replacement;
     return true;
   }
 }
 
-class _FileSystem implements PluginInstallFileSystem {
+class _FileSystem implements FencedPluginInstallFileSystem {
   bool stagingExists = false;
   bool destinationExists = false;
   bool destinationOwned = false;
   bool rollbackAvailable = false;
   final List<String> calls = [];
+  final Map<String, int> _highestFence = {};
+
+  void _assertFence(PluginInstallStaging staging) {
+    final highest = _highestFence[staging.operationId] ?? 0;
+    if (staging.fencingToken < highest) throw StateError('Stale filesystem fencing token.');
+  }
+
+  @override
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  }) async {
+    final highest = _highestFence[operationId] ?? 0;
+    if (fencingToken < highest) return false;
+    _highestFence[operationId] = fencingToken;
+    return true;
+  }
 
   @override
   Future<PluginInstallStaging> createStaging({
     required String operationId,
     required String pluginId,
     required String version,
-  }) async => PluginInstallStaging(
+    int fencingToken = 0,
+  }) async {
+    final highest = _highestFence[operationId] ?? 0;
+    if (fencingToken < highest) throw StateError('Stale filesystem fencing token.');
+    return PluginInstallStaging(
         operationId: operationId,
         pluginId: pluginId,
         opaqueHandle: 'stage-$operationId',
+        fencingToken: fencingToken,
       );
+  }
 
   @override
   Future<void> createDirectory(
     PluginInstallStaging staging,
     String relativePath,
-  ) async {}
+  ) async {
+    _assertFence(staging);
+  }
 
   @override
   Future<void> writeFile({
@@ -68,7 +117,9 @@ class _FileSystem implements PluginInstallFileSystem {
     required String relativePath,
     required Stream<List<int>> bytes,
     required int maxBytes,
-  }) async {}
+  }) async {
+    _assertFence(staging);
+  }
 
   @override
   Future<String> destinationPathFor({
@@ -80,13 +131,16 @@ class _FileSystem implements PluginInstallFileSystem {
   Future<void> promote(
     PluginInstallStaging staging, {
     required String destinationPath,
-  }) async {}
+  }) async {
+    _assertFence(staging);
+  }
 
   @override
   Future<void> rollbackPromotion(
     PluginInstallStaging staging, {
     required String promotedPath,
   }) async {
+    _assertFence(staging);
     calls.add('rollback');
     destinationExists = false;
     destinationOwned = false;
@@ -98,6 +152,7 @@ class _FileSystem implements PluginInstallFileSystem {
     PluginInstallStaging staging, {
     required String promotedPath,
   }) async {
+    _assertFence(staging);
     calls.add('finalize');
     rollbackAvailable = false;
     stagingExists = false;
@@ -105,6 +160,7 @@ class _FileSystem implements PluginInstallFileSystem {
 
   @override
   Future<void> discardStaging(PluginInstallStaging staging) async {
+    _assertFence(staging);
     calls.add('discard');
     stagingExists = false;
   }
@@ -214,6 +270,79 @@ void main() {
   });
 
   group('PluginInstallRecoveryExecutor', () {
+
+    test('records recovery fencing token before executing filesystem action',
+        () async {
+      final journal = _Journal()..entries['op-1'] = _entry();
+      final fs = _FileSystem()..stagingExists = true;
+      final store = InMemoryInstalledPluginStore();
+      final finding = (await PluginInstallRecoveryPlanner(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+      ).inspect()).findings.single;
+      final leases = InMemoryPluginInstallOperationLeaseStore();
+
+      final result = await PluginInstallRecoveryExecutor(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+        leaseStore: leases,
+        workerId: 'recovery-worker',
+        clock: () => DateTime.utc(2026, 1, 1),
+      ).execute(
+        finding,
+        approvedBy: 'operator',
+        approvalId: 'approval-fenced-recovery',
+      );
+
+      expect(result.status, PluginInstallJournalStatus.rolledBack);
+      expect(result.fencingToken, 1);
+      expect(journal.entries['op-1']!.fencingToken, 1);
+      expect(fs.calls, ['inspect', 'inspect', 'discard']);
+    });
+
+    test('recovery cannot claim an operation leased by an installer', () async {
+      final journal = _Journal()..entries['op-1'] = _entry();
+      final fs = _FileSystem()..stagingExists = true;
+      final store = InMemoryInstalledPluginStore();
+      final finding = (await PluginInstallRecoveryPlanner(
+        journal: journal,
+        fileSystem: fs,
+        installedStore: store,
+      ).inspect()).findings.single;
+      final leases = InMemoryPluginInstallOperationLeaseStore();
+      await leases.acquire(
+        operationId: 'op-1',
+        ownerId: 'installer-worker',
+        now: DateTime.utc(2026, 1, 1),
+        leaseDuration: const Duration(seconds: 30),
+      );
+
+      await expectLater(
+        PluginInstallRecoveryExecutor(
+          journal: journal,
+          fileSystem: fs,
+          installedStore: store,
+          leaseStore: leases,
+          workerId: 'recovery-worker',
+          clock: () => DateTime.utc(2026, 1, 1),
+        ).execute(
+          finding,
+          approvedBy: 'operator',
+          approvalId: 'approval-lease-conflict',
+        ),
+        throwsA(isA<PluginInstallRecoveryException>().having(
+          (error) => error.code,
+          'code',
+          'RECOVERY_OPERATION_BUSY',
+        )),
+      );
+      expect(journal.entries['op-1']!.status,
+          PluginInstallJournalStatus.extracting);
+      expect(fs.calls, ['inspect']);
+    });
+
     test('executes approved discard and persists operator audit metadata',
         () async {
       final journal = _Journal()..entries['op-1'] = _entry();

@@ -39,6 +39,8 @@ Start here:
 - [Revocation operations and inspection](REVOCATION_OPERATIONS_AND_INSPECTION.md) — read-only operational snapshots, metrics and safety boundaries.
 - [Scoped revocation replay authorization](SCOPED_REVOCATION_REPLAY_AUTHORIZATION.md) — host identity, scope resolution, replay permission and approval gates.
 - [Scoped revocation administrative operations](SCOPED_REVOCATION_ADMIN_OPERATIONS.md) — authorized scoped inspection and access-decision auditing.
+- [Revocation scope ownership](REVOCATION_SCOPE_OWNERSHIP.md) — trusted scope assignment, immutable persistence, schema v4 migration and replay isolation.
+- [Scoped revocation query architecture](SCOPED_REVOCATION_QUERY_ARCHITECTURE.md) — trusted scope propagation, database-native keyset pagination, snapshot semantics, migrations and retention sequence.
 - [Audited dead-letter replay contract](REVOCATION_OPERATIONS_AND_INSPECTION.md#audited-dead-letter-replay-contract) — operator attribution, approval evidence and replay identity rules.
 
 ## Composition persistence and compatibility
@@ -52,3 +54,5 @@ responsibilities, failure semantics, security boundaries and concrete adapter gu
 Update this index whenever an architecture or developer document is added.
 
 - [Transactional plugin installation](TRANSACTIONAL_PLUGIN_INSTALLATION.md) — verified package staging, bounded extraction, reversible promotion, journaling and rollback.
+- [SQLite plugin installation journal](SQLITE_PLUGIN_INSTALL_JOURNAL.md) — durable operation projection, append-only history, SQLite CAS and operational limits.
+- [SQLite plugin installation adapter](../packages/alhambra_plugin_install_sqlite/README.md) — package usage and supported guarantees.

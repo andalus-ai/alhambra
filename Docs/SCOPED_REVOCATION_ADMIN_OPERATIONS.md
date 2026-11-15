@@ -50,3 +50,8 @@ SQLite and PostgreSQL implement `PluginRevocationOperatorActionInspectionStore`.
 - No direct mutation of journal/outbox state.
 - No claim, acknowledge, reschedule, retry, replay or reconciliation operation through this query service.
 - No claim of serializable cross-table snapshot consistency.
+
+
+## Persisted scope ownership
+
+New durable adapters persist the trusted scope assigned at execution time on execution, journal and outbox rows. The admin inspection service filters directly on those immutable fields; it no longer needs to infer ownership from plugin or provider identifiers. The legacy scope-resolver hook remains optional for source compatibility but is deprecated. Rows created before schema v4 are assigned the explicit compatibility scope `default` and should be migrated or mapped by the host before exposing them in a multi-scope deployment.
