@@ -52,3 +52,11 @@ alhambra_plugin_api.
 - Recovery journal adapters must return one latest non-terminal entry per operation and atomically compare-and-set both status and observed update timestamp/revision.
 - Persist operator and approval identifiers before recovery side effects; enforce approval-ID uniqueness within the host audit scope and apply bounded, control-character-free validation.
 - Treat an interrupted rollback or recovery claim as manual review, not as permission to switch from rollback to commit.
+
+
+- Lease-enabled installation and recovery must fail closed unless every
+  side-effecting adapter implements its fenced contract.
+- Register a newer fencing token before inspecting or mutating an operation;
+  adapter token checks must be atomic with each write/mutation.
+- Never treat an in-memory lease store as cross-process coordination.
+- Use one unique worker identity per concurrently running worker instance.

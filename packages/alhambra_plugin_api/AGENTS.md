@@ -21,3 +21,12 @@ plugins and runtime implementations.
 - Verify the public barrel export and package dependency graph.
 - Run formatter, analyzer and package tests; report commands that were not run.
 - Update the package README and relevant Docs pages when contracts change.
+
+
+## Installation lease contracts
+- Keep lease and fencing contracts persistence-neutral.
+- Fencing tokens are monotonic per operation and must be checked atomically by
+  every adapter that performs a side effect.
+- A lease expiry check alone is not a fencing guarantee; document the adapter's
+  atomic token registration and mutation semantics.
+- Do not import SQLite or runtime implementation types into the API package.

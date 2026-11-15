@@ -269,8 +269,9 @@ class DefaultPluginPackageVerifier implements PluginPackageVerifier {
 }
 
 /// In-memory installed-plugin store; intended as a reference implementation.
-class InMemoryInstalledPluginStore implements TransactionalInstalledPluginStore {
+class InMemoryInstalledPluginStore implements FencedTransactionalInstalledPluginStore {
   final Map<String, InstalledPluginRecord> _installed = {};
+  final Map<String, int> _highestInstallFence = {};
 
   @override
   Future<List<InstalledPluginRecord>> all() async =>
@@ -308,5 +309,40 @@ class InMemoryInstalledPluginStore implements TransactionalInstalledPluginStore 
     }
     _installed.remove(plugin.id);
     return true;
+  }
+
+  bool _acceptFence(String operationId, int fencingToken) {
+    if (operationId.trim().isEmpty || fencingToken < 1) return false;
+    final highest = _highestInstallFence[operationId] ?? 0;
+    if (fencingToken < highest) return false;
+    _highestInstallFence[operationId] = fencingToken;
+    return true;
+  }
+
+  @override
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  }) async =>
+      _acceptFence(operationId, fencingToken);
+
+  @override
+  Future<bool> createIfAbsentFenced(
+    InstalledPluginRecord plugin, {
+    required String operationId,
+    required int fencingToken,
+  }) async {
+    if (!_acceptFence(operationId, fencingToken)) return false;
+    return createIfAbsent(plugin);
+  }
+
+  @override
+  Future<bool> removeIfMatchesFenced(
+    InstalledPluginRecord plugin, {
+    required String operationId,
+    required int fencingToken,
+  }) async {
+    if (!_acceptFence(operationId, fencingToken)) return false;
+    return removeIfMatches(plugin);
   }
 }
