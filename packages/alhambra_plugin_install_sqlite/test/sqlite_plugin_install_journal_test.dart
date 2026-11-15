@@ -171,7 +171,10 @@ void main() {
         await directory.delete(recursive: true);
       });
       expect(await journal.advanceFence(operationId: 'migrated-operation', fencingToken: 1), isTrue);
-      expect(await journal.advanceFence(operationId: 'migrated-operation', fencingToken: 0), throwsArgumentError);
+      await expectLater(
+        journal.advanceFence(operationId: 'migrated-operation', fencingToken: 0),
+        throwsArgumentError,
+      );
     });
 
     test('approval identifiers are unique within the database', () async {
