@@ -85,9 +85,9 @@ Hosts that need durable, queryable history can implement the optional
 `CompositionLifecycleStorageMaintenanceAuditStore`. It extends the
 coordinator's append-only audit sink with bounded queries by operation ID,
 status, inclusive time range, and an exclusive keyset cursor. Results are
-ordered oldest-first by `(startedAt, operationId, status.index)`. Implementors
+ordered oldest-first by `(startedAt, operationId, status.name)`. Implementors
 should make appends idempotent for an identical `(operationId, status)`
-record and reject conflicting reuse.
+record and reject conflicting reuse with\n`CompositionLifecycleStorageMaintenanceAuditIdentityConflictException`.
 
 `CompositionLifecycleStorageMaintenanceRecovery.classify` interprets the
 records for one operation without performing recovery or replay. A start
