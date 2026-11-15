@@ -77,9 +77,11 @@ The filesystem and installed-record store cannot be assumed to share one
 atomic commit. A durable journal and reversible promotion are therefore
 required to recover ambiguous interruption windows.
 
-The repository supplies contracts and a coordinator, not a production archive
-reader, concrete filesystem adapter, durable journal or durable installed
-record store. The default operation ID is unique only within one installer
+The repository supplies contracts and a coordinator, plus an optional
+SQLite-backed durable journal in `alhambra_plugin_install_sqlite`. It does not
+supply a production archive reader, concrete filesystem adapter or durable
+installed-record store. See [SQLite Plugin Installation Journal](SQLITE_PLUGIN_INSTALL_JOURNAL.md)
+for the adapter's transaction and operational guarantees. The default operation ID is unique only within one installer
 instance/time sequence; production hosts should inject a globally unique ID
 factory and enforce uniqueness in the durable journal. An adapter claiming atomic promotion must prove it with
 platform-specific integration tests. In-memory test doubles do not establish

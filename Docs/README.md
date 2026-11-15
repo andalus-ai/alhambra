@@ -54,4 +54,5 @@ responsibilities, failure semantics, security boundaries and concrete adapter gu
 Update this index whenever an architecture or developer document is added.
 
 - [Transactional plugin installation](TRANSACTIONAL_PLUGIN_INSTALLATION.md) — verified package staging, bounded extraction, reversible promotion, journaling and rollback.
-- [Plugin installation worker leases and fencing](PLUGIN_INSTALL_WORKER_LEASES_AND_FENCING.md) — operation leases, monotonic fencing tokens and adapter enforcement requirements.
+- [SQLite plugin installation journal](SQLITE_PLUGIN_INSTALL_JOURNAL.md) — durable operation projection, append-only history, SQLite CAS and operational limits.
+- [SQLite plugin installation adapter](../packages/alhambra_plugin_install_sqlite/README.md) — package usage and supported guarantees.
