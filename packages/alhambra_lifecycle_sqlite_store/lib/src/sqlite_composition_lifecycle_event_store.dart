@@ -14,12 +14,12 @@ final class SqliteCompositionLifecycleEventStore
     implements
         CompositionLifecycleEventStore,
         CompositionLifecycleStorageHealthProvider,
-        CompositionLifecycleStorageMaintenanceProvider {
-  static const int schemaVersion = 2;
+        CompositionLifecycleStorageMaintenanceProvider,\n        CompositionLifecycleStorageMaintenanceAuditStore {
+  static const int schemaVersion = 3;
 
   static final List<_SqliteSchemaMigration> _migrations = [
     _SqliteSchemaMigration(version: 1, apply: _createInitialSchema),
-    _SqliteSchemaMigration(version: 2, apply: _addCombinedStatusOperationIndex),
+    _SqliteSchemaMigration(version: 2, apply: _addCombinedStatusOperationIndex),\n    _SqliteSchemaMigration(version: 3, apply: _createMaintenanceAuditSchema),
   ];
 
   final Database database;
