@@ -82,7 +82,7 @@ void main() {
       expect(
         () => PluginRevocationOutboxPageQuery(
           scopeId: 'tenant-a',
-          cursor: 'x' * 4097,
+          cursor: List.filled(4097, 'x').join(),
         ),
         throwsArgumentError,
       );
