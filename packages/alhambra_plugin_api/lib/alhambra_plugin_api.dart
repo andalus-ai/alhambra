@@ -89,3 +89,4 @@ export 'plugin_api/di/service_graph_contracts.dart';
 export 'plugin_api/packaging/integrity_contracts.dart';
 export 'plugin_api/packaging/installation_contracts.dart';
 export 'plugin_api/composition/composition_lifecycle_storage_maintenance_policy.dart';
+export 'plugin_api/composition/composition_lifecycle_storage_maintenance_coordinator.dart';
