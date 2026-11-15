@@ -9,7 +9,8 @@ import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 /// instances sharing the same local database are serialized by SQLite.
 ///
 /// Use a local filesystem with reliable SQLite locking. This adapter does not
-/// provide filesystem promotion atomicity or installer-worker leases.
+/// provide filesystem promotion atomicity. Worker leases are provided by the
+/// companion [SqlitePluginInstallOperationLeaseStore].
 final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJournal {
   final sq.Database _db;
   bool _closed = false;
