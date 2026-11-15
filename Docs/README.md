@@ -39,6 +39,8 @@ Start here:
 - [Revocation operations and inspection](REVOCATION_OPERATIONS_AND_INSPECTION.md) — read-only operational snapshots, metrics and safety boundaries.
 - [Scoped revocation replay authorization](SCOPED_REVOCATION_REPLAY_AUTHORIZATION.md) — host identity, scope resolution, replay permission and approval gates.
 - [Scoped revocation administrative operations](SCOPED_REVOCATION_ADMIN_OPERATIONS.md) — authorized scoped inspection and access-decision auditing.
+- [Revocation scope ownership](REVOCATION_SCOPE_OWNERSHIP.md) — trusted scope assignment, immutable persistence, schema v4 migration and replay isolation.
+- [Scoped revocation query architecture](SCOPED_REVOCATION_QUERY_ARCHITECTURE.md) — trusted scope propagation, database-native keyset pagination, snapshot semantics, migrations and retention sequence.
 - [Audited dead-letter replay contract](REVOCATION_OPERATIONS_AND_INSPECTION.md#audited-dead-letter-replay-contract) — operator attribution, approval evidence and replay identity rules.
 
 ## Composition persistence and compatibility

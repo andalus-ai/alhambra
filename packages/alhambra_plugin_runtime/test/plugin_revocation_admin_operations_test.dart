@@ -71,6 +71,7 @@ final class _FailingAccessAuditStore
 PluginRevocationJournalEntry _journal(String suffix) =>
     PluginRevocationJournalEntry(
       idempotencyKey: 'key-$suffix',
+      scopeId: suffix.endsWith('-blue') ? 'tenant-blue' : 'tenant-red',
       operationId: 'operation-$suffix',
       pluginId: 'plugin-$suffix',
       providerOwnerId: 'provider-$suffix',
@@ -86,6 +87,7 @@ PluginRevocationOutboxMessage _message(String suffix) {
   return PluginRevocationOutboxMessage(
     event: PluginRevocationAuditEvent(
       eventId: 'event-$suffix',
+      scopeId: suffix.endsWith('-blue') ? 'tenant-blue' : 'tenant-red',
       idempotencyKey: 'event-key-$suffix',
       operationId: 'operation-$suffix',
       pluginId: 'plugin-$suffix',

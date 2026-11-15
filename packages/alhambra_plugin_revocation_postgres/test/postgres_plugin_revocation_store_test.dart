@@ -12,9 +12,11 @@ PluginRevocationExecutionRecord _record(
   PluginRevocationExecutionStatus status =
       PluginRevocationExecutionStatus.requiresReconciliation,
   DateTime? at,
+  String scopeId = 'default',
 }) =>
     PluginRevocationExecutionRecord(
       idempotencyKey: key,
+      scopeId: scopeId,
       operationId: 'operation-$key',
       pluginId: 'plugin-$key',
       providerOwnerId: 'provider',
@@ -28,6 +30,31 @@ void main() {
   final skipReason = databaseUrl == null
       ? 'Set ALHAMBRA_TEST_DATABASE_URL to run PostgreSQL integration tests.'
       : false;
+
+
+  test('migration applies schema v4 scope ownership', () async {
+    final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
+    await store.migrate();
+    final admin = Pool.withUrl(databaseUrl!);
+    addTearDown(() async { await store.close(); await admin.close(); });
+
+    final rows = await admin.execute(
+      'SELECT MAX(version) AS version FROM alhambra_plugin_revocation_schema',
+    );
+    expect(rows.first.toColumnMap()['version'], 4);
+
+    for (final table in [
+      'alhambra_plugin_revocation_execution',
+      'alhambra_plugin_revocation_journal',
+      'alhambra_plugin_revocation_outbox',
+    ]) {
+      final columns = await admin.execute(
+        r'SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND column_name = $2',
+        parameters: [table, 'scope_id'],
+      );
+      expect(columns, isNotEmpty);
+    }
+  }, skip: skipReason);
 
   test('transactionally commits execution, journal and outbox', () async {
     final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
@@ -78,6 +105,37 @@ void main() {
         deliveredAt: DateTime.utc(2026, 1, 1, 0, 3),
       ),
       isTrue,
+    );
+  }, skip: skipReason);
+
+
+  test('persists scope and rolls back a terminal scope mismatch', () async {
+    final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
+    await store.migrate();
+    final key = 'scope-' + DateTime.now().microsecondsSinceEpoch.toString();
+    addTearDown(store.close);
+
+    final pending = _record(key, scopeId: 'tenant-blue');
+    expect(await store.writePending(pending), isTrue);
+    expect((await store.read(key))?.scopeId, 'tenant-blue');
+    expect((await store.journalStore.read(key))?.scopeId, 'tenant-blue');
+
+    await expectLater(
+      store.completeAndEnqueue(_record(
+        key,
+        scopeId: 'tenant-red',
+        status: PluginRevocationExecutionStatus.completed,
+        at: DateTime.utc(2026, 1, 1, 0, 1),
+      )),
+      throwsStateError,
+    );
+
+    expect((await store.read(key))?.status,
+        PluginRevocationExecutionStatus.requiresReconciliation);
+    expect(
+      (await store.readAllOutbox())
+          .where((item) => item.event.idempotencyKey == key),
+      isEmpty,
     );
   }, skip: skipReason);
 

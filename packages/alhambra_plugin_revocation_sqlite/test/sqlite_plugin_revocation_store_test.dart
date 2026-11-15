@@ -9,9 +9,11 @@ PluginRevocationExecutionRecord _record({
   PluginRevocationExecutionStatus status =
       PluginRevocationExecutionStatus.requiresReconciliation,
   DateTime? at,
+  String scopeId = 'default',
 }) =>
     PluginRevocationExecutionRecord(
       idempotencyKey: 'operation:plugin:provider:deactivate',
+      scopeId: scopeId,
       operationId: 'operation',
       pluginId: 'plugin',
       providerOwnerId: 'provider',
@@ -70,6 +72,36 @@ void main() {
       expect(claimed.single.event.eventId, '${pending.idempotencyKey}:terminal');
       expect(claimed.single.event.outcome, 'completed');
       expect(claimed.single.attempts, 1);
+    });
+
+
+    test('persists scope and rolls back a terminal scope mismatch', () async {
+      final pending = _record(scopeId: 'tenant-blue');
+      expect(await store.writePending(pending), isTrue);
+
+      expect(
+        (await store.read(pending.idempotencyKey))?.scopeId,
+        'tenant-blue',
+      );
+      expect(
+        (await store.journalStore.read(pending.idempotencyKey))?.scopeId,
+        'tenant-blue',
+      );
+
+      await expectLater(
+        store.completeAndEnqueue(_record(
+          scopeId: 'tenant-red',
+          status: PluginRevocationExecutionStatus.completed,
+          at: DateTime.utc(2026, 1, 1, 0, 1),
+        )),
+        throwsStateError,
+      );
+
+      expect(
+        (await store.read(pending.idempotencyKey))?.status,
+        PluginRevocationExecutionStatus.requiresReconciliation,
+      );
+      expect(await store.readAllOutbox(), isEmpty);
     });
 
     test('expired lease is reclaimed and stale worker is fenced', () async {
@@ -231,6 +263,32 @@ void main() {
       );
       expect((await journal.read(entry.idempotencyKey))?.revision, 2);
     });
+  });
+
+
+  test('fresh database applies schema v4 scope columns and indexes', () async {
+    final directory = await Directory.systemTemp.createTemp('alhambra-revocation-schema-');
+    final databasePath = '${directory.path}/revocations.sqlite';
+    final migrated = SqlitePluginRevocationStore(databasePath);
+    final inspection = sq.sqlite3.open(databasePath);
+    addTearDown(() async {
+      inspection.dispose();
+      migrated.close();
+      await directory.delete(recursive: true);
+    });
+
+    expect(
+      inspection.select('PRAGMA user_version').single['user_version'],
+      4,
+    );
+    for (final table in [
+      'plugin_revocation_execution',
+      'plugin_revocation_journal',
+      'plugin_revocation_outbox',
+    ]) {
+      final columns = inspection.select('PRAGMA table_info($table)');
+      expect(columns.any((column) => column['name'] == 'scope_id'), isTrue);
+    }
   });
 
   test('completion rolls back when its journal row is missing', () async {
