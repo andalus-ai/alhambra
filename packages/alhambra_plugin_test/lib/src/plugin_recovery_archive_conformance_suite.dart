@@ -131,7 +131,7 @@ final class PluginRecoveryArchiveConformanceSuite {
       () async {
         final inserted = await archive.putIfAbsent(concurrentRecord);
         final stored = await archive.read(concurrentId);
-        return !inserted && stored != null && _sameSnapshot(stored, concurrentRecord);
+        return !inserted && stored != null && _sameRecord(stored, concurrentRecord);
       },
       success: 'Duplicate insertion returned false and preserved the original record.',
       failure: 'Duplicate insertion replaced or altered the original record.',
@@ -141,10 +141,11 @@ final class PluginRecoveryArchiveConformanceSuite {
       'conflicting snapshot is rejected',
       () async {
         final conflicting = fixtureBuilder(concurrentId, 1);
-        if (_sameSnapshot(conflicting, concurrentRecord)) return false;
+        if (conflicting.job.jobId != concurrentId ||
+            _sameSnapshot(conflicting, concurrentRecord)) return false;
         final inserted = await archive.putIfAbsent(conflicting);
         final stored = await archive.read(concurrentId);
-        return !inserted && stored != null && _sameSnapshot(stored, concurrentRecord);
+        return !inserted && stored != null && _sameRecord(stored, concurrentRecord);
       },
       success: 'A different snapshot with the same job ID was rejected.',
       failure: 'The adapter accepted or stored a conflicting snapshot.',
@@ -201,4 +202,13 @@ final class PluginRecoveryArchiveConformanceSuite {
     PluginLifecycleRecoveryJobArchiveRecord right,
   ) => const PluginLifecycleRecoveryJobSnapshotCodec().encode(left.job) ==
       const PluginLifecycleRecoveryJobSnapshotCodec().encode(right.job);
+
+  bool _sameRecord(
+    PluginLifecycleRecoveryJobArchiveRecord left,
+    PluginLifecycleRecoveryJobArchiveRecord right,
+  ) => _sameSnapshot(left, right) &&
+      left.archivedAt == right.archivedAt &&
+      left.integrity.formatVersion == right.integrity.formatVersion &&
+      left.integrity.algorithm == right.integrity.algorithm &&
+      left.integrity.digest == right.integrity.digest;
 }
