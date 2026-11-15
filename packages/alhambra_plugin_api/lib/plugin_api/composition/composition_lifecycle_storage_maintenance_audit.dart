@@ -164,7 +164,7 @@ final class CompositionLifecycleStorageMaintenanceRecovery {
     final end = terminals.single;
     if (end.startedAt != start.startedAt ||
         end.requestedAt != start.requestedAt ||
-        end.request != start.request ||
+        !_sameRequest(end.request, start.request) ||
         end.completedAt == null ||
         end.completedAt!.isBefore(start.startedAt)) {
       return CompositionLifecycleStorageMaintenanceRecovery._(
@@ -201,3 +201,11 @@ final class CompositionLifecycleStorageMaintenanceRecovery {
   /// the executor/adapter must supply a stronger retry-safety guarantee.
   bool get automaticRetryAllowed => false;
 }
+
+bool _sameRequest(
+  CompositionLifecycleStorageMaintenanceRequest left,
+  CompositionLifecycleStorageMaintenanceRequest right,
+) =>
+    left.retainFrom == right.retainFrom &&
+    left.maxEvents == right.maxEvents &&
+    left.checkpoint == right.checkpoint;
