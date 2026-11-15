@@ -18,6 +18,20 @@ void main() {
     if (await temp.exists()) await temp.delete(recursive: true);
   });
 
+  test('supports non-lease single-worker installs with token zero', () async {
+    final staging = await fileSystem.createStaging(
+      operationId: 'op-local', pluginId: 'demo.plugin', version: '0.1.0',
+    );
+    await fileSystem.writeFile(
+      staging: staging,
+      relativePath: 'README.md',
+      bytes: Stream.value([65, 66]),
+      maxBytes: 8,
+    );
+    await fileSystem.discardStaging(staging);
+    expect(Directory('${temp.path}/.alhambra-install-state/staging/${staging.opaqueHandle}').existsSync(), isFalse);
+  });
+
   test('fences staging, extraction, promotion and rollback', () async {
     expect(await fileSystem.advanceFence(operationId: 'op-1', fencingToken: 1), isTrue);
     final staging = await fileSystem.createStaging(
