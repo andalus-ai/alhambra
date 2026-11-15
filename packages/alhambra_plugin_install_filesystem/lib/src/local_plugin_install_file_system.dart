@@ -40,6 +40,10 @@ final class LocalPluginInstallFileSystem
   }
 
   Future<void> initialize() async {
+    final rootType = await FileSystemEntity.type(rootPath, followLinks: false);
+    if (rootType == FileSystemEntityType.link) {
+      throw FileSystemException('Installation root must not be a symbolic link.', rootPath);
+    }
     await Directory(rootPath).create(recursive: true);
     await _assertNoSymlink(rootPath);
     for (final path in [_stateRoot, _stagingRoot, _pluginRoot, _lockRoot, _operationRoot]) {
@@ -124,7 +128,7 @@ final class LocalPluginInstallFileSystem
   }
 
   Future<void> _requireFence(String operationId, int token) async {
-    if (token < 1) throw StateError('A positive fencing token is required.');
+    if (token < 0) throw StateError('A non-negative fencing token is required.');
     final state = await _readState(operationId);
     if (state['fencingToken'] != token) {
       throw StateError('Filesystem mutation rejected: stale or unregistered fencing token.');
@@ -309,11 +313,18 @@ final class LocalPluginInstallFileSystem
           throw StateError('Refusing to overwrite an existing plugin destination.');
         }
         await _writeOwnerMarker(source, staging);
-        await Directory(source).rename(expected);
         final state = await _readState(staging.operationId);
-        state['phase'] = 'promoted';
+        // Persist promotion intent before rename. If the process dies after
+        // rename but before the next journal write, inspection still knows
+        // that this operation may own a reversible destination.
+        state['phase'] = 'promoting';
         state['destinationPath'] = expected;
         await _writeState(state);
+        await Directory(source).rename(expected);
+        final promotedState = await _readState(staging.operationId);
+        promotedState['phase'] = 'promoted';
+        promotedState['destinationPath'] = expected;
+        await _writeState(promotedState);
       });
 
   @override
@@ -345,8 +356,9 @@ final class LocalPluginInstallFileSystem
             !await _hasOwnerMarker(expected, staging.operationId, staging.fencingToken)) {
           throw StateError('Cannot finalize a destination not owned by this operation.');
         }
-        final marker = File(p.join(expected, _ownerFileName));
-        await marker.delete();
+        // Keep the tiny ownership marker in the installed tree. It is a
+        // reserved host metadata file, not plugin payload. Retaining it lets
+        // recovery prove ownership if the journal commit is interrupted.
         state['phase'] = 'finalized';
         state['finalizedAt'] = DateTime.now().toUtc().toIso8601String();
         await _writeState(state);
@@ -397,7 +409,6 @@ final class LocalPluginInstallFileSystem
         state['fencingToken']! as int,
       );
     }
-    final token = state['fencingToken']! as int;
     final rollback = destinationExists && owned &&
         (state['phase'] == 'promoted' || state['phase'] == 'promoting');
     return PluginInstallRecoverySnapshot(
