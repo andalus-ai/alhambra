@@ -288,7 +288,7 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
       _schemaVersion, entry.pluginId, entry.version, entry.status.name, revision,
       _date(entry.updatedAt), entry.stagingHandle, entry.promotedPath,
       entry.failureCode, entry.contentHash, entry.approvedBy, entry.approvalId,
-      entry.operationId,
+      entry.fencingToken, entry.operationId,
     ]);
     _insertEvent(entry, revision);
   }
