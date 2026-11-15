@@ -63,7 +63,8 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
             failure_code TEXT,
             content_hash TEXT,
             approved_by TEXT,
-            approval_id TEXT
+            approval_id TEXT,
+            fencing_token INTEGER
           )
         ''');
         _db.execute('''
@@ -100,12 +101,19 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
             content_hash TEXT,
             approved_by TEXT,
             approval_id TEXT,
+            fencing_token INTEGER,
             UNIQUE(operation_id, revision),
             FOREIGN KEY(operation_id) REFERENCES plugin_install_operation(operation_id)
           )
         ''');
         _db.execute('CREATE INDEX idx_plugin_install_event_history ON plugin_install_event(operation_id, revision)');
-        _db.execute('PRAGMA user_version = 1');
+        _db.execute('''
+          CREATE TABLE plugin_install_fence (
+            operation_id TEXT PRIMARY KEY,
+            highest_token INTEGER NOT NULL CHECK (highest_token >= 0)
+          )
+        ''');
+        _db.execute('PRAGMA user_version = 2');
       });
     }
     if (version == 1) {
@@ -136,7 +144,7 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
     }
   }
 
-  static const int _schemaVersion = 1;
+  static const int _schemaVersion = 2;
   static String _date(DateTime value) => value.toUtc().toIso8601String();
   static DateTime _parseDate(Object? value) => DateTime.parse(value! as String).toUtc();
 
@@ -245,7 +253,7 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
       if (rows.isEmpty) {
         _db.execute('''
           INSERT INTO plugin_install_operation ($_columns, revision)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         ''', _values(entry));
         _recordApproval(entry);
         _insertEvent(entry, 1);
