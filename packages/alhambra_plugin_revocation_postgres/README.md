@@ -6,7 +6,7 @@ PostgreSQL implementation of Alhambra plugin revocation execution, journal and a
 
 The core `alhambra_plugin_runtime` package defines the contracts and remains database-neutral. This optional adapter provides multi-instance persistence using PostgreSQL transactions, uniqueness constraints, and row-level worker claims. It also implements the read-only `PluginRevocationOutboxInspectionStore` contract via `readAllOutbox()`; inspection does not claim or mutate messages.
 
-The current adapter does **not yet** implement `PluginRevocationDeadLetterReplayStore`. The in-memory runtime reference implementation is not a substitute for durable operator audit. Do not enable production dead-letter replay until a later adapter release provides one-transaction audit insertion + new replay outbox insertion.
+The adapter implements `PluginRevocationDeadLetterReplayStore`. Replay inserts a new pending event and operator audit record atomically; it never resets the source dead-letter row.
 
 ## Bootstrap
 
@@ -68,7 +68,7 @@ Delivery is **at least once**, not exactly once. A process can publish successfu
 
 ## Migration and operations
 
-- Migration version 1 is available at `migrations/001_plugin_revocation.sql` and is also applied by `migrate()`.
+- Migration versions 1–4 are applied transactionally by `migrate()`. The checked-in SQL migrations are `migrations/001_plugin_revocation.sql`, `migrations/002_audited_dead_letter_replay.sql`, `migrations/003_operator_scope.sql` and `migrations/004_scope_ownership.sql`. Version 4 adds immutable scope ownership to execution, journal and outbox records and scope-first inspection indexes. Existing rows are assigned the explicit compatibility scope `default`.
 - Run migrations with a dedicated role; grant the application role only the required table and sequence privileges (no sequence is currently used).
 - Configure pool size, connection timeout, query timeout, and TLS through the PostgreSQL URL.
 - Monitor pending count, oldest pending age, expired leases, retry attempts and dead-letter count using the outbox tables.
@@ -85,3 +85,15 @@ dart test
 ```
 
 The integration suite verifies atomic execution/journal/outbox completion, independent-pool claim concurrency, journal revision CAS, and rollback when the journal update cannot be completed. Tests are skipped when the environment variable is absent.
+
+
+## Audited dead-letter replay
+
+`replayDeadLetter` verifies and locks the source dead-letter row, allocates a generation, and inserts a new pending outbox event plus its operator-action audit record in one PostgreSQL transaction. A transaction-scoped advisory lock serializes requests using the same action ID; the source row lock serializes distinct approved replays of the same source event. Unique constraints provide a final integrity boundary. The original dead-letter row remains unchanged.
+
+The adapter exposes `readOperatorActions()`. Actor authentication, authorization, tenant scoping and approval-reference validation must be performed by the host before invoking replay. Replay delivery remains at-least-once.
+
+
+## Scope ownership
+
+`PluginRevocationCoordinator.execute(scopeId: ...)` accepts a trusted host-resolved scope (defaulting to `default` for source compatibility). The scope is persisted on the execution claim, journal entry and audit outbox event. Terminal completion and journal compare-and-set reject scope changes. Replay verifies that the requested scope matches the source dead-letter event. The adapter does not authenticate or resolve tenant identity; the embedding host must do that before invoking the coordinator.

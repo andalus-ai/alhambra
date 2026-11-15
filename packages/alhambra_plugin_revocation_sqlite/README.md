@@ -11,7 +11,7 @@ Durable SQLite implementation for Alhambra plugin revocation.
 
 The adapter is an optional package. The neutral `alhambra_plugin_runtime` package remains database-independent.
 
-The current adapter does **not yet** implement `PluginRevocationDeadLetterReplayStore`. The in-memory runtime reference implementation is not a substitute for durable operator audit. Do not enable production dead-letter replay until a later adapter release provides one-transaction audit insertion + new replay outbox insertion.
+The adapter implements `PluginRevocationDeadLetterReplayStore`. Replay inserts a new pending event and operator audit record atomically; it never resets the source dead-letter row.
 
 ## Bootstrap
 
@@ -20,6 +20,9 @@ final persistence = SqlitePluginRevocationStore('/var/lib/app/revocations.sqlite
 
 final coordinator = PluginRevocationCoordinator(
   manager: pluginManager,
+  // Resolve from authenticated host context; never from a request body.
+  // The default 'default' scope is retained for single-scope compatibility.
+  // scopeId: authenticatedTenantId,
   executionStore: persistence,
   auditSink: persistence,
   approve: approvalPolicy,
@@ -52,4 +55,16 @@ SQLite is intended for embedded, single-host persistence. Use a server database 
 
 ## Schema
 
-Schema version 1 creates `plugin_revocation_execution`, `plugin_revocation_outbox`, and `plugin_revocation_journal`. The outbox has a unique event ID and idempotency key plus an index for due/expired work. The adapter creates tables idempotently and records SQLite `user_version = 1`. Future schema changes must use forward-only migrations and preserve enum names as text rather than ordinal values.
+Schema version 1 creates the execution, outbox and journal tables. Schema version 2 adds replay lineage and the operator-action audit table. Schema version 3 adds operator-action `scope_id`. Schema version 4 adds immutable `scope_id` ownership to execution, journal and outbox records plus scope-first inspection indexes. Each migration runs in a `BEGIN IMMEDIATE` transaction and advances `PRAGMA user_version` only after all changes succeed. Existing databases are upgraded automatically on adapter startup. Rows created before v4 are assigned the explicit compatibility scope `default`.
+
+
+## Audited dead-letter replay
+
+`replayDeadLetter` only accepts a source row currently in `deadLetter`. It inserts a new pending outbox row and its operator-action audit record in the same immediate transaction. The source row is unchanged. The database writer lock serializes replay generation allocation across independent SQLite connections; unique action IDs make retries idempotent. Each generation has a distinct event ID and idempotency key.
+
+The adapter exposes `readOperatorActions()` for audit inspection. Operator authentication and approval validation remain host responsibilities. SQLite is a single-host persistence option, not a multi-host coordination database.
+
+
+## Scope ownership
+
+`PluginRevocationCoordinator.execute(scopeId: ...)` accepts a trusted host-resolved scope (defaulting to `default` for source compatibility). The scope is persisted on the execution claim, journal entry and audit outbox event. Terminal completion and journal compare-and-set reject scope changes. Replay verifies that the requested scope matches the source dead-letter event. The adapter does not authenticate or resolve tenant identity; the embedding host must do that before invoking the coordinator.

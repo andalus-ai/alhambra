@@ -15,6 +15,7 @@ import 'sqlite_composition_lifecycle_event_store.dart';
 final class SqliteLifecycleEventStoreWorker
     implements
         CompositionLifecycleEventStore,
+        CompositionLifecycleStorageHealthProvider,
         CompositionLifecycleStorageMaintenanceProvider {
   final ReceivePort _responses;
   final ReceivePort _errors;
@@ -178,6 +179,25 @@ final class SqliteLifecycleEventStoreWorker
     const codec = CompositionLifecycleEventJsonCodec();
     return List<CompositionLifecycleEvent>.unmodifiable(
       values.map((value) => codec.decode(value as String)),
+    );
+  }
+
+  @override
+  Future<CompositionLifecycleStorageHealth> inspectHealth() async {
+    final response = await _request('health');
+    return CompositionLifecycleStorageHealth(
+      state: CompositionLifecycleStorageHealthState.values.byName(
+        response['state'] as String,
+      ),
+      checkedAt: DateTime.parse(response['checkedAt'] as String),
+      lastSuccessfulWriteAt: response['lastSuccessfulWriteAt'] == null
+          ? null
+          : DateTime.parse(response['lastSuccessfulWriteAt'] as String),
+      lastError: response['lastError'] as String?,
+      recordCount: response['recordCount'] as int?,
+      primaryStorageBytes: response['primaryStorageBytes'] as int?,
+      auxiliaryStorageBytes: response['auxiliaryStorageBytes'] as int?,
+      metrics: Map<String, Object?>.from(response['metrics'] as Map),
     );
   }
 
@@ -379,6 +399,21 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
             maxEvents: maxEvents,
           );
           host.send({'id': id, 'ok': true, 'removed': removed});
+          break;
+        case 'health':
+          final health = await store.inspectHealth();
+          host.send({
+            'id': id,
+            'ok': true,
+            'state': health.state.name,
+            'checkedAt': health.checkedAt.toIso8601String(),
+            'lastSuccessfulWriteAt': health.lastSuccessfulWriteAt?.toIso8601String(),
+            'lastError': health.lastError,
+            'recordCount': health.recordCount,
+            'primaryStorageBytes': health.primaryStorageBytes,
+            'auxiliaryStorageBytes': health.auxiliaryStorageBytes,
+            'metrics': health.metrics,
+          });
           break;
         case 'checkpoint':
           final mode = SqliteWalCheckpointMode.values.byName(payload['mode'] as String);

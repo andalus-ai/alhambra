@@ -278,3 +278,132 @@ planning. `executeBatchWithJob()` independently repeats preflight and rejects
 a job whose action, ordered targets, checkpoint snapshots, or reserved
 operation IDs no longer match. The host owns authorization, persistence,
 idempotency-key policy, and any approval audit trail.
+
+
+## Recovery plan freshness validation
+
+`PluginLifecycleRecoveryBatchPlanner.validatePlan()` lets a host check a
+reviewed plan again before presenting its final approval action or persisting
+the job. It rebuilds the current snapshot using the plan's existing reserved
+operation IDs, then compares the dependency order and complete checkpoint
+snapshots (including state, sequence, attempt, timestamps, dependencies, and
+sanitized failure metadata).
+
+The validation is read-only: it does not regenerate operation IDs, write
+checkpoints or jobs, mutate the manager, or invoke plugin hooks. A stale or
+blocked result includes blockers and, when available, the newly observed plan
+for host review. The host must obtain fresh approval if the plan changed.
+
+This is an additional review aid, not an approval token or execution lock.
+State can change immediately after validation. `executeBatchWithJob()` remains
+responsible for its own independent preflight and job-intent checks before
+plugin code runs. Hosts continue to own authorization, approval policy, and
+durable audit records.
+
+
+## Durable recovery-job cancellation
+
+`PluginLifecycleRecoveryJobCancellationController.requestCancellation()`
+uses the job store's revision compare-and-set boundary. A planned job becomes
+terminal `cancelled` immediately and its untouched steps become skipped. A
+running job becomes `cancellationRequested`; the request is durable, but no
+plugin hook is interrupted.
+
+`executeBatchWithJob()` observes a cancellation request between plugin steps.
+It lets the currently claimed step finish and persist its outcome, then marks
+remaining pending steps skipped and the job cancelled before claiming another
+step. If cancellation races with a step outcome write, the runner reloads the
+latest job revision and preserves the cancellation request while recording
+the in-flight step's result.
+
+A crash during a running step remains ambiguous. Cancellation does not convert
+a running claim into a skipped or completed step, and restart inspection must
+continue to require host review. Cancellation is not rollback, compensation,
+or proof that external side effects were undone. Hosts authorize cancellation
+and provide durable, atomic compare-and-set job storage.
+
+
+## Recovery-job expiration and archival retention
+
+A planned recovery job may be created with an immutable UTC `expiresAt`
+timestamp. Omit it when the host does not want an expiration deadline. Expiry
+is host-controlled: `PluginLifecycleRecoveryJobExpirationController.inspect()`
+is read-only, and `expire()` changes a job only after its deadline has been
+reached and its expected revision still matches.
+
+Only `planned` jobs may expire. Expiration atomically transitions the job to
+`expired`, records `expiredAt`, and marks untouched steps skipped. The
+journaled recovery runner independently refuses to claim a planned job once
+its `expiresAt` has been reached, even if the host has not yet materialized
+the terminal `expired` state. The host can then explicitly expire or replace
+the stale plan.
+
+Running, cancellation-requested, interrupted, failed, partially completed,
+manual-review, completed, and cancelled jobs are never expired by this
+controller. In particular, expiry does not interrupt plugin hooks, compensate
+side effects, or resolve an ambiguous execution. Revision compare-and-set
+arbitrates races with execution claims and cancellation requests: whichever
+valid state transition commits first wins; a stale caller must reload and
+inspect.
+
+There is no timer, scheduler, sweeper, or automatic deletion in the runtime.
+The host supplies the deadline policy, chooses when to inspect and apply
+expiration, and retains audit evidence according to its own requirements.
+
+`PluginLifecycleRecoveryJobArchiver` and
+`PluginLifecycleRecoveryJobArchive` define a persistence-neutral archival
+boundary. The archiver accepts only completed, failed, partially completed, cancelled,
+or expired jobs; planned, running, cancellation-requested, interrupted, and
+manual-review jobs remain operationally visible. It requires the expected
+job revision and writes an immutable snapshot through an idempotent
+`putIfAbsent` operation. It does not delete or mutate the
+operational job. Production archive adapters must reject conflicting snapshots
+for an existing job ID and document their durability and concurrency
+guarantees. Retention, legal holds, access control, and any eventual purge
+remain host responsibilities.
+
+
+## Recovery archive integrity, restore, and retention governance
+
+Archived jobs carry an integrity envelope containing a format version, digest
+algorithm identifier, and digest of a canonical versioned snapshot. The archive
+timestamp is included in the digest as well as the complete job snapshot. The
+canonical snapshot includes the full recovery job identity, ordered plugin
+steps, checkpoint preconditions, execution IDs, timestamps, sanitized failure
+metadata, cancellation/expiration metadata, and revision. The codec is
+explicitly versioned; changes to persisted fields require a compatible codec
+evolution.
+
+Alhambra does not select or bundle a cryptographic implementation. The host
+supplies a `PluginLifecycleRecoveryJobDigestProvider`; production deployments
+should use a vetted cryptographic digest such as SHA-256 and pin the algorithm
+identifier. The test digest provider is test-only and must never be used for
+production integrity.
+
+`PluginLifecycleRecoveryJobArchiveVerifier` is read-only. It reports missing,
+unsupported-format, and digest-mismatch conditions without mutating data.
+`PluginLifecycleRecoveryJobArchiveRestorer` imports only a verified snapshot
+and uses the operational job store's insert-if-absent boundary. A matching
+existing snapshot is idempotent; a conflicting job ID or idempotency key is
+rejected. Restore does not execute plugin code, alter plugin checkpoints, or
+resume a job. Restored jobs retain their terminal state and require a separate
+host decision for any new recovery attempt.
+
+Retention policy is supplied by the host for each inspection. The inspector
+considers the retention deadline, legal hold, and audit-preservation flag; it
+does not infer legal requirements or persist policy. Legal hold and audit
+preservation always block purge, even after the nominal retention deadline.
+
+Purge is a separate explicit operation against an archive adapter that
+implements `PluginLifecycleRecoveryJobArchivePurgeStore`. It requires
+host-provided authorization evidence validated by a host authorization adapter,
+an expected archive digest, an eligible retention decision, and a fresh
+successful integrity verification against the same archive adapter being purged. A durable
+purge-intent audit event is written before the adapter's atomic
+delete-if-digest-matches operation. If audit persistence fails, the archive is
+not deleted. The operational job record is never purged by this API.
+
+Alhambra does not provide retention timers, automatic archival, legal-hold
+management, authorization, purge scheduling, or an archive backend. Hosts are
+responsible for durable audit sinks, archive adapter concurrency guarantees,
+retention policy, legal compliance, and review of any failed purge attempt.

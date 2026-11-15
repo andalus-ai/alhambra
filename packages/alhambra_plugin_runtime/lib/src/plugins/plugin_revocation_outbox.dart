@@ -4,6 +4,7 @@ import 'plugin_revocation_operator_actions.dart';
 /// Stable, sanitized audit payload created when a revocation reaches an outcome.
 final class PluginRevocationAuditEvent {
   final String eventId;
+  final String scopeId;
   final String idempotencyKey;
   final String operationId;
   final String pluginId;
@@ -17,6 +18,7 @@ final class PluginRevocationAuditEvent {
 
   const PluginRevocationAuditEvent({
     required this.eventId,
+    this.scopeId = 'default',
     required this.idempotencyKey,
     required this.operationId,
     required this.pluginId,
@@ -92,7 +94,7 @@ abstract interface class PluginRevocationOutboxStore {
 /// Single-isolate reference implementation for tests only. A real adapter
 /// needs database transactions, uniqueness constraints and row-level claims.
 class InMemoryTransactionalPluginRevocationStore
-    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore, PluginRevocationDeadLetterReplayStore {
+    implements TransactionalPluginRevocationStore, PluginRevocationOutboxStore, PluginRevocationOutboxInspectionStore, PluginRevocationDeadLetterReplayStore, PluginRevocationOperatorActionInspectionStore {
   final Map<String, PluginRevocationExecutionRecord> _executions = {};
   final Map<String, PluginRevocationOutboxMessage> _messages = {};
   final Map<String, PluginRevocationOperatorAction> _operatorActions = {};
@@ -119,8 +121,12 @@ class InMemoryTransactionalPluginRevocationStore
 
   @override
   Future<void> completeAndEnqueue(PluginRevocationExecutionRecord record) async {
-    if (!_executions.containsKey(record.idempotencyKey)) {
+    final current = _executions[record.idempotencyKey];
+    if (current == null) {
       throw StateError('Cannot complete an unclaimed revocation operation.');
+    }
+    if (current.scopeId != record.scopeId) {
+      throw StateError('Revocation scope cannot change after the execution claim.');
     }
     // No await between these map writes: atomic within this single isolate.
     _executions[record.idempotencyKey] = record;
@@ -132,6 +138,7 @@ class InMemoryTransactionalPluginRevocationStore
     _messages.putIfAbsent(eventId, () {
       final event = PluginRevocationAuditEvent(
         eventId: eventId,
+        scopeId: record.scopeId,
         idempotencyKey: record.idempotencyKey,
         operationId: record.operationId,
         pluginId: record.pluginId,
@@ -273,6 +280,7 @@ class InMemoryTransactionalPluginRevocationStore
     if (existingAction != null) {
       if (existingAction.targetEventId != request.targetEventId ||
           existingAction.actorId != request.actorId ||
+          existingAction.scopeId != request.scopeId ||
           existingAction.reason != request.reason ||
           existingAction.approvalReference != request.approvalReference) {
         throw StateError('Operator action ID was already used with different replay details.');
@@ -284,6 +292,9 @@ class InMemoryTransactionalPluginRevocationStore
     final source = _messages[request.targetEventId];
     if (source == null || source.state != PluginRevocationOutboxState.deadLetter) {
       return null;
+    }
+    if (source.event.scopeId != request.scopeId) {
+      throw StateError('Dead-letter event is outside the requested scope.');
     }
     final generation = _operatorActions.values
         .where((action) => action.targetEventId == request.targetEventId)
@@ -297,6 +308,7 @@ class InMemoryTransactionalPluginRevocationStore
     final at = request.occurredAt.toUtc();
     final event = PluginRevocationAuditEvent(
       eventId: replayEventId,
+      scopeId: source.event.scopeId,
       idempotencyKey: replayKey,
       operationId: source.event.operationId,
       pluginId: source.event.pluginId,
@@ -317,6 +329,7 @@ class InMemoryTransactionalPluginRevocationStore
     final audit = PluginRevocationOperatorAction(
       actionId: request.actionId,
       actorId: request.actorId,
+      scopeId: request.scopeId,
       reason: request.reason,
       approvalReference: request.approvalReference,
       targetEventId: source.event.eventId,
@@ -330,6 +343,7 @@ class InMemoryTransactionalPluginRevocationStore
     return PluginRevocationReplayResult(audit, replay);
   }
 
+  @override
   Future<List<PluginRevocationOperatorAction>> readOperatorActions() async =>
       List.unmodifiable(_operatorActions.values.toList()
         ..sort((a, b) => a.occurredAt.compareTo(b.occurredAt)));

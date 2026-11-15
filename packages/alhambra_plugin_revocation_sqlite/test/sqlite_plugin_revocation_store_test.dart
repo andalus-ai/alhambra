@@ -9,9 +9,11 @@ PluginRevocationExecutionRecord _record({
   PluginRevocationExecutionStatus status =
       PluginRevocationExecutionStatus.requiresReconciliation,
   DateTime? at,
+  String scopeId = 'default',
 }) =>
     PluginRevocationExecutionRecord(
       idempotencyKey: 'operation:plugin:provider:deactivate',
+      scopeId: scopeId,
       operationId: 'operation',
       pluginId: 'plugin',
       providerOwnerId: 'provider',
@@ -70,6 +72,36 @@ void main() {
       expect(claimed.single.event.eventId, '${pending.idempotencyKey}:terminal');
       expect(claimed.single.event.outcome, 'completed');
       expect(claimed.single.attempts, 1);
+    });
+
+
+    test('persists scope and rolls back a terminal scope mismatch', () async {
+      final pending = _record(scopeId: 'tenant-blue');
+      expect(await store.writePending(pending), isTrue);
+
+      expect(
+        (await store.read(pending.idempotencyKey))?.scopeId,
+        'tenant-blue',
+      );
+      expect(
+        (await store.journalStore.read(pending.idempotencyKey))?.scopeId,
+        'tenant-blue',
+      );
+
+      await expectLater(
+        store.completeAndEnqueue(_record(
+          scopeId: 'tenant-red',
+          status: PluginRevocationExecutionStatus.completed,
+          at: DateTime.utc(2026, 1, 1, 0, 1),
+        )),
+        throwsStateError,
+      );
+
+      expect(
+        (await store.read(pending.idempotencyKey))?.status,
+        PluginRevocationExecutionStatus.requiresReconciliation,
+      );
+      expect(await store.readAllOutbox(), isEmpty);
     });
 
     test('expired lease is reclaimed and stale worker is fenced', () async {
@@ -233,6 +265,32 @@ void main() {
     });
   });
 
+
+  test('fresh database applies schema v4 scope columns and indexes', () async {
+    final directory = await Directory.systemTemp.createTemp('alhambra-revocation-schema-');
+    final databasePath = '${directory.path}/revocations.sqlite';
+    final migrated = SqlitePluginRevocationStore(databasePath);
+    final inspection = sq.sqlite3.open(databasePath);
+    addTearDown(() async {
+      inspection.dispose();
+      migrated.close();
+      await directory.delete(recursive: true);
+    });
+
+    expect(
+      inspection.select('PRAGMA user_version').single['user_version'],
+      4,
+    );
+    for (final table in [
+      'plugin_revocation_execution',
+      'plugin_revocation_journal',
+      'plugin_revocation_outbox',
+    ]) {
+      final columns = inspection.select('PRAGMA table_info($table)');
+      expect(columns.any((column) => column['name'] == 'scope_id'), isTrue);
+    }
+  });
+
   test('completion rolls back when its journal row is missing', () async {
     final directory = await Directory.systemTemp.createTemp('alhambra-revocation-rollback-');
     final databasePath = '${directory.path}/revocations.sqlite';
@@ -334,6 +392,7 @@ void main() {
     final request = PluginRevocationReplayRequest(
       actionId: 'sqlite-action-1',
       actorId: 'operator-1',
+      scopeId: 'tenant-blue',
       reason: 'Approved after sink recovery',
       approvalReference: 'change-101',
       targetEventId: claimed.event.eventId,
@@ -343,11 +402,14 @@ void main() {
     final repeated = (await store.replayDeadLetter(request))!;
     expect(repeated.replay.event.eventId, first.replay.event.eventId);
     expect(first.audit.replayGeneration, 1);
+    expect(first.audit.scopeId, 'tenant-blue');
     expect(first.replay.event.replayOfEventId, claimed.event.eventId);
     expect(first.replay.event.replayGeneration, 1);
     expect(first.replay.state, PluginRevocationOutboxState.pending);
     expect(first.replay.attempts, 0);
-    expect(await store.readOperatorActions(), hasLength(1));
+    final persistedActions = await store.readOperatorActions();
+    expect(persistedActions, hasLength(1));
+    expect(persistedActions.single.scopeId, 'tenant-blue');
     final all = await store.readAllOutbox();
     expect(all, hasLength(2));
     expect(all.singleWhere((m) => m.event.eventId == claimed.event.eventId).state,
@@ -356,6 +418,7 @@ void main() {
     final second = await store.replayDeadLetter(PluginRevocationReplayRequest(
       actionId: 'sqlite-action-2',
       actorId: 'operator-2',
+      scopeId: 'tenant-blue',
       reason: 'Second approved replay generation',
       approvalReference: 'change-102',
       targetEventId: claimed.event.eventId,
@@ -363,7 +426,9 @@ void main() {
     ));
     expect(second!.audit.replayGeneration, 2);
     expect(second.replay.event.eventId, isNot(first.replay.event.eventId));
-    expect(await store.readOperatorActions(), hasLength(2));
+    final allActions = await store.readOperatorActions();
+    expect(allActions, hasLength(2));
+    expect(allActions.every((action) => action.scopeId == 'tenant-blue'), isTrue);
   });
 
 }

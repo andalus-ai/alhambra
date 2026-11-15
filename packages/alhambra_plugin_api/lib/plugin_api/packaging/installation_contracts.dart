@@ -27,11 +27,13 @@ final class PluginInstallStaging {
   final String operationId;
   final String pluginId;
   final String opaqueHandle;
+  final int fencingToken;
 
   const PluginInstallStaging({
     required this.operationId,
     required this.pluginId,
     required this.opaqueHandle,
+    this.fencingToken = 0,
   });
 }
 
@@ -49,6 +51,7 @@ abstract interface class PluginInstallFileSystem {
     required String operationId,
     required String pluginId,
     required String version,
+    int fencingToken = 0,
   });
 
   Future<void> createDirectory(
@@ -84,6 +87,16 @@ abstract interface class PluginInstallFileSystem {
   });
 
   Future<void> discardStaging(PluginInstallStaging staging);
+
+  /// Read-only, operation-scoped inspection. The adapter must prove staging
+  /// ownership from the opaque handle or operation marker, not from path
+  /// similarity. Must not repair, delete, promote or mutate files.
+  Future<PluginInstallRecoverySnapshot> inspectOperation({
+    required String operationId,
+    required String pluginId,
+    required String? stagingHandle,
+    required String? destinationPath,
+  });
 }
 
 /// Host compatibility/dependency preflight. Must not execute plugin code.
@@ -104,10 +117,11 @@ enum PluginInstallJournalStatus {
   rolledBack,
   failed,
   needsReconciliation,
+  recoveryStarted,
 }
 
-/// Append/update semantics are adapter-defined but writes must be durable
-/// before the installer performs the corresponding external side effect.
+/// [unresolved] returns exactly the latest non-terminal entry per operation ID.
+/// Writes must be durable before the corresponding external side effect.
 final class PluginInstallJournalEntry {
   final String operationId;
   final String pluginId;
@@ -117,6 +131,10 @@ final class PluginInstallJournalEntry {
   final String? stagingHandle;
   final String? promotedPath;
   final String? failureCode;
+  final String? contentHash;
+  final String? approvedBy;
+  final String? approvalId;
+  final int? fencingToken;
 
   const PluginInstallJournalEntry({
     required this.operationId,
@@ -127,10 +145,17 @@ final class PluginInstallJournalEntry {
     this.stagingHandle,
     this.promotedPath,
     this.failureCode,
+    this.contentHash,
+    this.approvedBy,
+    this.approvalId,
+    this.fencingToken,
   });
 }
 
 abstract interface class PluginInstallJournal {
+  /// When [entry.fencingToken] is non-null, production implementations must
+  /// atomically persist the highest accepted token per operation and reject
+  /// any lower token. This check must be part of the journal write transaction.
   Future<void> write(PluginInstallJournalEntry entry);
   Future<List<PluginInstallJournalEntry>> unresolved();
 }
@@ -159,3 +184,110 @@ abstract interface class TransactionalInstalledPluginStore
   Future<bool> createIfAbsent(InstalledPluginRecord plugin);
   Future<bool> removeIfMatches(InstalledPluginRecord plugin);
 }
+
+
+/// Read-only facts returned by a host filesystem adapter during reconciliation.
+///
+/// Both staging and destination facts must be based on adapter-owned
+/// operation provenance (for example a durable operation marker), not merely
+/// on matching path names.
+final class PluginInstallRecoverySnapshot {
+  final bool stagingExists;
+  final bool destinationExists;
+  final bool destinationOwnedByOperation;
+  final bool rollbackAvailable;
+
+  const PluginInstallRecoverySnapshot({
+    required this.stagingExists,
+    required this.destinationExists,
+    required this.destinationOwnedByOperation,
+    required this.rollbackAvailable,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      other is PluginInstallRecoverySnapshot &&
+      other.stagingExists == stagingExists &&
+      other.destinationExists == destinationExists &&
+      other.destinationOwnedByOperation == destinationOwnedByOperation &&
+      other.rollbackAvailable == rollbackAvailable;
+
+  @override
+  int get hashCode => Object.hash(
+        stagingExists,
+        destinationExists,
+        destinationOwnedByOperation,
+        rollbackAvailable,
+      );
+}
+
+/// Journal adapter that supports stale-safe recovery claims.
+///
+/// The compare-and-set must be atomic and durable. It must update only when
+/// the latest entry for [operationId] still has both [expectedStatus] and
+/// [expectedUpdatedAt]. The host must fence the original installer worker or
+/// prove its operation lease has expired before allowing a recovery claim.
+abstract interface class PluginInstallRecoveryJournal
+    implements PluginInstallJournal {
+  Future<bool> compareAndSet({
+    required String operationId,
+    required PluginInstallJournalStatus expectedStatus,
+    required DateTime expectedUpdatedAt,
+    required PluginInstallJournalEntry replacement,
+  });
+}
+
+
+/// Marker for journals that enforce the fencing token on every write.
+///
+/// The token is carried by [PluginInstallJournalEntry.fencingToken]. A fenced
+/// implementation must reject stale tokens atomically with its write.
+abstract interface class FencedPluginInstallJournal
+    implements PluginInstallJournal {
+  /// Atomically advances the highest accepted token before work begins.
+  /// Returns false if a newer token has already been registered.
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  });
+}
+
+/// Marker for filesystem adapters that enforce [PluginInstallStaging.fencingToken]
+/// on every mutating operation, including extraction, promotion, rollback,
+/// finalization and staging cleanup. The highest token must be persisted in
+/// operation-owned metadata and lower tokens rejected.
+abstract interface class FencedPluginInstallFileSystem
+    implements PluginInstallFileSystem {
+  /// Atomically persists the highest accepted token in operation-owned state.
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  });
+}
+
+/// Installed-record adapter that atomically rejects stale operation tokens.
+abstract interface class FencedTransactionalInstalledPluginStore
+    implements TransactionalInstalledPluginStore {
+  Future<bool> advanceFence({
+    required String operationId,
+    required int fencingToken,
+  });
+
+  Future<bool> createIfAbsentFenced(
+    InstalledPluginRecord plugin, {
+    required String operationId,
+    required int fencingToken,
+  });
+
+  Future<bool> removeIfMatchesFenced(
+    InstalledPluginRecord plugin, {
+    required String operationId,
+    required int fencingToken,
+  });
+}
+
+
+/// Recovery journal that atomically enforces fencing tokens on both writes
+/// and compare-and-set claims.
+abstract interface class FencedPluginInstallRecoveryJournal
+    implements PluginInstallRecoveryJournal, FencedPluginInstallJournal {}

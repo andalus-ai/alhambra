@@ -30,6 +30,9 @@ final class TransactionalPluginInstaller {
   final TransactionalInstalledPluginStore installedStore;
   final PluginInstallJournal journal;
   final PluginInstallLimits limits;
+  final PluginInstallOperationLeaseStore? leaseStore;
+  final String? workerId;
+  final Duration leaseDuration;
   final DateTime Function() clock;
   final String Function()? operationIdFactory;
   int _operationSequence = 0;
@@ -43,6 +46,9 @@ final class TransactionalPluginInstaller {
     required this.installedStore,
     required this.journal,
     this.limits = const PluginInstallLimits(),
+    this.leaseStore,
+    this.workerId,
+    this.leaseDuration = const Duration(seconds: 30),
     DateTime Function()? clock,
     String Function()? operationIdFactory,
   })  : clock = clock ?? DateTime.now,
@@ -79,6 +85,56 @@ final class TransactionalPluginInstaller {
       );
     }
 
+    PluginInstallOperationLease? operationLease;
+    if (leaseStore != null) {
+      if (journal is! FencedPluginInstallJournal ||
+          fileSystem is! FencedPluginInstallFileSystem ||
+          installedStore is! FencedTransactionalInstalledPluginStore) {
+        throw ArgumentError(
+          'Lease mode requires fenced journal, filesystem and installed-store adapters.',
+        );
+      }
+      final owner = workerId;
+      if (owner == null || owner.trim().isEmpty) {
+        throw ArgumentError('workerId is required when an installation lease store is configured.');
+      }
+      if (leaseDuration <= Duration.zero) {
+        throw ArgumentError.value(leaseDuration, 'leaseDuration', 'Must be positive.');
+      }
+      operationLease = await leaseStore!.acquire(
+        operationId: operationId,
+        ownerId: owner,
+        now: clock().toUtc(),
+        leaseDuration: leaseDuration,
+      );
+      if (operationLease == null) {
+        throw const PluginInstallException(
+          'INSTALL_OPERATION_BUSY',
+          'Another worker currently owns this installation operation.',
+          reconciliationRequired: true,
+        );
+      }
+    }
+
+    Future<void> ensureLease() async {
+      final store = leaseStore;
+      final current = operationLease;
+      if (store == null || current == null) return;
+      final renewed = await store.renew(
+        lease: current,
+        now: clock().toUtc(),
+        leaseDuration: leaseDuration,
+      );
+      if (renewed == null) {
+        throw const PluginInstallException(
+          'INSTALL_LEASE_LOST',
+          'Installation worker lost its operation lease.',
+          reconciliationRequired: true,
+        );
+      }
+      operationLease = renewed;
+    }
+
     PluginInstallStaging? staging;
     String? promotedPath;
     var recordCreateAttempted = false;
@@ -87,7 +143,9 @@ final class TransactionalPluginInstaller {
 
     Future<void> record(PluginInstallJournalStatus status, {
       String? failureCode,
-    }) => journal.write(PluginInstallJournalEntry(
+    }) async {
+      await ensureLease();
+      await journal.write(PluginInstallJournalEntry(
       operationId: operationId,
       pluginId: pluginId,
       version: version,
@@ -96,9 +154,30 @@ final class TransactionalPluginInstaller {
       stagingHandle: staging?.opaqueHandle,
       promotedPath: promotedPath,
       failureCode: failureCode,
+      contentHash: package.metadata.contentHash,
+      fencingToken: operationLease?.fencingToken,
     ));
+    }
 
     try {
+      if (operationLease != null) {
+        await ensureLease();
+        final token = operationLease!.fencingToken;
+        final journalReady = await (journal as FencedPluginInstallJournal)
+            .advanceFence(operationId: operationId, fencingToken: token);
+        final filesystemReady = await (fileSystem as FencedPluginInstallFileSystem)
+            .advanceFence(operationId: operationId, fencingToken: token);
+        final storeReady = await (installedStore as FencedTransactionalInstalledPluginStore)
+            .advanceFence(operationId: operationId, fencingToken: token);
+        if (!journalReady || !filesystemReady || !storeReady) {
+          throw const PluginInstallException(
+            'INSTALL_FENCE_REJECTED',
+            'A host adapter has already accepted a newer fencing token.',
+            reconciliationRequired: true,
+          );
+        }
+      }
+      try {
       await record(PluginInstallJournalStatus.verificationStarted);
       final verification = await verifier.verify(package);
       if (verification is! PackageVerified) {
@@ -122,11 +201,21 @@ final class TransactionalPluginInstaller {
         );
       }
 
+      await ensureLease();
       final stagingHandle = await fileSystem.createStaging(
         operationId: operationId,
         pluginId: pluginId,
         version: version,
+        fencingToken: operationLease?.fencingToken ?? 0,
       );
+      if (operationLease != null &&
+          stagingHandle.fencingToken != operationLease!.fencingToken) {
+        throw const PluginInstallException(
+          'INSTALL_FENCE_MISMATCH',
+          'Filesystem staging handle did not preserve the current fencing token.',
+          reconciliationRequired: true,
+        );
+      }
       staging = stagingHandle;
       await record(PluginInstallJournalStatus.stagingCreated);
 
@@ -186,6 +275,7 @@ final class TransactionalPluginInstaller {
                 'Directory "$relativePath" declares a non-zero size.',
               );
             }
+            await ensureLease();
             await fileSystem.createDirectory(stagingHandle, relativePath);
             break;
           case PluginArchiveEntryKind.file:
@@ -216,7 +306,9 @@ final class TransactionalPluginInstaller {
                   );
                 }
               },
+              beforeChunk: ensureLease,
             );
+            await ensureLease();
             await fileSystem.writeFile(
               staging: stagingHandle,
               relativePath: relativePath,
@@ -253,6 +345,7 @@ final class TransactionalPluginInstaller {
       }
       await record(PluginInstallJournalStatus.promoting);
       promotionAttempted = true;
+      await ensureLease();
       await fileSystem.promote(stagingHandle, destinationPath: destinationPath);
       await record(PluginInstallJournalStatus.promoted);
 
@@ -266,7 +359,15 @@ final class TransactionalPluginInstaller {
       );
       candidateRecord = installRecord;
       recordCreateAttempted = true;
-      final created = await installedStore.createIfAbsent(installRecord);
+      await ensureLease();
+      final created = operationLease == null
+          ? await installedStore.createIfAbsent(installRecord)
+          : await (installedStore as FencedTransactionalInstalledPluginStore)
+              .createIfAbsentFenced(
+                installRecord,
+                operationId: operationId,
+                fencingToken: operationLease!.fencingToken,
+              );
       if (!created) {
         recordCreateAttempted = false;
         throw PluginInstallException(
@@ -276,6 +377,7 @@ final class TransactionalPluginInstaller {
       }
       await record(PluginInstallJournalStatus.installedRecordSaved);
 
+      await ensureLease();
       await fileSystem.finalizePromotion(stagingHandle, promotedPath: destinationPath);
       await record(PluginInstallJournalStatus.committed);
 
@@ -300,15 +402,27 @@ final class TransactionalPluginInstaller {
         if (promotionAttempted &&
             rollbackPath != null &&
             rollbackStaging != null) {
+          await ensureLease();
           await fileSystem.rollbackPromotion(
             rollbackStaging,
             promotedPath: rollbackPath,
           );
         } else if (rollbackStaging != null) {
+          await ensureLease();
           await fileSystem.discardStaging(rollbackStaging);
         }
         if (recordCreateAttempted && candidateRecord != null) {
-          await installedStore.removeIfMatches(candidateRecord);
+          await ensureLease();
+          if (operationLease == null) {
+            await installedStore.removeIfMatches(candidateRecord);
+          } else {
+            await (installedStore as FencedTransactionalInstalledPluginStore)
+                .removeIfMatchesFenced(
+                  candidateRecord,
+                  operationId: operationId,
+                  fencingToken: operationLease!.fencingToken,
+                );
+          }
         }
         await record(PluginInstallJournalStatus.rolledBack,
             failureCode: failure.code);
@@ -336,6 +450,17 @@ final class TransactionalPluginInstaller {
         // Preserve the original failure if journaling is unavailable.
       }
       Error.throwWithStackTrace(failure, stackTrace);
+      }
+    } finally {
+      final store = leaseStore;
+      final current = operationLease;
+      if (store != null && current != null) {
+        try {
+          await store.release(lease: current, now: clock().toUtc());
+        } catch (_) {
+          // Expiry remains the fallback if lease release cannot be persisted.
+        }
+      }
     }
   }
 
@@ -368,8 +493,10 @@ final class TransactionalPluginInstaller {
   static Stream<List<int>> _boundedBytes(
     Stream<List<int>> source, {
     required void Function(int length) onChunk,
+    Future<void> Function()? beforeChunk,
   }) async* {
     await for (final chunk in source) {
+      await beforeChunk?.call();
       onChunk(chunk.length);
       yield chunk;
     }

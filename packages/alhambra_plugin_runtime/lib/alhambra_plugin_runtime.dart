@@ -48,7 +48,9 @@ export 'src/plugins/plugin_shutdown_coordinator.dart';
 export 'src/plugins/plugin_revocation_coordinator.dart';
 export 'src/plugins/plugin_revocation_outbox.dart';
 export 'src/plugins/plugin_revocation_operator_actions.dart';
+export 'src/plugins/plugin_revocation_replay_service.dart';
 export 'src/plugins/plugin_revocation_operations.dart';
+export 'src/plugins/plugin_revocation_admin_operations.dart';
 export 'src/plugins/plugin_revocation_journal.dart';
 export 'src/plugins/plugin_revocation_recovery_planner.dart';
 export 'src/plugins/plugin_revocation_reconciler.dart';
@@ -146,3 +148,15 @@ export 'src/plugins/plugin_lifecycle_recovery_batch_planner.dart';
 
 export 'src/plugins/plugin_lifecycle_recovery_batch.dart';
 export 'src/packaging/transactional_plugin_installer.dart';
+export 'src/packaging/in_memory_plugin_install_lease_store.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_batch_validation.dart';
+export 'src/packaging/plugin_install_recovery_planner.dart';
+export 'src/packaging/plugin_install_recovery_executor.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_job_expiration.dart';
+export 'src/plugins/plugin_lifecycle_recovery_job_retention.dart';
+
+export 'src/plugins/plugin_lifecycle_recovery_job_archive.dart';
+export 'src/plugins/plugin_lifecycle_recovery_job_archive_integrity_metadata.dart';
+export 'src/plugins/plugin_lifecycle_recovery_job_archive_integrity.dart';
