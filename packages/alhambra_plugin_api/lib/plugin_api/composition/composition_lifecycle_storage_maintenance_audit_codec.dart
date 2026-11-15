@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'composition_lifecycle_storage_maintenance_coordinator.dart';
+import 'composition_lifecycle_storage_maintenance.dart';
 
 /// Versioned JSON codec for durable maintenance audit records.
 ///
