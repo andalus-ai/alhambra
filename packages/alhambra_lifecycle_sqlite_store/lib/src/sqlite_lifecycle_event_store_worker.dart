@@ -16,7 +16,7 @@ final class SqliteLifecycleEventStoreWorker
     implements
         CompositionLifecycleEventStore,
         CompositionLifecycleStorageHealthProvider,
-        CompositionLifecycleStorageMaintenanceProvider {
+        CompositionLifecycleStorageMaintenanceProvider,\n        CompositionLifecycleStorageMaintenanceAuditStore {
   final ReceivePort _responses;
   final ReceivePort _errors;
   final ReceivePort _exits;
@@ -151,6 +151,14 @@ final class SqliteLifecycleEventStoreWorker
     if (response['ok'] != true) {
       final type = response['errorType'];
       final message = response['errorMessage']?.toString() ?? 'Unknown worker error';
+      if (type == 'CompositionLifecycleStorageMaintenanceAuditIdentityConflictException') {
+        throw CompositionLifecycleStorageMaintenanceAuditIdentityConflictException(
+          operationId: response['operationId']?.toString() ?? '',
+          status: CompositionLifecycleStorageMaintenanceOperationStatus.values.byName(
+            response['status']?.toString() ?? 'started',
+          ),
+        );
+      }
       if (type == 'CompositionLifecycleEventIdentityConflictException') {
         throw CompositionLifecycleEventIdentityConflictException(
           response['eventId']?.toString() ?? '',
@@ -180,6 +188,37 @@ final class SqliteLifecycleEventStoreWorker
     return List<CompositionLifecycleEvent>.unmodifiable(
       values.map((value) => codec.decode(value as String)),
     );
+  }
+
+  @override
+  Future<void> append(
+    CompositionLifecycleStorageMaintenanceOperationRecord record,
+  ) async {
+    const codec = CompositionLifecycleStorageMaintenanceAuditJsonCodec();
+    await _request('auditAppend', {'record': codec.encode(record)});
+  }
+
+  @override
+  Future<List<CompositionLifecycleStorageMaintenanceOperationRecord>> query(
+    CompositionLifecycleStorageMaintenanceAuditQuery query,
+  ) async {
+    final response = await _request('auditQuery', {
+      'operationId': query.operationId,
+      'status': query.status?.name,
+      'from': query.from?.toUtc().toIso8601String(),
+      'to': query.to?.toUtc().toIso8601String(),
+      'after': query.after == null
+          ? null
+          : {
+              'startedAt': query.after!.startedAt.toUtc().toIso8601String(),
+              'operationId': query.after!.operationId,
+              'status': query.after!.status.name,
+            },
+      'limit': query.limit,
+    });
+    const codec = CompositionLifecycleStorageMaintenanceAuditJsonCodec();
+    final values = response['records'] as List<Object?>;
+    return List.unmodifiable(values.map((value) => codec.decode(value as String)));
   }
 
   @override
@@ -345,6 +384,48 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
         : <Object?, Object?>{};
     try {
       switch (operation) {
+        case 'auditAppend':
+          await store.append(
+            const CompositionLifecycleStorageMaintenanceAuditJsonCodec()
+                .decode(payload['record'] as String),
+          );
+          host.send({'id': id, 'ok': true});
+          break;
+        case 'auditQuery':
+          final rawCursor = payload['after'];
+          final cursor = rawCursor is Map
+              ? Map<Object?, Object?>.from(rawCursor)
+              : null;
+          final query = CompositionLifecycleStorageMaintenanceAuditQuery(
+            operationId: payload['operationId'] as String?,
+            status: payload['status'] == null
+                ? null
+                : CompositionLifecycleStorageMaintenanceOperationStatus.values
+                    .byName(payload['status'] as String),
+            from: payload['from'] == null
+                ? null
+                : DateTime.parse(payload['from'] as String),
+            to: payload['to'] == null
+                ? null
+                : DateTime.parse(payload['to'] as String),
+            after: cursor == null
+                ? null
+                : CompositionLifecycleStorageMaintenanceAuditCursor(
+                    startedAt: DateTime.parse(cursor['startedAt'] as String),
+                    operationId: cursor['operationId'] as String,
+                    status: CompositionLifecycleStorageMaintenanceOperationStatus
+                        .values.byName(cursor['status'] as String),
+                  ),
+            limit: payload['limit'] as int,
+          );
+          const codec = CompositionLifecycleStorageMaintenanceAuditJsonCodec();
+          final records = await store.query(query);
+          host.send({
+            'id': id,
+            'ok': true,
+            'records': records.map(codec.encode).toList(growable: false),
+          });
+          break;
         case 'append':
           await store.append(
             const CompositionLifecycleEventJsonCodec().decode(
@@ -443,6 +524,10 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
         'errorMessage': error.toString(),
         if (error is CompositionLifecycleEventIdentityConflictException)
           'eventId': error.eventId,
+        if (error is CompositionLifecycleStorageMaintenanceAuditIdentityConflictException) ...{
+          'operationId': error.operationId,
+          'status': error.status.name,
+        },
       });
     }
   }
