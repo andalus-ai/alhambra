@@ -2,7 +2,7 @@
 
 ## Status
 
-The trusted scope ownership layer is implemented in schema v4. The storage-neutral query contracts are introduced in this increment. SQLite/PostgreSQL SQL implementations and the authorized paged admin service remain follow-on work; existing inspection APIs still perform full reads.
+The trusted scope ownership layer is implemented in schema v4. The storage-neutral query contracts and SQLite/PostgreSQL database-native page queries are implemented. The authorized paged admin service remains follow-on work; existing legacy inspection APIs still perform full reads.
 
 ## Query invariants
 
@@ -32,9 +32,15 @@ The captured `snapshotAt` is an upper bound for newly inserted records, not a cl
 
 1. [x] Persist immutable scope ownership in execution, journal and outbox records (schema v4).
 2. [x] Define storage-neutral bounded scoped query contracts.
-3. [ ] Implement scope-first keyset SQL in SQLite and PostgreSQL, including indexes and cursor binding.
+3. [x] Implement scope-first keyset SQL in SQLite and PostgreSQL, including indexes and authenticated cursor binding.
 4. [ ] Add paged admin inspection with authorization and durable access audit before querying.
-5. [ ] Add adapter integration tests for cross-scope isolation, deterministic ordering, cursor misuse, bounds, page boundaries and concurrent inserts.
+5. [x] Add SQLite and PostgreSQL tests for cross-scope isolation, deterministic ordering, cursor misuse, bounds and page boundaries. Concurrent-insert behavior remains bounded by the documented snapshot upper-bound semantics.
 6. [ ] Add optional scope-aware retention as a separate maintenance capability.
 
 Do not expose paged inspection until both durable adapters enforce the scope predicate before LIMIT.
+
+## Cursor signing configuration
+
+Both durable adapters require a stable host-provided `cursorSecret` (minimum 32 bytes) before a page traversal can issue or consume a cursor. Tokens use HMAC-SHA256 and bind the query family, exact scope, normalized status/state filters, time range and page size. The secret must be shared across instances and retained across restarts. An unconfigured adapter fails closed when paged inspection is requested.
+
+SQLite schema v5 adds an operator-action scope/order index and normalizes existing journal/outbox/operator timestamps to fixed-width UTC microsecond text. This is required because SQLite compares the stored timestamp text for index-compatible ordering and cursor predicates.
