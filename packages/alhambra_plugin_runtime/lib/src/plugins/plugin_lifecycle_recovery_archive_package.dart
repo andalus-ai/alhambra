@@ -540,3 +540,9 @@ bool _sameRecord(
     left.integrity.formatVersion == right.integrity.formatVersion &&
     left.integrity.algorithm == right.integrity.algorithm &&
     left.integrity.digest == right.integrity.digest;
+
+bool _sameIds(Iterable<String> left, Iterable<String> right) {
+  final a = left.toSet();
+  final b = right.toSet();
+  return a.length == left.length && b.length == right.length && a.length == b.length && a.containsAll(b);
+}
