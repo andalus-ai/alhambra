@@ -16,7 +16,7 @@ final class _Archive implements PluginLifecycleRecoveryJobArchive {
 final class _Digest implements PluginLifecycleRecoveryJobDigestProvider {
   @override
   Future<String> digest({required String algorithm, required String canonicalPayload}) async =>
-      '$algorithm-\${canonicalPayload.hashCode}-\${canonicalPayload.length}';
+      '$algorithm-${canonicalPayload.hashCode}-${canonicalPayload.length}';
 }
 
 PluginLifecycleRecoveryJob _job(String id) => PluginLifecycleRecoveryJob(
