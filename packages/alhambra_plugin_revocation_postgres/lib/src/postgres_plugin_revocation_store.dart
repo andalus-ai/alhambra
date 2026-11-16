@@ -14,15 +14,21 @@ final class PostgresPluginRevocationStore
         PluginRevocationOutboxStore,
         PluginRevocationOutboxInspectionStore,
         PluginRevocationDeadLetterReplayStore,
-        PluginRevocationOperatorActionInspectionStore {
+        PluginRevocationOperatorActionInspectionStore,
+        PluginRevocationScopedQueryStore {
   final Pool<dynamic> _pool;
   final Random _random;
+  final PluginRevocationPageCursorCodec? _cursorCodec;
   bool _closed = false;
 
   PostgresPluginRevocationStore(
     this._pool, {
     Random? random,
-  }) : _random = random ?? Random.secure();
+    List<int>? cursorSecret,
+  })  : _random = random ?? Random.secure(),
+        _cursorCodec = cursorSecret == null
+            ? null
+            : PluginRevocationPageCursorCodec(cursorSecret);
 
   /// Creates a pooled adapter from a PostgreSQL connection URL.
   ///
@@ -30,8 +36,13 @@ final class PostgresPluginRevocationStore
   factory PostgresPluginRevocationStore.fromUrl(
     String url, {
     Random? random,
+    List<int>? cursorSecret,
   }) =>
-      PostgresPluginRevocationStore(Pool.withUrl(url), random: random);
+      PostgresPluginRevocationStore(
+        Pool.withUrl(url),
+        random: random,
+        cursorSecret: cursorSecret,
+      );
 
   /// Journal contract view backed by the same PostgreSQL pool.
   PluginRevocationJournalStore get journalStore =>
@@ -64,7 +75,7 @@ final class PostgresPluginRevocationStore
         'SELECT COALESCE(MAX(version), 0) AS version FROM alhambra_plugin_revocation_schema',
       );
       final currentVersion = schema.first.toColumnMap()['version'] as int;
-      if (currentVersion > 4) {
+      if (currentVersion > 5) {
         throw UnsupportedError('Database schema version $currentVersion is newer than this adapter supports.');
       }
       await tx.execute('''
@@ -155,6 +166,10 @@ final class PostgresPluginRevocationStore
         await tx.execute('CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_journal_scope_updated ON alhambra_plugin_revocation_journal(scope_id, updated_at DESC, idempotency_key DESC)');
         await tx.execute('CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_outbox_scope_occurred ON alhambra_plugin_revocation_outbox(scope_id, occurred_at DESC, event_id DESC)');
         await tx.execute("INSERT INTO alhambra_plugin_revocation_schema (version) VALUES (4) ON CONFLICT (version) DO NOTHING");
+      }
+      if (currentVersion < 5) {
+        await tx.execute('CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_operator_scope_occurred ON alhambra_plugin_revocation_operator_action(scope_id, occurred_at DESC, action_id DESC)');
+        await tx.execute("INSERT INTO alhambra_plugin_revocation_schema (version) VALUES (5) ON CONFLICT (version) DO NOTHING");
       }
     });
   }
@@ -397,6 +412,215 @@ final class PostgresPluginRevocationStore
       }
       await _enqueue(tx, record);
     });
+  }
+
+  PluginRevocationPageCursorCodec get _requiredCursorCodec =>
+      _cursorCodec ??
+      (throw StateError(
+        'Configure a stable cursorSecret of at least 32 bytes before using paged inspection.',
+      ));
+
+  String _bind(List<Object?> parameters, Object? value) {
+    parameters.add(value);
+    return String.fromCharCode(36) + parameters.length.toString();
+  }
+
+  @override
+  Future<PluginRevocationScopedPage<PluginRevocationJournalEntry>>
+      queryJournalPage(PluginRevocationJournalPageQuery query) async {
+    _assertOpen();
+    final filters = query.statuses.map((value) => value.name).toList()..sort();
+    final position = query.cursor == null
+        ? null
+        : _requiredCursorCodec.decode(
+            token: query.cursor!,
+            family: 'journal',
+            query: query,
+            filters: filters,
+          );
+    final snapshotAt = position?.snapshotAt ?? DateTime.now().toUtc();
+    final parameters = <Object?>[];
+    final where = <String>[
+      'scope_id = ${_bind(parameters, query.scopeId)}',
+      'updated_at <= ${_bind(parameters, snapshotAt)}',
+    ];
+    if (query.fromInclusive != null) {
+      where.add('updated_at >= ${_bind(parameters, query.fromInclusive!.toUtc())}');
+    }
+    if (query.toExclusive != null) {
+      where.add('updated_at < ${_bind(parameters, query.toExclusive!.toUtc())}');
+    }
+    if (filters.isNotEmpty) {
+      final placeholders = filters.map((value) => _bind(parameters, value)).join(', ');
+      where.add('status IN ($placeholders)');
+    }
+    if (position != null) {
+      final before = _bind(parameters, position.lastAt);
+      final equal = _bind(parameters, position.lastAt);
+      final id = _bind(parameters, position.lastId);
+      where.add('(updated_at < $before OR (updated_at = $equal AND idempotency_key < $id))');
+    }
+    final limit = _bind(parameters, query.pageSize + 1);
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_journal WHERE ${where.join(' AND ')} '
+      'ORDER BY updated_at DESC, idempotency_key DESC LIMIT $limit',
+      parameters: parameters,
+    );
+    final hasMore = rows.length > query.pageSize;
+    final selected = rows.take(query.pageSize).toList(growable: false);
+    final entries = selected
+        .map((row) => _journal(row.toColumnMap()))
+        .toList(growable: false);
+    final nextCursor = hasMore && entries.isNotEmpty
+        ? _requiredCursorCodec.encode(
+            family: 'journal',
+            query: query,
+            filters: filters,
+            snapshotAt: snapshotAt,
+            lastAt: entries.last.updatedAt,
+            lastId: entries.last.idempotencyKey,
+          )
+        : null;
+    return PluginRevocationScopedPage(
+      items: entries,
+      nextCursor: nextCursor,
+      snapshotAt: snapshotAt,
+    );
+  }
+
+  @override
+  Future<PluginRevocationScopedPage<PluginRevocationOutboxMessage>>
+      queryOutboxPage(PluginRevocationOutboxPageQuery query) async {
+    _assertOpen();
+    final filters = query.states.map((value) => value.name).toList()..sort();
+    final position = query.cursor == null
+        ? null
+        : _requiredCursorCodec.decode(
+            token: query.cursor!,
+            family: 'outbox',
+            query: query,
+            filters: filters,
+          );
+    final snapshotAt = position?.snapshotAt ?? DateTime.now().toUtc();
+    final parameters = <Object?>[];
+    final where = <String>[
+      'scope_id = ${_bind(parameters, query.scopeId)}',
+      'occurred_at <= ${_bind(parameters, snapshotAt)}',
+    ];
+    if (query.fromInclusive != null) {
+      where.add('occurred_at >= ${_bind(parameters, query.fromInclusive!.toUtc())}');
+    }
+    if (query.toExclusive != null) {
+      where.add('occurred_at < ${_bind(parameters, query.toExclusive!.toUtc())}');
+    }
+    if (filters.isNotEmpty) {
+      final placeholders = filters.map((value) => _bind(parameters, value)).join(', ');
+      where.add('state IN ($placeholders)');
+    }
+    if (position != null) {
+      final before = _bind(parameters, position.lastAt);
+      final equal = _bind(parameters, position.lastAt);
+      final id = _bind(parameters, position.lastId);
+      where.add('(occurred_at < $before OR (occurred_at = $equal AND event_id < $id))');
+    }
+    final limit = _bind(parameters, query.pageSize + 1);
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_outbox WHERE ${where.join(' AND ')} '
+      'ORDER BY occurred_at DESC, event_id DESC LIMIT $limit',
+      parameters: parameters,
+    );
+    final hasMore = rows.length > query.pageSize;
+    final selected = rows.take(query.pageSize).toList(growable: false);
+    final messages = selected
+        .map((row) => _message(row.toColumnMap()))
+        .toList(growable: false);
+    final nextCursor = hasMore && messages.isNotEmpty
+        ? _requiredCursorCodec.encode(
+            family: 'outbox',
+            query: query,
+            filters: filters,
+            snapshotAt: snapshotAt,
+            lastAt: messages.last.event.occurredAt,
+            lastId: messages.last.event.eventId,
+          )
+        : null;
+    return PluginRevocationScopedPage(
+      items: messages,
+      nextCursor: nextCursor,
+      snapshotAt: snapshotAt,
+    );
+  }
+
+  @override
+  Future<PluginRevocationScopedPage<PluginRevocationOperatorAction>>
+      queryOperatorActionPage(
+    PluginRevocationOperatorActionPageQuery query,
+  ) async {
+    _assertOpen();
+    const filters = <String>[];
+    final position = query.cursor == null
+        ? null
+        : _requiredCursorCodec.decode(
+            token: query.cursor!,
+            family: 'operator-action',
+            query: query,
+            filters: filters,
+          );
+    final snapshotAt = position?.snapshotAt ?? DateTime.now().toUtc();
+    final parameters = <Object?>[];
+    final where = <String>[
+      'scope_id = ${_bind(parameters, query.scopeId)}',
+      'occurred_at <= ${_bind(parameters, snapshotAt)}',
+    ];
+    if (query.fromInclusive != null) {
+      where.add('occurred_at >= ${_bind(parameters, query.fromInclusive!.toUtc())}');
+    }
+    if (query.toExclusive != null) {
+      where.add('occurred_at < ${_bind(parameters, query.toExclusive!.toUtc())}');
+    }
+    if (position != null) {
+      final before = _bind(parameters, position.lastAt);
+      final equal = _bind(parameters, position.lastAt);
+      final id = _bind(parameters, position.lastId);
+      where.add('(occurred_at < $before OR (occurred_at = $equal AND action_id < $id))');
+    }
+    final limit = _bind(parameters, query.pageSize + 1);
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_operator_action WHERE ${where.join(' AND ')} '
+      'ORDER BY occurred_at DESC, action_id DESC LIMIT $limit',
+      parameters: parameters,
+    );
+    final hasMore = rows.length > query.pageSize;
+    final selected = rows.take(query.pageSize).toList(growable: false);
+    final actions = selected.map((row) {
+      final value = row.toColumnMap();
+      return PluginRevocationOperatorAction(
+        actionId: value['action_id']! as String,
+        actorId: value['actor_id']! as String,
+        scopeId: value['scope_id']! as String,
+        reason: value['reason']! as String,
+        approvalReference: value['approval_reference']! as String,
+        targetEventId: value['target_event_id']! as String,
+        replayEventId: value['replay_event_id']! as String,
+        replayGeneration: value['replay_generation']! as int,
+        occurredAt: _date(value['occurred_at']),
+      );
+    }).toList(growable: false);
+    final nextCursor = hasMore && actions.isNotEmpty
+        ? _requiredCursorCodec.encode(
+            family: 'operator-action',
+            query: query,
+            filters: filters,
+            snapshotAt: snapshotAt,
+            lastAt: actions.last.occurredAt,
+            lastId: actions.last.actionId,
+          )
+        : null;
+    return PluginRevocationScopedPage(
+      items: actions,
+      nextCursor: nextCursor,
+      snapshotAt: snapshotAt,
+    );
   }
 
   @override

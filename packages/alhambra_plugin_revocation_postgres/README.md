@@ -68,7 +68,7 @@ Delivery is **at least once**, not exactly once. A process can publish successfu
 
 ## Migration and operations
 
-- Migration versions 1–4 are applied transactionally by `migrate()`. The checked-in SQL migrations are `migrations/001_plugin_revocation.sql`, `migrations/002_audited_dead_letter_replay.sql`, `migrations/003_operator_scope.sql` and `migrations/004_scope_ownership.sql`. Version 4 adds immutable scope ownership to execution, journal and outbox records and scope-first inspection indexes. Existing rows are assigned the explicit compatibility scope `default`.
+- Migration versions 1–5 are applied transactionally by `migrate()`. The checked-in SQL migrations are `migrations/001_plugin_revocation.sql`, `migrations/002_audited_dead_letter_replay.sql`, `migrations/003_operator_scope.sql`, `migrations/004_scope_ownership.sql` and `migrations/005_scoped_operator_action_index.sql`. Version 4 adds immutable scope ownership to execution, journal and outbox records and scope-first inspection indexes. Version 5 adds the operator-action scope/order index. Existing rows are assigned the explicit compatibility scope `default`.
 - Run migrations with a dedicated role; grant the application role only the required table and sequence privileges (no sequence is currently used).
 - Configure pool size, connection timeout, query timeout, and TLS through the PostgreSQL URL.
 - Monitor pending count, oldest pending age, expired leases, retry attempts and dead-letter count using the outbox tables.
@@ -97,3 +97,18 @@ The adapter exposes `readOperatorActions()`. Actor authentication, authorization
 ## Scope ownership
 
 `PluginRevocationCoordinator.execute(scopeId: ...)` accepts a trusted host-resolved scope (defaulting to `default` for source compatibility). The scope is persisted on the execution claim, journal entry and audit outbox event. Terminal completion and journal compare-and-set reject scope changes. Replay verifies that the requested scope matches the source dead-letter event. The adapter does not authenticate or resolve tenant identity; the embedding host must do that before invoking the coordinator.
+
+## Database-native scoped pagination
+
+The adapter implements `PluginRevocationScopedQueryStore` for journal, outbox and operator-action history. Scope, time range, status/state, snapshot and cursor predicates are included in the SQL WHERE clause before LIMIT. Keyset order is deterministic with a unique ID tie-breaker. No full-read inspection method is used by the page queries.
+
+Configure a stable random signing secret on every adapter instance:
+
+```dart
+final persistence = PostgresPluginRevocationStore.fromUrl(
+  appDatabaseUrl,
+  cursorSecret: cursorSigningSecret,
+);
+```
+
+The secret must contain at least 32 bytes, be shared across instances serving the same cursor domain, and survive restarts. Keep it in a secret manager. HMAC-SHA256 cursors bind query family, scope, normalized filters, time range and page size; mismatches and tampering fail closed. The captured snapshot is an ordering-timestamp ceiling, not a strict insertion or serializable cross-table snapshot. Late-arriving backdated rows may become visible during traversal.

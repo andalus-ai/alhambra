@@ -10,9 +10,10 @@ PluginRevocationExecutionRecord _record({
       PluginRevocationExecutionStatus.requiresReconciliation,
   DateTime? at,
   String scopeId = 'default',
+  String? idempotencyKey,
 }) =>
     PluginRevocationExecutionRecord(
-      idempotencyKey: 'operation:plugin:provider:deactivate',
+      idempotencyKey: idempotencyKey ?? 'operation:plugin:provider:deactivate',
       scopeId: scopeId,
       operationId: 'operation',
       pluginId: 'plugin',
@@ -32,6 +33,155 @@ void main() {
     });
 
     tearDown(() => store.close());
+
+
+    test('scoped journal and outbox pages isolate scope and continue without gaps', () async {
+      final paged = SqlitePluginRevocationStore.memory(
+        cursorSecret: List<int>.generate(32, (index) => index + 1),
+      );
+      addTearDown(paged.close);
+      final first = _record(
+        idempotencyKey: 'blue-a',
+        scopeId: 'tenant-blue',
+        at: DateTime.utc(2026, 1, 1),
+      );
+      final second = _record(
+        idempotencyKey: 'blue-b',
+        scopeId: 'tenant-blue',
+        at: DateTime.utc(2026, 1, 2),
+      );
+      final foreign = _record(
+        idempotencyKey: 'red-a',
+        scopeId: 'tenant-red',
+        at: DateTime.utc(2026, 1, 3),
+      );
+      for (final record in [first, second, foreign]) {
+        expect(await paged.writePending(record), isTrue);
+        await paged.completeAndEnqueue(_record(
+          idempotencyKey: record.idempotencyKey,
+          scopeId: record.scopeId,
+          status: PluginRevocationExecutionStatus.completed,
+          at: record.updatedAt.add(const Duration(minutes: 1)),
+        ));
+      }
+
+      final journalQuery = PluginRevocationJournalPageQuery(
+        scopeId: 'tenant-blue',
+        pageSize: 1,
+        statuses: {PluginRevocationJournalStatus.completed},
+      );
+      final journalFirst = await paged.queryJournalPage(journalQuery);
+      expect(journalFirst.items, hasLength(1));
+      expect(journalFirst.items.single.idempotencyKey, 'blue-b');
+      expect(journalFirst.hasMore, isTrue);
+      final journalSecond = await paged.queryJournalPage(
+        PluginRevocationJournalPageQuery(
+          scopeId: 'tenant-blue',
+          pageSize: 1,
+          statuses: {PluginRevocationJournalStatus.completed},
+          cursor: journalFirst.nextCursor,
+        ),
+      );
+      expect(journalSecond.items.single.idempotencyKey, 'blue-a');
+      expect(journalSecond.hasMore, isFalse);
+
+      final outboxFirst = await paged.queryOutboxPage(
+        PluginRevocationOutboxPageQuery(
+          scopeId: 'tenant-blue',
+          pageSize: 1,
+          states: {PluginRevocationOutboxState.pending},
+        ),
+      );
+      expect(outboxFirst.items, hasLength(1));
+      expect(outboxFirst.items.single.event.scopeId, 'tenant-blue');
+      expect(outboxFirst.items.single.event.idempotencyKey, 'blue-b');
+      final outboxSecond = await paged.queryOutboxPage(
+        PluginRevocationOutboxPageQuery(
+          scopeId: 'tenant-blue',
+          pageSize: 1,
+          states: {PluginRevocationOutboxState.pending},
+          cursor: outboxFirst.nextCursor,
+        ),
+      );
+      expect(outboxSecond.items.single.event.idempotencyKey, 'blue-a');
+      expect(outboxSecond.hasMore, isFalse);
+
+      await expectLater(
+        paged.queryJournalPage(PluginRevocationJournalPageQuery(
+          scopeId: 'tenant-red',
+          pageSize: 1,
+          statuses: {PluginRevocationJournalStatus.completed},
+          cursor: journalFirst.nextCursor,
+        )),
+        throwsA(isA<PluginRevocationInvalidCursorException>()),
+      );
+      final tampered = '${journalFirst.nextCursor}x';
+      await expectLater(
+        paged.queryJournalPage(PluginRevocationJournalPageQuery(
+          scopeId: 'tenant-blue',
+          pageSize: 1,
+          statuses: {PluginRevocationJournalStatus.completed},
+          cursor: tampered,
+        )),
+        throwsA(isA<PluginRevocationInvalidCursorException>()),
+      );
+    });
+
+    test('operator action page is scope-filtered in SQLite', () async {
+      final paged = SqlitePluginRevocationStore.memory(
+        cursorSecret: List<int>.generate(32, (index) => index + 11),
+      );
+      addTearDown(paged.close);
+      final pending = _record(
+        idempotencyKey: 'operator-page-source',
+        scopeId: 'tenant-blue',
+      );
+      await paged.writePending(pending);
+      await paged.completeAndEnqueue(_record(
+        idempotencyKey: pending.idempotencyKey,
+        scopeId: pending.scopeId,
+        status: PluginRevocationExecutionStatus.completed,
+        at: DateTime.utc(2026, 1, 1, 0, 1),
+      ));
+      final claimed = (await paged.claim(
+        workerId: 'page-test',
+        now: DateTime.utc(2026, 1, 1, 0, 2),
+        leaseDuration: const Duration(seconds: 10),
+        limit: 1,
+        maxAttempts: 1,
+      )).single;
+      await paged.reschedule(
+        eventId: claimed.event.eventId,
+        leaseToken: claimed.leaseToken!,
+        nextAttemptAt: DateTime.utc(2026, 1, 1, 0, 3),
+        errorCode: 'test',
+        maxAttempts: 1,
+      );
+      await paged.replayDeadLetter(PluginRevocationReplayRequest(
+        actionId: 'operator-page-action',
+        actorId: 'operator',
+        scopeId: 'tenant-blue',
+        reason: 'approved',
+        approvalReference: 'approval-1',
+        targetEventId: claimed.event.eventId,
+        occurredAt: DateTime.utc(2026, 1, 1, 0, 4),
+      ));
+      final page = await paged.queryOperatorActionPage(
+        PluginRevocationOperatorActionPageQuery(
+          scopeId: 'tenant-blue',
+          pageSize: 10,
+        ),
+      );
+      expect(page.items, hasLength(1));
+      expect(page.items.single.actionId, 'operator-page-action');
+      final foreign = await paged.queryOperatorActionPage(
+        PluginRevocationOperatorActionPageQuery(
+          scopeId: 'tenant-red',
+          pageSize: 10,
+        ),
+      );
+      expect(foreign.items, isEmpty);
+    });
 
     test('commits terminal execution and outbox event atomically', () async {
       final pending = _record();

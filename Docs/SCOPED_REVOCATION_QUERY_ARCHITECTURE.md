@@ -2,7 +2,7 @@
 
 ## Status
 
-The trusted scope ownership layer is implemented in schema v4. The storage-neutral query contracts are introduced in this increment. SQLite/PostgreSQL SQL implementations and the authorized paged admin service remain follow-on work; existing inspection APIs still perform full reads.
+The trusted scope ownership layer is implemented in schema v4. The storage-neutral query contracts and SQLite/PostgreSQL database-native page queries are implemented. The authorized paged admin service remains follow-on work; existing legacy inspection APIs still perform full reads.
 
 ## Query invariants
 
@@ -26,15 +26,21 @@ The interface contract explicitly forbids implementing page methods by calling l
 
 ## Snapshot semantics
 
-The captured `snapshotAt` is an upper bound for newly inserted records, not a claim of a cross-table serializable snapshot. Journal status updates can change `updated_at` during a traversal. Operational browsing may accept this bounded consistency model. Audit exports requiring repeatable reads need a dedicated transaction/export job and must document the database isolation guarantee.
+The captured `snapshotAt` is a ceiling on the ordering timestamp, not a stable insertion snapshot. Late-arriving rows with backdated timestamps can become visible during a traversal, and journal status updates can change `updated_at`. Operational browsing accepts this bounded consistency model. Audit exports requiring repeatable reads need a dedicated transaction/export job and must document the database isolation guarantee.
 
 ## Delivery sequence
 
 1. [x] Persist immutable scope ownership in execution, journal and outbox records (schema v4).
 2. [x] Define storage-neutral bounded scoped query contracts.
-3. [ ] Implement scope-first keyset SQL in SQLite and PostgreSQL, including indexes and cursor binding.
+3. [x] Implement scope-first keyset SQL in SQLite and PostgreSQL, including indexes and authenticated cursor binding.
 4. [ ] Add paged admin inspection with authorization and durable access audit before querying.
-5. [ ] Add adapter integration tests for cross-scope isolation, deterministic ordering, cursor misuse, bounds, page boundaries and concurrent inserts.
+5. [x] Add SQLite and PostgreSQL tests for cross-scope isolation, deterministic ordering, cursor misuse, bounds and page boundaries. Late-arriving backdated rows and mutable journal timestamps remain visible consistency limitations; strict audit exports require a database transaction or dedicated export job.
 6. [ ] Add optional scope-aware retention as a separate maintenance capability.
 
-Do not expose paged inspection until both durable adapters enforce the scope predicate before LIMIT.
+A paged admin endpoint may now use these adapters, but must still authorize and durably audit the inspection attempt before invoking any page query.
+
+## Cursor signing configuration
+
+Both durable adapters require a stable host-provided `cursorSecret` (minimum 32 bytes) before a page traversal can issue or consume a cursor. Tokens use HMAC-SHA256 and bind the query family, exact scope, normalized status/state filters, time range and page size. The secret must be shared across instances and retained across restarts. An unconfigured adapter fails closed when paged inspection is requested.
+
+SQLite schema v5 adds an operator-action scope/order index and normalizes existing journal/outbox/operator timestamps to fixed-width UTC microsecond text. This is required because SQLite compares the stored timestamp text for index-compatible ordering and cursor predicates.
