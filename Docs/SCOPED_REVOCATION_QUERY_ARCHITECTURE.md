@@ -37,7 +37,7 @@ The captured `snapshotAt` is a ceiling on the ordering timestamp, not a stable i
 5. [x] Add SQLite and PostgreSQL tests for cross-scope isolation, deterministic ordering, cursor misuse, bounds and page boundaries. Late-arriving backdated rows and mutable journal timestamps remain visible consistency limitations; strict audit exports require a database transaction or dedicated export job.
 6. [ ] Add optional scope-aware retention as a separate maintenance capability.
 
-Do not expose paged inspection until both durable adapters enforce the scope predicate before LIMIT.
+A paged admin endpoint may now use these adapters, but must still authorize and durably audit the inspection attempt before invoking any page query.
 
 ## Cursor signing configuration
 
