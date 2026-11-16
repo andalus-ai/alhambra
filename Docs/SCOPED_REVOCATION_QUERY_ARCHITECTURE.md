@@ -26,7 +26,7 @@ The interface contract explicitly forbids implementing page methods by calling l
 
 ## Snapshot semantics
 
-The captured `snapshotAt` is an upper bound for newly inserted records, not a claim of a cross-table serializable snapshot. Journal status updates can change `updated_at` during a traversal. Operational browsing may accept this bounded consistency model. Audit exports requiring repeatable reads need a dedicated transaction/export job and must document the database isolation guarantee.
+The captured `snapshotAt` is a ceiling on the ordering timestamp, not a stable insertion snapshot. Late-arriving rows with backdated timestamps can become visible during a traversal, and journal status updates can change `updated_at`. Operational browsing accepts this bounded consistency model. Audit exports requiring repeatable reads need a dedicated transaction/export job and must document the database isolation guarantee.
 
 ## Delivery sequence
 
@@ -34,7 +34,7 @@ The captured `snapshotAt` is an upper bound for newly inserted records, not a cl
 2. [x] Define storage-neutral bounded scoped query contracts.
 3. [x] Implement scope-first keyset SQL in SQLite and PostgreSQL, including indexes and authenticated cursor binding.
 4. [ ] Add paged admin inspection with authorization and durable access audit before querying.
-5. [x] Add SQLite and PostgreSQL tests for cross-scope isolation, deterministic ordering, cursor misuse, bounds and page boundaries. Concurrent-insert behavior remains bounded by the documented snapshot upper-bound semantics.
+5. [x] Add SQLite and PostgreSQL tests for cross-scope isolation, deterministic ordering, cursor misuse, bounds and page boundaries. Late-arriving backdated rows and mutable journal timestamps remain visible consistency limitations; strict audit exports require a database transaction or dedicated export job.
 6. [ ] Add optional scope-aware retention as a separate maintenance capability.
 
 Do not expose paged inspection until both durable adapters enforce the scope predicate before LIMIT.
