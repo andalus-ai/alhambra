@@ -89,6 +89,53 @@ void main() {
     expect(await fileSystem.advanceFence(operationId: 'op-2', fencingToken: 1), isFalse);
   });
 
+
+  test('recovery worker can prove operation ownership after taking a newer fence', () async {
+    await fileSystem.advanceFence(operationId: 'op-takeover', fencingToken: 1);
+    final original = await fileSystem.createStaging(
+      operationId: 'op-takeover',
+      pluginId: 'demo.plugin',
+      version: '3.0.0',
+      fencingToken: 1,
+    );
+    final destination = await fileSystem.destinationPathFor(
+      pluginId: 'demo.plugin',
+      version: '3.0.0',
+    );
+    await fileSystem.promote(original, destinationPath: destination);
+
+    // A recovery worker takes over the operation with a newer fencing token.
+    expect(
+      await fileSystem.advanceFence(
+        operationId: 'op-takeover',
+        fencingToken: 2,
+      ),
+      isTrue,
+    );
+    final recoveryStaging = PluginInstallStaging(
+      operationId: original.operationId,
+      pluginId: original.pluginId,
+      opaqueHandle: original.opaqueHandle,
+      fencingToken: 2,
+    );
+    final snapshot = await fileSystem.inspectOperation(
+      operationId: 'op-takeover',
+      pluginId: 'demo.plugin',
+      stagingHandle: original.opaqueHandle,
+      destinationPath: destination,
+    );
+
+    expect(snapshot.destinationExists, isTrue);
+    expect(snapshot.destinationOwnedByOperation, isTrue);
+    expect(snapshot.rollbackAvailable, isTrue);
+
+    await fileSystem.rollbackPromotion(
+      recoveryStaging,
+      promotedPath: destination,
+    );
+    expect(await Directory(destination).exists(), isFalse);
+  });
+
   test('promotion never overwrites an existing destination', () async {
     await fileSystem.advanceFence(operationId: 'op-3', fencingToken: 1);
     final staging = await fileSystem.createStaging(
