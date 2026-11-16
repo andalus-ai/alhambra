@@ -56,6 +56,64 @@ void main() {
     }
   }, skip: skipReason);
 
+
+  test('scoped keyset pages isolate scope and reject cursor reuse', () async {
+    final store = PostgresPluginRevocationStore.fromUrl(
+      databaseUrl!,
+      cursorSecret: List<int>.generate(32, (index) => index + 31),
+    );
+    await store.migrate();
+    final suffix = DateTime.now().microsecondsSinceEpoch.toString();
+    addTearDown(store.close);
+    for (final entry in [
+      ('blue-a-$suffix', 'tenant-blue', DateTime.utc(2026, 1, 1)),
+      ('blue-b-$suffix', 'tenant-blue', DateTime.utc(2026, 1, 2)),
+      ('red-a-$suffix', 'tenant-red', DateTime.utc(2026, 1, 3)),
+    ]) {
+      await store.writePending(_record(entry.$1, scopeId: entry.$2, at: entry.$3));
+      await store.completeAndEnqueue(_record(
+        entry.$1,
+        scopeId: entry.$2,
+        status: PluginRevocationExecutionStatus.completed,
+        at: entry.$3.add(const Duration(minutes: 1)),
+      ));
+    }
+    final first = await store.queryJournalPage(PluginRevocationJournalPageQuery(
+      scopeId: 'tenant-blue',
+      pageSize: 1,
+      statuses: {PluginRevocationJournalStatus.completed},
+    ));
+    expect(first.items, hasLength(1));
+    expect(first.items.single.idempotencyKey, 'blue-b-$suffix');
+    expect(first.hasMore, isTrue);
+    final second = await store.queryJournalPage(PluginRevocationJournalPageQuery(
+      scopeId: 'tenant-blue',
+      pageSize: 1,
+      statuses: {PluginRevocationJournalStatus.completed},
+      cursor: first.nextCursor,
+    ));
+    expect(second.items.single.idempotencyKey, 'blue-a-$suffix');
+    expect(second.hasMore, isFalse);
+
+    final outbox = await store.queryOutboxPage(PluginRevocationOutboxPageQuery(
+      scopeId: 'tenant-blue',
+      pageSize: 10,
+      states: {PluginRevocationOutboxState.pending},
+    ));
+    expect(outbox.items, hasLength(2));
+    expect(outbox.items.every((item) => item.event.scopeId == 'tenant-blue'), isTrue);
+
+    await expectLater(
+      store.queryJournalPage(PluginRevocationJournalPageQuery(
+        scopeId: 'tenant-red',
+        pageSize: 1,
+        statuses: {PluginRevocationJournalStatus.completed},
+        cursor: first.nextCursor,
+      )),
+      throwsA(isA<PluginRevocationInvalidCursorException>()),
+    );
+  }, skip: skipReason);
+
   test('transactionally commits execution, journal and outbox', () async {
     final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
     await store.migrate();
