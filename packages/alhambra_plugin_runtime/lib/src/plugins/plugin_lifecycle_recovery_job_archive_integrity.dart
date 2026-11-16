@@ -9,7 +9,7 @@ import 'plugin_lifecycle_recovery_job_archive_integrity_metadata.dart';
 /// The schema is intentionally explicit: adding a persisted job field requires
 /// updating this codec and its golden tests before archive format evolution.
 final class PluginLifecycleRecoveryJobSnapshotCodec {
-  static const int formatVersion = 1;
+  static const int formatVersion = 2;
 
   const PluginLifecycleRecoveryJobSnapshotCodec();
 

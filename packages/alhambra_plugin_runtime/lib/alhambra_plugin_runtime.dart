@@ -154,3 +154,4 @@ export 'src/plugins/plugin_lifecycle_recovery_job_retention.dart';
 export 'src/plugins/plugin_lifecycle_recovery_job_archive.dart';
 export 'src/plugins/plugin_lifecycle_recovery_job_archive_integrity_metadata.dart';
 export 'src/plugins/plugin_lifecycle_recovery_job_archive_integrity.dart';
+export 'src/plugins/plugin_lifecycle_recovery_job_archive_migration.dart';
