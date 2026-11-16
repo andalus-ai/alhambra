@@ -3,10 +3,12 @@ import 'package:flutter_test/flutter_test.dart';
 
 final class _Archive implements PluginLifecycleRecoveryJobArchive {
   final Map<String, PluginLifecycleRecoveryJobArchiveRecord> records = {};
+  String? failOnJobId;
   @override
   Future<PluginLifecycleRecoveryJobArchiveRecord?> read(String jobId) async => records[jobId];
   @override
   Future<bool> putIfAbsent(PluginLifecycleRecoveryJobArchiveRecord record) async {
+    if (record.job.jobId == failOnJobId) throw StateError('simulated adapter failure');
     if (records.containsKey(record.job.jobId)) return false;
     records[record.job.jobId] = record;
     return true;
@@ -218,6 +220,28 @@ void main() {
       );
       expect((await importer.inspect(conflictPackage)).disposition,
           PluginRecoveryArchivePackageImportDisposition.destinationConflict);
+    });
+
+ 
+    test('reports partial imports when an archive adapter fails mid-batch', () async {
+      final digest = _Digest();
+      final records = [await _record('job-a', digest), await _record('job-b', digest)];
+      final package = await PluginRecoveryArchivePackageExporter(
+        digestProvider: digest, digestAlgorithm: 'package-test',
+      ).create(
+        packageId: 'bundle-partial', producer: 'test-host',
+        createdAt: DateTime.utc(2026, 11, 2), records: records,
+      );
+      final destination = _Archive()..failOnJobId = 'job-b';
+      final importer = PluginRecoveryArchivePackageImporter(
+        destinationArchive: destination, digestProvider: digest,
+      );
+      final plan = await importer.inspect(package);
+      final report = await importer.importPackage(plan);
+      expect(report.disposition, PluginRecoveryArchivePackageImportDisposition.partiallyImported);
+      expect(report.importedJobIds, ['job-a']);
+      expect(report.failedJobIds, ['job-b']);
+      expect(destination.records.keys, ['job-a']);
     });
 
     test('re-inspects before import and safely accepts identical concurrent insertion', () async {
