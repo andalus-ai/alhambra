@@ -45,8 +45,10 @@ present; conflicting records block preview.
 
 The importer re-inspects before writing. Each destination write relies on the
 archive adapter's atomic `putIfAbsent` contract and is read back for equality.
-If a race or adapter failure occurs after earlier records were written, the
-report identifies imported, already-present, and conflicting IDs. Import is
+If a destination conflict or adapter exception occurs after earlier records
+were written, the report identifies imported, already-present, conflicting,
+and failed IDs. A failure before any record is imported is reported as failed;
+a failure after progress is reported as partially imported. Import is
 therefore per-record atomic, not a multi-record transaction; no automatic
 rollback is attempted because the archive contract does not require deletion.
 
