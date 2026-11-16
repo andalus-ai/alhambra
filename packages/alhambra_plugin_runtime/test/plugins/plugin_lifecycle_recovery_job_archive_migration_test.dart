@@ -47,7 +47,7 @@ PluginLifecycleRecoveryJob _job({String jobId = 'job-1'}) =>
 
 PluginLifecycleRecoveryJobArchiveRecord _record({
   String jobId = 'job-1',
-  int formatVersion = 2,
+  int formatVersion = 1,
 }) => PluginLifecycleRecoveryJobArchiveRecord(
   job: _job(jobId: jobId),
   archivedAt: DateTime.utc(2026, 1, 1, 0, 2),
@@ -61,8 +61,8 @@ PluginLifecycleRecoveryJobArchiveRecord _record({
 PluginLifecycleRecoveryJobArchiveMigrationRegistry _registry() =>
     PluginLifecycleRecoveryJobArchiveMigrationRegistry([
       PluginLifecycleRecoveryJobArchiveFormatMigration(
-        fromVersion: 2,
-        toVersion: 1,
+        fromVersion: 1,
+        toVersion: 2,
         migrate: (job) => job,
       ),
     ]);
@@ -72,21 +72,21 @@ void main() {
     test('finds a deterministic multi-step path', () {
       final registry = PluginLifecycleRecoveryJobArchiveMigrationRegistry([
         PluginLifecycleRecoveryJobArchiveFormatMigration(
-          fromVersion: 3,
+          fromVersion: 1,
           toVersion: 2,
           migrate: (job) => job,
         ),
         PluginLifecycleRecoveryJobArchiveFormatMigration(
           fromVersion: 2,
-          toVersion: 1,
+          toVersion: 3,
           migrate: (job) => job,
         ),
       ]);
 
-      final path = registry.findPath(fromVersion: 3, toVersion: 1);
+      final path = registry.findPath(fromVersion: 1, toVersion: 3);
       expect(path, isNotNull);
-      expect(path!.steps.map((step) => step.fromVersion), [3, 2]);
-      expect(path.steps.map((step) => step.toVersion), [2, 1]);
+      expect(path!.steps.map((step) => step.fromVersion), [1, 2]);
+      expect(path.steps.map((step) => step.toVersion), [2, 3]);
     });
 
     test('rejects ambiguous and cyclic migration definitions', () {
@@ -94,7 +94,7 @@ void main() {
         () => PluginLifecycleRecoveryJobArchiveMigrationRegistry([
           PluginLifecycleRecoveryJobArchiveFormatMigration(
             fromVersion: 2,
-            toVersion: 1,
+            toVersion: 3,
             migrate: (job) => job,
           ),
           PluginLifecycleRecoveryJobArchiveFormatMigration(
@@ -118,11 +118,11 @@ void main() {
           migrate: (job) => job,
         ),
       ]);
-      expect(cyclic.findPath(fromVersion: 2, toVersion: 1), isNull);
+      expect(cyclic.findPath(fromVersion: 2, toVersion: 4), isNull);
     });
 
     test('returns no path for unknown legacy versions', () {
-      expect(_registry().findPath(fromVersion: 7, toVersion: 1), isNull);
+      expect(_registry().findPath(fromVersion: 7, toVersion: 2), isNull);
     });
   });
 
@@ -136,9 +136,9 @@ void main() {
 
       expect(plan.disposition, PluginRecoveryArchiveMigrationDisposition.ready);
       expect(plan.canMigrate, isTrue);
-      expect(plan.sourceFormatVersion, 2);
-      expect(plan.targetFormatVersion, 1);
-      expect(source.records['job-1']!.integrity.formatVersion, 2);
+      expect(plan.sourceFormatVersion, 1);
+      expect(plan.targetFormatVersion, 2);
+      expect(source.records['job-1']!.integrity.formatVersion, 1);
     });
 
     test('reports missing records and unsupported migration paths', () async {
@@ -161,7 +161,7 @@ void main() {
     });
 
     test('identifies records already in the target format', () async {
-      final source = _Archive()..records['job-1'] = _record(formatVersion: 1);
+      final source = _Archive()..records['job-1'] = _record(formatVersion: 2);
       final plan = await PluginLifecycleRecoveryJobArchiveMigrationPlanner(
         sourceArchive: source,
         registry: _registry(),
@@ -190,10 +190,10 @@ void main() {
 
       final result = await executor.migrate(plan);
       expect(result, PluginRecoveryArchiveMigrationDisposition.imported);
-      expect(destination.records['job-1']!.integrity.formatVersion, 1);
+      expect(destination.records['job-1']!.integrity.formatVersion, 2);
       expect(destination.records['job-1']!.integrity.algorithm, 'test-v1');
       expect(destination.records['job-1']!.integrity.digest, isNotEmpty);
-      expect(source.records['job-1']!.integrity.formatVersion, 2);
+      expect(source.records['job-1']!.integrity.formatVersion, 1);
     });
 
     test('is idempotent when destination already has the same migrated record', () async {
@@ -254,7 +254,7 @@ void main() {
 
       source.records['job-1'] = _record();
       final freshPlan = await planner.inspect(jobId: 'job-1');
-      destination.records['job-1'] = _record(formatVersion: 1);
+      destination.records['job-1'] = _record(formatVersion: 2);
       final conflictExecutor = PluginLifecycleRecoveryJobArchiveMigrationExecutor(
         sourceArchive: source,
         destinationArchive: destination,
@@ -270,8 +270,8 @@ void main() {
       final destination = _Archive();
       final badRegistry = PluginLifecycleRecoveryJobArchiveMigrationRegistry([
         PluginLifecycleRecoveryJobArchiveFormatMigration(
-          fromVersion: 2,
-          toVersion: 1,
+          fromVersion: 1,
+          toVersion: 2,
           migrate: (job) => _job(jobId: 'other-job'),
         ),
       ]);
