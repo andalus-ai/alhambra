@@ -111,4 +111,4 @@ final persistence = PostgresPluginRevocationStore.fromUrl(
 );
 ```
 
-The secret must contain at least 32 bytes, be shared across instances serving the same cursor domain, and survive restarts. Keep it in a secret manager. HMAC-SHA256 cursors bind query family, scope, normalized filters, time range and page size; mismatches and tampering fail closed. The captured snapshot is an insert upper bound, not a serializable cross-table snapshot.
+The secret must contain at least 32 bytes, be shared across instances serving the same cursor domain, and survive restarts. Keep it in a secret manager. HMAC-SHA256 cursors bind query family, scope, normalized filters, time range and page size; mismatches and tampering fail closed. The captured snapshot is an ordering-timestamp ceiling, not a strict insertion or serializable cross-table snapshot. Late-arriving backdated rows may become visible during traversal.
