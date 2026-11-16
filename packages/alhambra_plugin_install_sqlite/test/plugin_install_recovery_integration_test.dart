@@ -29,9 +29,9 @@ void main() {
         await Directory.systemTemp.createTemp('alhambra-install-recovery-');
     final installRoot = await Directory('${directory.path}/install').create();
     final databasePath = '${directory.path}/install.sqlite';
-    final journal = SqlitePluginInstallJournal(databasePath);
-    final leases = SqlitePluginInstallOperationLeaseStore(databasePath);
-    final fileSystem = LocalPluginInstallFileSystem(rootDirectory: installRoot);
+    var journal = SqlitePluginInstallJournal(databasePath);
+    var leases = SqlitePluginInstallOperationLeaseStore(databasePath);
+    var fileSystem = LocalPluginInstallFileSystem(rootDirectory: installRoot);
     final installedStore = _EmptyInstalledPluginStore();
 
     addTearDown(() async {
