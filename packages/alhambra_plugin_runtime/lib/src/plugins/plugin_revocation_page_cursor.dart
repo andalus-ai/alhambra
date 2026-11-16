@@ -68,7 +68,7 @@ final class PluginRevocationPageCursorCodec {
       final decoded = jsonDecode(utf8.decode(base64Url.decode(normalized)));
       if (decoded is! Map<String, dynamic>) throw const FormatException();
       final expectedFilters = [...filters]..sort();
-      final actualFilters = (decoded['filters'] as List<dynamic>).cast<String>();
+      final actualFilters = (decoded['filters'] as List<dynamic>).cast<String>().toList();
       actualFilters.sort();
       if (decoded['v'] != 1 ||
           decoded['family'] != family ||
