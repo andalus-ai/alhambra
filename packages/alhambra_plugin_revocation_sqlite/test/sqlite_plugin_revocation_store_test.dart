@@ -106,8 +106,8 @@ void main() {
       expect(outboxSecond.items.single.event.idempotencyKey, 'blue-a');
       expect(outboxSecond.hasMore, isFalse);
 
-      expect(
-        () => paged.queryJournalPage(PluginRevocationJournalPageQuery(
+      await expectLater(
+        paged.queryJournalPage(PluginRevocationJournalPageQuery(
           scopeId: 'tenant-red',
           pageSize: 1,
           statuses: {PluginRevocationJournalStatus.completed},
@@ -116,8 +116,8 @@ void main() {
         throwsA(isA<PluginRevocationInvalidCursorException>()),
       );
       final tampered = '${journalFirst.nextCursor}x';
-      expect(
-        () => paged.queryJournalPage(PluginRevocationJournalPageQuery(
+      await expectLater(
+        paged.queryJournalPage(PluginRevocationJournalPageQuery(
           scopeId: 'tenant-blue',
           pageSize: 1,
           statuses: {PluginRevocationJournalStatus.completed},
