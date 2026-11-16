@@ -268,11 +268,13 @@ final class PluginRecoveryArchivePackageExporter {
   final PluginLifecycleRecoveryJobDigestProvider digestProvider;
   final String digestAlgorithm;
   final PluginRecoveryArchivePackageCodec codec;
+  final PluginLifecycleRecoveryJobSnapshotCodec snapshotCodec;
 
   const PluginRecoveryArchivePackageExporter({
     required this.digestProvider,
     required this.digestAlgorithm,
     this.codec = const PluginRecoveryArchivePackageCodec(),
+    this.snapshotCodec = const PluginLifecycleRecoveryJobSnapshotCodec(),
   });
 
   Future<PluginRecoveryArchivePackage> create({
@@ -288,6 +290,13 @@ final class PluginRecoveryArchivePackageExporter {
           record.integrity.formatVersion != PluginLifecycleRecoveryJobSnapshotCodec.formatVersion ||
           !_isTerminal(record.job)) {
         throw StateError('Package export accepts only current-schema terminal archive records.');
+      }
+      final actualRecordDigest = await digestProvider.digest(
+        algorithm: record.integrity.algorithm,
+        canonicalPayload: snapshotCodec.encode(record.job, archivedAt: record.archivedAt),
+      );
+      if (actualRecordDigest != record.integrity.digest) {
+        throw StateError('Cannot export an archive record with an invalid digest.');
       }
     }
     final manifest = PluginRecoveryArchivePackageManifest(
@@ -432,10 +441,12 @@ final class PluginRecoveryArchivePackageImporter {
       throw StateError('Package import is blocked: \${plan.disposition.name}.');
     }
     final fresh = await inspect(plan.archivePackage);
+    final approvedIds = [...plan.validJobIds, ...plan.alreadyPresentJobIds];
+    final currentIds = [...fresh.validJobIds, ...fresh.alreadyPresentJobIds];
     if (!fresh.canImport ||
-        fresh.validJobIds.join('\u0000') != plan.validJobIds.join('\u0000') ||
-        fresh.conflictingJobIds.join('\u0000') != plan.conflictingJobIds.join('\u0000') ||
-        fresh.invalidJobIds.join('\u0000') != plan.invalidJobIds.join('\u0000')) {
+        !_sameIds(approvedIds, currentIds) ||
+        fresh.conflictingJobIds.isNotEmpty ||
+        fresh.invalidJobIds.isNotEmpty) {
       throw StateError('Package or destination changed after inspection.');
     }
 
