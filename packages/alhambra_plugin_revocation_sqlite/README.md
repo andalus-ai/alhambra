@@ -71,7 +71,7 @@ The adapter exposes `readOperatorActions()` for audit inspection. Operator authe
 
 ## Database-native scoped pagination
 
-The adapter implements `PluginRevocationScopedQueryStore`. All three page methods constrain `scope_id`, time bounds, status/state, snapshot upper bound and keyset cursor in SQL before `LIMIT`; they never call the legacy full-read methods. Ordering is deterministic: journal `(updated_at DESC, idempotency_key DESC)`, outbox `(occurred_at DESC, event_id DESC)`, and operator actions `(occurred_at DESC, action_id DESC)`.
+The adapter implements `PluginRevocationScopedQueryStore`. All three page methods constrain `scope_id`, time bounds, status/state, ordering-timestamp ceiling and keyset cursor in SQL before `LIMIT`; they never call the legacy full-read methods. Ordering is deterministic: journal `(updated_at DESC, idempotency_key DESC)`, outbox `(occurred_at DESC, event_id DESC)`, and operator actions `(occurred_at DESC, action_id DESC)`.
 
 Configure a stable random secret (at least 32 bytes) on every adapter instance:
 
@@ -82,4 +82,4 @@ final persistence = SqlitePluginRevocationStore(
 );
 ```
 
-The same secret must be shared by all instances serving the same cursor domain and preserved across restarts. Store it in a secret manager; never derive it from a database URL or tenant ID. Without a configured secret, paged queries fail closed. Cursors are HMAC-SHA256 authenticated and bound to query family, scope, filters, time range, and page size. The first page captures an insert upper bound; this is not a cross-table repeatable-read snapshot.
+The same secret must be shared by all instances serving the same cursor domain and preserved across restarts. Store it in a secret manager; never derive it from a database URL or tenant ID. Without a configured secret, paged queries fail closed. Cursors are HMAC-SHA256 authenticated and bound to query family, scope, filters, time range, and page size. The first page captures an ordering-timestamp ceiling, not a strict insertion or cross-table repeatable-read snapshot. Late-arriving rows with backdated timestamps may become visible during traversal.
