@@ -329,6 +329,7 @@ enum PluginRecoveryArchivePackageImportDisposition {
   alreadyPresent,
   imported,
   partiallyImported,
+  failed,
 }
 
 final class PluginRecoveryArchivePackageImportPlan {
@@ -453,28 +454,37 @@ final class PluginRecoveryArchivePackageImporter {
     final imported = <String>[];
     final present = [...fresh.alreadyPresentJobIds];
     final conflicts = <String>[];
+    final failed = <String>[];
     final byId = {for (final record in plan.archivePackage.records) record.job.jobId: record};
     for (final id in fresh.validJobIds) {
       final record = byId[id]!;
-      if (await destinationArchive.putIfAbsent(record)) {
-        final stored = await destinationArchive.read(id);
-        if (stored == null || !_sameRecord(stored, record, snapshotCodec)) {
-          conflicts.add(id);
-          break;
-        }
-        imported.add(id);
-      } else {
-        final stored = await destinationArchive.read(id);
-        if (stored != null && _sameRecord(stored, record, snapshotCodec)) {
-          present.add(id);
+      try {
+        if (await destinationArchive.putIfAbsent(record)) {
+          final stored = await destinationArchive.read(id);
+          if (stored == null || !_sameRecord(stored, record, snapshotCodec)) {
+            conflicts.add(id);
+            break;
+          }
+          imported.add(id);
         } else {
-          conflicts.add(id);
-          break;
+          final stored = await destinationArchive.read(id);
+          if (stored != null && _sameRecord(stored, record, snapshotCodec)) {
+            present.add(id);
+          } else {
+            conflicts.add(id);
+            break;
+          }
         }
+      } on Object {
+        failed.add(id);
+        break;
       }
     }
-    final disposition = conflicts.isNotEmpty
-        ? PluginRecoveryArchivePackageImportDisposition.partiallyImported
+    final hasPartialOutcome = conflicts.isNotEmpty || failed.isNotEmpty;
+    final disposition = hasPartialOutcome
+        ? (imported.isEmpty && present.isEmpty
+            ? PluginRecoveryArchivePackageImportDisposition.failed
+            : PluginRecoveryArchivePackageImportDisposition.partiallyImported)
         : imported.isEmpty
             ? PluginRecoveryArchivePackageImportDisposition.alreadyPresent
             : PluginRecoveryArchivePackageImportDisposition.imported;
@@ -483,6 +493,7 @@ final class PluginRecoveryArchivePackageImporter {
       importedJobIds: imported,
       alreadyPresentJobIds: present,
       conflictingJobIds: conflicts,
+      failedJobIds: failed,
     );
   }
 
@@ -504,15 +515,18 @@ final class PluginRecoveryArchivePackageImportReport {
   final List<String> importedJobIds;
   final List<String> alreadyPresentJobIds;
   final List<String> conflictingJobIds;
+  final List<String> failedJobIds;
 
   PluginRecoveryArchivePackageImportReport({
     required this.disposition,
     required Iterable<String> importedJobIds,
     required Iterable<String> alreadyPresentJobIds,
     required Iterable<String> conflictingJobIds,
+    required Iterable<String> failedJobIds,
   }) : importedJobIds = List.unmodifiable(importedJobIds),
        alreadyPresentJobIds = List.unmodifiable(alreadyPresentJobIds),
-       conflictingJobIds = List.unmodifiable(conflictingJobIds);
+       conflictingJobIds = List.unmodifiable(conflictingJobIds),
+       failedJobIds = List.unmodifiable(failedJobIds);
 }
 
 bool _isTerminal(PluginLifecycleRecoveryJob job) => switch (job.status) {
