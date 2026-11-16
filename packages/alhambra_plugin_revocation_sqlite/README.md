@@ -55,7 +55,7 @@ SQLite is intended for embedded, single-host persistence. Use a server database 
 
 ## Schema
 
-Schema version 1 creates the execution, outbox and journal tables. Schema version 2 adds replay lineage and the operator-action audit table. Schema version 3 adds operator-action `scope_id`. Schema version 4 adds immutable `scope_id` ownership to execution, journal and outbox records plus scope-first inspection indexes. Each migration runs in a `BEGIN IMMEDIATE` transaction and advances `PRAGMA user_version` only after all changes succeed. Existing databases are upgraded automatically on adapter startup. Rows created before v4 are assigned the explicit compatibility scope `default`.
+Schema version 1 creates the execution, outbox and journal tables. Schema version 2 adds replay lineage and the operator-action audit table. Schema version 3 adds operator-action `scope_id`. Schema version 4 adds immutable `scope_id` ownership to execution, journal and outbox records plus scope-first inspection indexes. Schema version 5 adds the scope-first operator-action ordering index and normalizes existing journal/outbox/operator timestamps to fixed UTC microsecond text so keyset ordering remains lexically chronological. Each migration runs in a `BEGIN IMMEDIATE` transaction and advances `PRAGMA user_version` only after all changes succeed. Existing databases are upgraded automatically on adapter startup. Rows created before v4 are assigned the explicit compatibility scope `default`.
 
 
 ## Audited dead-letter replay
@@ -68,3 +68,18 @@ The adapter exposes `readOperatorActions()` for audit inspection. Operator authe
 ## Scope ownership
 
 `PluginRevocationCoordinator.execute(scopeId: ...)` accepts a trusted host-resolved scope (defaulting to `default` for source compatibility). The scope is persisted on the execution claim, journal entry and audit outbox event. Terminal completion and journal compare-and-set reject scope changes. Replay verifies that the requested scope matches the source dead-letter event. The adapter does not authenticate or resolve tenant identity; the embedding host must do that before invoking the coordinator.
+
+## Database-native scoped pagination
+
+The adapter implements `PluginRevocationScopedQueryStore`. All three page methods constrain `scope_id`, time bounds, status/state, snapshot upper bound and keyset cursor in SQL before `LIMIT`; they never call the legacy full-read methods. Ordering is deterministic: journal `(updated_at DESC, idempotency_key DESC)`, outbox `(occurred_at DESC, event_id DESC)`, and operator actions `(occurred_at DESC, action_id DESC)`.
+
+Configure a stable random secret (at least 32 bytes) on every adapter instance:
+
+```dart
+final persistence = SqlitePluginRevocationStore(
+  '/var/lib/app/revocations.sqlite',
+  cursorSecret: cursorSigningSecret,
+);
+```
+
+The same secret must be shared by all instances serving the same cursor domain and preserved across restarts. Store it in a secret manager; never derive it from a database URL or tenant ID. Without a configured secret, paged queries fail closed. Cursors are HMAC-SHA256 authenticated and bound to query family, scope, filters, time range, and page size. The first page captures an insert upper bound; this is not a cross-table repeatable-read snapshot.
