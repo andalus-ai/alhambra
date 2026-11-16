@@ -256,14 +256,18 @@ final class PluginLifecycleRecoveryJobArchiveMigrationExecutor {
     }
 
     var migrated = planned.job;
+    var expectedVersion = plan.sourceFormatVersion;
     for (final step in plan.path!.steps) {
-      if (step.fromVersion !=
-          (step == plan.path!.steps.first ? plan.sourceFormatVersion : _versionBefore(step, plan.path!))) {
+      if (step.fromVersion != expectedVersion) {
         throw StateError('Migration path is not contiguous.');
       }
       final before = migrated;
       migrated = step.migrate(before);
       _validateIdentity(before, migrated);
+      expectedVersion = step.toVersion;
+    }
+    if (expectedVersion != plan.targetFormatVersion) {
+      throw StateError('Migration path did not reach the requested target format.');
     }
     if (migrated.schemaVersion != PluginLifecycleRecoveryJob.currentSchemaVersion) {
       throw StateError('Migration produced an unsupported recovery-job schema.');
@@ -292,14 +296,6 @@ final class PluginLifecycleRecoveryJobArchiveMigrationExecutor {
       return PluginRecoveryArchiveMigrationDisposition.alreadyPresent;
     }
     throw StateError('Destination contains a conflicting archive record.');
-  }
-
-  static int _versionBefore(
-    PluginLifecycleRecoveryJobArchiveFormatMigration step,
-    PluginRecoveryArchiveFormatMigrationPath path,
-  ) {
-    final index = path.steps.indexOf(step);
-    return index <= 0 ? path.fromVersion : path.steps[index - 1].toVersion;
   }
 
   static void _validateIdentity(
