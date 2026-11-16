@@ -128,11 +128,18 @@ void main() {
       isTrue,
     );
 
+    var clockValue = takeoverAt;
+    DateTime advancingClock() {
+      final current = clockValue;
+      clockValue = clockValue.add(const Duration(milliseconds: 1));
+      return current;
+    }
+
     final planner = PluginInstallRecoveryPlanner(
       journal: journal,
       fileSystem: fileSystem,
       installedStore: installedStore,
-      clock: () => takeoverAt,
+      clock: advancingClock,
     );
     final report = await planner.inspect();
     expect(report.findings, hasLength(1));
@@ -146,7 +153,7 @@ void main() {
       installedStore: installedStore,
       leaseStore: leases,
       workerId: 'recovery-worker',
-      clock: () => takeoverAt,
+      clock: advancingClock,
     );
     final completed = await executor.execute(
       finding,
