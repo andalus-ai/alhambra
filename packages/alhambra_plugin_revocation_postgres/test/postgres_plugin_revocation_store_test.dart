@@ -32,7 +32,7 @@ void main() {
       : false;
 
 
-  test('migration applies schema v4 scope ownership', () async {
+  test('migration applies schema v5 scoped query indexes', () async {
     final store = PostgresPluginRevocationStore.fromUrl(databaseUrl!);
     await store.migrate();
     final admin = Pool.withUrl(databaseUrl!);
@@ -41,7 +41,7 @@ void main() {
     final rows = await admin.execute(
       'SELECT MAX(version) AS version FROM alhambra_plugin_revocation_schema',
     );
-    expect(rows.first.toColumnMap()['version'], 4);
+    expect(rows.first.toColumnMap()['version'], 5);
 
     for (final table in [
       'alhambra_plugin_revocation_execution',
