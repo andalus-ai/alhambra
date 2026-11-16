@@ -6,6 +6,9 @@ import 'plugin_lifecycle_recovery_job_archive_integrity_metadata.dart';
 typedef PluginRecoveryArchiveJobMigration =
     PluginLifecycleRecoveryJob Function(PluginLifecycleRecoveryJob job);
 
+typedef PluginRecoveryArchiveSourceVerifier =
+    Future<bool> Function(PluginLifecycleRecoveryJobArchiveRecord record);
+
 /// One explicit, deterministic archive-format migration step.
 ///
 /// Migrations transform only the persisted recovery-job value. They must not
@@ -226,6 +229,7 @@ final class PluginLifecycleRecoveryJobArchiveMigrationExecutor {
   final PluginLifecycleRecoveryJobArchive destinationArchive;
   final PluginLifecycleRecoveryJobDigestProvider digestProvider;
   final String digestAlgorithm;
+  final PluginRecoveryArchiveSourceVerifier verifySource;
   final PluginLifecycleRecoveryJobSnapshotCodec codec;
 
   const PluginLifecycleRecoveryJobArchiveMigrationExecutor({
@@ -233,6 +237,7 @@ final class PluginLifecycleRecoveryJobArchiveMigrationExecutor {
     required this.destinationArchive,
     required this.digestProvider,
     required this.digestAlgorithm,
+    required this.verifySource,
     this.codec = const PluginLifecycleRecoveryJobSnapshotCodec(),
   });
 
@@ -253,6 +258,9 @@ final class PluginLifecycleRecoveryJobArchiveMigrationExecutor {
     final latest = await sourceArchive.read(plan.jobId);
     if (latest == null || !_sameRecord(latest, planned)) {
       throw StateError('Archive source changed after migration inspection.');
+    }
+    if (!_isArchivable(latest.job) || !await verifySource(latest)) {
+      throw StateError('Source archive is not terminal or failed integrity verification.');
     }
 
     var migrated = planned.job;
@@ -288,15 +296,35 @@ final class PluginLifecycleRecoveryJobArchiveMigrationExecutor {
       ),
     );
 
-    if (await destinationArchive.putIfAbsent(target)) {
-      return PluginRecoveryArchiveMigrationDisposition.imported;
-    }
+    final inserted = await destinationArchive.putIfAbsent(target);
     final existing = await destinationArchive.read(plan.jobId);
-    if (existing != null && _sameRecord(existing, target)) {
+    if (existing != null && !_sameRecord(existing, target)) {
+      throw StateError('Destination contains a conflicting archive record.');
+    }
+    if (existing == null) {
+      throw StateError('Destination did not retain the migrated archive record.');
+    }
+    if (inserted) return PluginRecoveryArchiveMigrationDisposition.imported;
+    if (_sameRecord(existing, target)) {
       return PluginRecoveryArchiveMigrationDisposition.alreadyPresent;
     }
     throw StateError('Destination contains a conflicting archive record.');
   }
+
+  static bool _isArchivable(PluginLifecycleRecoveryJob job) =>
+      switch (job.status) {
+        PluginRecoveryJobStatus.completed ||
+        PluginRecoveryJobStatus.failed ||
+        PluginRecoveryJobStatus.partiallyCompleted ||
+        PluginRecoveryJobStatus.cancelled ||
+        PluginRecoveryJobStatus.expired =>
+          !job.steps.any((step) => step.status == PluginRecoveryJobStepStatus.running),
+        PluginRecoveryJobStatus.planned ||
+        PluginRecoveryJobStatus.running ||
+        PluginRecoveryJobStatus.cancellationRequested ||
+        PluginRecoveryJobStatus.interrupted ||
+        PluginRecoveryJobStatus.manualReview => false,
+      };
 
   static void _validateIdentity(
     PluginLifecycleRecoveryJob before,
