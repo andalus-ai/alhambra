@@ -11,17 +11,17 @@ The runtime provides:
 - a read-only migration planner;
 - an executor that writes a migrated copy to a separate destination archive.
 
-The source archive is never modified or purged by migration.
+The source archive is never modified or purged by migration. The runtime snapshot codec now writes archive format v2; v1 records require an explicit host-registered migration before they can be verified or restored by the current verifier.
 
 ## Registering migrations
 
 Register each supported transition. For example, a host that can migrate
-format 2 archives to the current format 1 can register:
+format 1 archives to the current format 2 can register:
 
 ```dart
 final registry = PluginLifecycleRecoveryJobArchiveMigrationRegistry([
   PluginLifecycleRecoveryJobArchiveFormatMigration(
-    fromVersion: 2,
+    fromVersion: 1,
     toVersion: PluginLifecycleRecoveryJobSnapshotCodec.formatVersion,
     migrate: (job) => migrateLegacyJobFields(job),
   ),
@@ -75,7 +75,8 @@ validate the source envelope using the algorithm and canonicalization rules
 for that source format. The executor fails closed if verification fails.
 
 The executor re-reads and compares the source snapshot against the inspected
-plan, verifies that the job is in a safe terminal state with no running steps,
+plan, verifies the legacy source through the host verifier, checks that the job
+is in a safe terminal state with no running steps,
 applies the registered migration chain, computes a new digest using the
 current snapshot codec, and inserts the new record into the destination
 archive. The destination record is read back and compared before success is
