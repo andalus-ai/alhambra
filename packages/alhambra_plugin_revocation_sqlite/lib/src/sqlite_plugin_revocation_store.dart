@@ -15,9 +15,11 @@ final class SqlitePluginRevocationStore
         PluginRevocationOutboxStore,
         PluginRevocationOutboxInspectionStore,
         PluginRevocationDeadLetterReplayStore,
-        PluginRevocationOperatorActionInspectionStore {
+        PluginRevocationOperatorActionInspectionStore,
+        PluginRevocationScopedQueryStore {
   final sq.Database _db;
   final Random _random;
+  final PluginRevocationPageCursorCodec? _cursorCodec;
   bool _closed = false;
 
   /// Journal view sharing this adapter's SQLite connection.
@@ -27,8 +29,12 @@ final class SqlitePluginRevocationStore
   SqlitePluginRevocationStore(
     String path, {
     Random? random,
+    List<int>? cursorSecret,
   })  : _db = sq.sqlite3.open(path),
-        _random = random ?? Random.secure() {
+        _random = random ?? Random.secure(),
+        _cursorCodec = cursorSecret == null
+            ? null
+            : PluginRevocationPageCursorCodec(cursorSecret) {
     _db.execute('PRAGMA busy_timeout = 5000');
     if (path != ':memory:') _db.execute('PRAGMA journal_mode = WAL');
     _db.execute('PRAGMA foreign_keys = ON');
@@ -36,9 +42,12 @@ final class SqlitePluginRevocationStore
   }
 
   /// Create a private in-memory store, primarily for tests.
-  SqlitePluginRevocationStore.memory({Random? random})
+  SqlitePluginRevocationStore.memory({Random? random, List<int>? cursorSecret})
       : _db = sq.sqlite3.openInMemory(),
-        _random = random ?? Random.secure() {
+        _random = random ?? Random.secure(),
+        _cursorCodec = cursorSecret == null
+            ? null
+            : PluginRevocationPageCursorCodec(cursorSecret) {
     _db.execute('PRAGMA foreign_keys = ON');
     _migrate();
   }
@@ -56,7 +65,7 @@ final class SqlitePluginRevocationStore
   void _migrate() {
     final version =
         _db.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > 4) {
+    if (version > 5) {
       throw UnsupportedError(
         'Database schema version $version is newer than this adapter supports.',
       );
@@ -165,6 +174,26 @@ final class SqlitePluginRevocationStore
         _db.execute('PRAGMA user_version = 4');
       });
     }
+    if (version < 5) {
+      _transaction(() {
+        _db.execute('CREATE INDEX IF NOT EXISTS idx_plugin_revocation_operator_scope_occurred ON plugin_revocation_operator_action(scope_id, occurred_at DESC, action_id DESC)');
+        // Normalize historical ISO timestamps to fixed microsecond precision so
+        // SQLite TEXT ordering is chronologically correct for keyset queries.
+        for (final row in _db.select('SELECT idempotency_key, updated_at FROM plugin_revocation_journal')) {
+          _db.execute('UPDATE plugin_revocation_journal SET updated_at = ? WHERE idempotency_key = ?',
+              [_date(_parseDate(row['updated_at'])), row['idempotency_key']]);
+        }
+        for (final row in _db.select('SELECT event_id, occurred_at FROM plugin_revocation_outbox')) {
+          _db.execute('UPDATE plugin_revocation_outbox SET occurred_at = ? WHERE event_id = ?',
+              [_date(_parseDate(row['occurred_at'])), row['event_id']]);
+        }
+        for (final row in _db.select('SELECT action_id, occurred_at FROM plugin_revocation_operator_action')) {
+          _db.execute('UPDATE plugin_revocation_operator_action SET occurred_at = ? WHERE action_id = ?',
+              [_date(_parseDate(row['occurred_at'])), row['action_id']]);
+        }
+        _db.execute('PRAGMA user_version = 5');
+      });
+    }
   }
 
   T _transaction<T>(T Function() action) {
@@ -180,7 +209,12 @@ final class SqlitePluginRevocationStore
     }
   }
 
-  static String _date(DateTime value) => value.toUtc().toIso8601String();
+  static String _date(DateTime value) {
+    final iso = value.toUtc().toIso8601String();
+    final dot = iso.indexOf('.');
+    final fraction = iso.substring(dot + 1, iso.length - 1);
+    return '${iso.substring(0, dot)}.${fraction.padRight(6, '0')}Z';
+  }
   static DateTime _parseDate(Object? value) =>
       DateTime.parse(value! as String).toUtc();
 
@@ -373,6 +407,208 @@ final class SqlitePluginRevocationStore
       }
       _enqueue(record);
     });
+  }
+
+  PluginRevocationPageCursorCodec get _requiredCursorCodec =>
+      _cursorCodec ??
+      (throw StateError(
+        'Configure a stable cursorSecret of at least 32 bytes before using paged inspection.',
+      ));
+
+  @override
+  Future<PluginRevocationScopedPage<PluginRevocationJournalEntry>>
+      queryJournalPage(PluginRevocationJournalPageQuery query) async {
+    _assertOpen();
+    final filters = query.statuses.map((value) => value.name).toList()..sort();
+    final position = query.cursor == null
+        ? null
+        : _requiredCursorCodec.decode(
+            token: query.cursor!,
+            family: 'journal',
+            query: query,
+            filters: filters,
+          );
+    final snapshotAt = position?.snapshotAt ?? DateTime.now().toUtc();
+    final where = <String>['scope_id = ?', 'updated_at <= ?'];
+    final parameters = <Object?>[query.scopeId, _date(snapshotAt)];
+    if (query.fromInclusive != null) {
+      where.add('updated_at >= ?');
+      parameters.add(_date(query.fromInclusive!));
+    }
+    if (query.toExclusive != null) {
+      where.add('updated_at < ?');
+      parameters.add(_date(query.toExclusive!));
+    }
+    if (filters.isNotEmpty) {
+      where.add('status IN (${List.filled(filters.length, '?').join(', ')})');
+      parameters.addAll(filters);
+    }
+    if (position != null) {
+      where.add('(updated_at < ? OR (updated_at = ? AND idempotency_key < ?))');
+      parameters.addAll([
+        _date(position.lastAt),
+        _date(position.lastAt),
+        position.lastId,
+      ]);
+    }
+    parameters.add(query.pageSize + 1);
+    final rows = _db.select(
+      'SELECT * FROM plugin_revocation_journal WHERE ${where.join(' AND ')} '
+      'ORDER BY updated_at DESC, idempotency_key DESC LIMIT ?',
+      parameters,
+    );
+    final hasMore = rows.length > query.pageSize;
+    final selected = rows.take(query.pageSize).toList(growable: false);
+    final entries = selected.map((row) => _journal(row)).toList(growable: false);
+    final nextCursor = hasMore && selected.isNotEmpty
+        ? _requiredCursorCodec.encode(
+            family: 'journal',
+            query: query,
+            filters: filters,
+            snapshotAt: snapshotAt,
+            lastAt: entries.last.updatedAt,
+            lastId: entries.last.idempotencyKey,
+          )
+        : null;
+    return PluginRevocationScopedPage(
+      items: entries,
+      nextCursor: nextCursor,
+      snapshotAt: snapshotAt,
+    );
+  }
+
+  @override
+  Future<PluginRevocationScopedPage<PluginRevocationOutboxMessage>>
+      queryOutboxPage(PluginRevocationOutboxPageQuery query) async {
+    _assertOpen();
+    final filters = query.states.map((value) => value.name).toList()..sort();
+    final position = query.cursor == null
+        ? null
+        : _requiredCursorCodec.decode(
+            token: query.cursor!,
+            family: 'outbox',
+            query: query,
+            filters: filters,
+          );
+    final snapshotAt = position?.snapshotAt ?? DateTime.now().toUtc();
+    final where = <String>['scope_id = ?', 'occurred_at <= ?'];
+    final parameters = <Object?>[query.scopeId, _date(snapshotAt)];
+    if (query.fromInclusive != null) {
+      where.add('occurred_at >= ?');
+      parameters.add(_date(query.fromInclusive!));
+    }
+    if (query.toExclusive != null) {
+      where.add('occurred_at < ?');
+      parameters.add(_date(query.toExclusive!));
+    }
+    if (filters.isNotEmpty) {
+      where.add('state IN (${List.filled(filters.length, '?').join(', ')})');
+      parameters.addAll(filters);
+    }
+    if (position != null) {
+      where.add('(occurred_at < ? OR (occurred_at = ? AND event_id < ?))');
+      parameters.addAll([
+        _date(position.lastAt),
+        _date(position.lastAt),
+        position.lastId,
+      ]);
+    }
+    parameters.add(query.pageSize + 1);
+    final rows = _db.select(
+      'SELECT * FROM plugin_revocation_outbox WHERE ${where.join(' AND ')} '
+      'ORDER BY occurred_at DESC, event_id DESC LIMIT ?',
+      parameters,
+    );
+    final hasMore = rows.length > query.pageSize;
+    final selected = rows.take(query.pageSize).toList(growable: false);
+    final messages = selected
+        .map((row) => _message(row))
+        .toList(growable: false);
+    final nextCursor = hasMore && selected.isNotEmpty
+        ? _requiredCursorCodec.encode(
+            family: 'outbox',
+            query: query,
+            filters: filters,
+            snapshotAt: snapshotAt,
+            lastAt: messages.last.event.occurredAt,
+            lastId: messages.last.event.eventId,
+          )
+        : null;
+    return PluginRevocationScopedPage(
+      items: messages,
+      nextCursor: nextCursor,
+      snapshotAt: snapshotAt,
+    );
+  }
+
+  @override
+  Future<PluginRevocationScopedPage<PluginRevocationOperatorAction>>
+      queryOperatorActionPage(
+    PluginRevocationOperatorActionPageQuery query,
+  ) async {
+    _assertOpen();
+    const filters = <String>[];
+    final position = query.cursor == null
+        ? null
+        : _requiredCursorCodec.decode(
+            token: query.cursor!,
+            family: 'operator-action',
+            query: query,
+            filters: filters,
+          );
+    final snapshotAt = position?.snapshotAt ?? DateTime.now().toUtc();
+    final where = <String>['scope_id = ?', 'occurred_at <= ?'];
+    final parameters = <Object?>[query.scopeId, _date(snapshotAt)];
+    if (query.fromInclusive != null) {
+      where.add('occurred_at >= ?');
+      parameters.add(_date(query.fromInclusive!));
+    }
+    if (query.toExclusive != null) {
+      where.add('occurred_at < ?');
+      parameters.add(_date(query.toExclusive!));
+    }
+    if (position != null) {
+      where.add('(occurred_at < ? OR (occurred_at = ? AND action_id < ?))');
+      parameters.addAll([
+        _date(position.lastAt),
+        _date(position.lastAt),
+        position.lastId,
+      ]);
+    }
+    parameters.add(query.pageSize + 1);
+    final rows = _db.select(
+      'SELECT * FROM plugin_revocation_operator_action WHERE ${where.join(' AND ')} '
+      'ORDER BY occurred_at DESC, action_id DESC LIMIT ?',
+      parameters,
+    );
+    final hasMore = rows.length > query.pageSize;
+    final selected = rows.take(query.pageSize).toList(growable: false);
+    final actions = selected.map((row) => PluginRevocationOperatorAction(
+      actionId: row['action_id']! as String,
+      actorId: row['actor_id']! as String,
+      scopeId: row['scope_id']! as String,
+      reason: row['reason']! as String,
+      approvalReference: row['approval_reference']! as String,
+      targetEventId: row['target_event_id']! as String,
+      replayEventId: row['replay_event_id']! as String,
+      replayGeneration: row['replay_generation']! as int,
+      occurredAt: _parseDate(row['occurred_at']),
+    )).toList(growable: false);
+    final nextCursor = hasMore && selected.isNotEmpty
+        ? _requiredCursorCodec.encode(
+            family: 'operator-action',
+            query: query,
+            filters: filters,
+            snapshotAt: snapshotAt,
+            lastAt: actions.last.occurredAt,
+            lastId: actions.last.actionId,
+          )
+        : null;
+    return PluginRevocationScopedPage(
+      items: actions,
+      nextCursor: nextCursor,
+      snapshotAt: snapshotAt,
+    );
   }
 
   @override
