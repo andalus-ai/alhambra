@@ -145,11 +145,26 @@ void main() {
           algorithm: record.integrity.algorithm, digest: 'tampered',
         ),
       );
-      final invalidPackage = await PluginRecoveryArchivePackageExporter(
-        digestProvider: digest, digestAlgorithm: 'package-test',
-      ).create(
-        packageId: 'bundle-2', producer: 'test-host',
-        createdAt: DateTime.utc(2026, 11, 2), records: [badRecord],
+      final manifest = PluginRecoveryArchivePackageManifest(
+        formatVersion: PluginRecoveryArchivePackageManifest.currentFormatVersion,
+        packageId: 'bundle-2',
+        producer: 'test-host',
+        createdAt: DateTime.utc(2026, 11, 2),
+        recordCount: 1,
+      );
+      const packageCodec = PluginRecoveryArchivePackageCodec();
+      final packagePayload = packageCodec.encodePayload(
+        manifest: manifest,
+        records: [badRecord],
+      );
+      final invalidPackage = PluginRecoveryArchivePackage(
+        manifest: manifest,
+        records: [badRecord],
+        digestAlgorithm: 'package-test',
+        digest: await digest.digest(
+          algorithm: 'package-test',
+          canonicalPayload: packagePayload,
+        ),
       );
       expect((await importer.inspect(invalidPackage)).disposition,
           PluginRecoveryArchivePackageImportDisposition.invalidRecord);
