@@ -53,6 +53,7 @@ export 'src/plugins/plugin_revocation_operations.dart';
 export 'src/plugins/plugin_revocation_admin_operations.dart';
 export 'src/plugins/plugin_revocation_journal.dart';
 export 'src/plugins/plugin_revocation_scoped_queries.dart';
+export 'src/plugins/plugin_revocation_page_cursor.dart';
 export 'src/plugins/plugin_revocation_recovery_planner.dart';
 export 'src/plugins/plugin_revocation_reconciler.dart';
 export 'src/plugins/plugin_startup_coordinator.dart';
