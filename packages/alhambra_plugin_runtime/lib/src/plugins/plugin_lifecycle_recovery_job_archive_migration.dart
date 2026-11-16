@@ -153,6 +153,10 @@ final class PluginLifecycleRecoveryJobArchiveMigrationPlanner {
     required String jobId,
     int targetFormatVersion = PluginLifecycleRecoveryJobSnapshotCodec.formatVersion,
   }) async {
+    if (jobId.trim().isEmpty) throw ArgumentError.value(jobId, 'jobId');
+    if (targetFormatVersion < 1) {
+      throw ArgumentError.value(targetFormatVersion, 'targetFormatVersion');
+    }
     final record = await sourceArchive.read(jobId);
     if (record == null) {
       return _plan(
