@@ -44,10 +44,6 @@ final class LocalPluginInstallFileSystem
     if (rootType == FileSystemEntityType.link) {
       throw FileSystemException('Installation root must not be a symbolic link.', rootPath);
     }
-    final rootType = await FileSystemEntity.type(rootPath, followLinks: false);
-    if (rootType == FileSystemEntityType.link) {
-      throw FileSystemException('Installation root must not be a symbolic link.', rootPath);
-    }
     await Directory(rootPath).create(recursive: true);
     await _assertNoSymlink(rootPath);
     for (final path in [_stateRoot, _stagingRoot, _pluginRoot, _lockRoot, _operationRoot]) {
@@ -304,7 +300,11 @@ final class LocalPluginInstallFileSystem
     }), flush: true);
   }
 
-  Future<bool> _hasOwnerMarker(String destination, String operationId, int token) async {
+  Future<bool> _hasOwnerMarker(
+    String destination,
+    String operationId,
+    String pluginId,
+  ) async {
     await _assertNoSymlink(destination);
     final marker = File(p.join(destination, _ownerFileName));
     final markerType = await FileSystemEntity.type(marker.path, followLinks: false);
@@ -312,7 +312,10 @@ final class LocalPluginInstallFileSystem
     if (markerType == FileSystemEntityType.notFound) return false;
     try {
       final data = jsonDecode(await marker.readAsString()) as Map<String, dynamic>;
-      return data['operationId'] == operationId && data['fencingToken'] == token;
+      // Ownership is stable for the operation lifetime. Fencing tokens only
+      // authorize mutations; a recovery worker must be able to prove ownership
+      // after advancing the token beyond the original installer token.
+      return data['operationId'] == operationId && data['pluginId'] == pluginId;
     } catch (_) {
       return false;
     }
@@ -363,7 +366,7 @@ final class LocalPluginInstallFileSystem
         }
         await _assertNoSymlink(expected);
         if (!await Directory(expected).exists()) return;
-        if (!await _hasOwnerMarker(expected, staging.operationId, staging.fencingToken)) {
+        if (!await _hasOwnerMarker(expected, staging.operationId, staging.pluginId)) {
           throw StateError('Cannot roll back a destination without matching ownership evidence.');
         }
         await Directory(expected).delete(recursive: true);
@@ -440,11 +443,7 @@ final class LocalPluginInstallFileSystem
       }
       await _assertNoSymlink(destination);
       destinationExists = await Directory(destination).exists();
-      owned = destinationExists && await _hasOwnerMarker(
-        destination,
-        operationId,
-        state['fencingToken']! as int,
-      );
+      owned = destinationExists && await _hasOwnerMarker(destination, operationId, pluginId);
     }
     final rollback = destinationExists && owned &&
         (state['phase'] == 'promoted' || state['phase'] == 'promoting');

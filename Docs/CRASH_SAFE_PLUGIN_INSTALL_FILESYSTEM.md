@@ -27,6 +27,13 @@ ownership marker is deliberately retained in the installed directory so the
 host can prove which operation promoted the tree after a process crash. This
 filename is reserved and rejected in archive paths.
 
+The marker records stable operation/plugin ownership, not current worker authority.
+Its original fencing token is diagnostic only: a recovery worker with a newer
+registered token must still be able to prove that the same operation created
+the destination. Every mutation is separately authorized by the current
+fencing token. The marker is host metadata and is not part of the package
+payload or the package's signed content hash.
+
 ## Mutation protocol
 
 Every mutation obtains an exclusive operation lock directory, reads the

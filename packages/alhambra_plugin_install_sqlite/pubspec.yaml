@@ -11,6 +11,8 @@ dependencies:
     path: ../alhambra_plugin_api
   alhambra_plugin_runtime:
     path: ../alhambra_plugin_runtime
+  alhambra_plugin_install_filesystem:
+    path: ../alhambra_plugin_install_filesystem
   sqlite3: ^2.4.0
 
 dev_dependencies:
