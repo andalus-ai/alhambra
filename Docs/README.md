@@ -30,6 +30,7 @@ Start here:
 - [Plugin startup capability gate](PLUGIN_STARTUP_CAPABILITY_GATE.md) — startup preconditions and capability checks.
 - [Plugin lifecycle checkpoints](PLUGIN_LIFECYCLE_CHECKPOINTS.md) — lifecycle persistence, reconciliation and explicit recovery.
 - [Recovery archive adapter conformance](RECOVERY_ARCHIVE_ADAPTER_CONFORMANCE.md) — behavioral checks and production guarantees for host-provided archive stores.
+- [Recovery archive format migrations](RECOVERY_ARCHIVE_FORMAT_MIGRATIONS.md) — explicit version paths, read-only previews, and verified copy migrations.
 - [Capability provider registry](CAPABILITY_PROVIDER_REGISTRY.md) — provider registration and ownership.
 - [Capability provider health and revocation](CAPABILITY_PROVIDER_HEALTH_AND_REVOCATION.md) — health signals and dependent capability impact.
 - [Governed plugin revocation execution](GOVERNED_PLUGIN_REVOCATION_EXECUTION.md) — approval and execution semantics.
