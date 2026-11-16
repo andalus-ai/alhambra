@@ -11,7 +11,7 @@ The runtime provides:
 - a read-only migration planner;
 - an executor that writes a migrated copy to a separate destination archive.
 
-The source archive is never modified or purged by migration. The snapshot codec now writes archive format v2; v1 records require an explicit host-registered migration before the current verifier can accept them. The runtime snapshot codec now writes archive format v2; v1 records require an explicit host-registered migration before they can be verified or restored by the current verifier.
+The source archive is never modified or purged by migration. The snapshot codec writes archive format v2; v1 records require an explicit host-registered migration before the current verifier can accept them.
 
 ## Registering migrations
 
