@@ -90,9 +90,10 @@ final class PluginRevocationOperatorActionPageQuery
 
 /// Immutable page returned by a scoped query adapter.
 ///
-/// [snapshotAt] is a captured upper bound for inserts, not a promise of a
-/// cross-table or repeatable-read snapshot. Adapters must document their
-/// isolation level. [nextCursor] is null on the final page.
+/// [snapshotAt] is a ceiling on the ordering timestamp, not a stable insertion
+/// snapshot. Late-arriving rows with backdated timestamps may become visible
+/// during traversal. Strict audit exports need a transaction or export job.
+/// [nextCursor] is null on the final page.
 final class PluginRevocationScopedPage<T> {
   final List<T> items;
   final String? nextCursor;
