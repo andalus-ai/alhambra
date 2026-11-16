@@ -14,15 +14,21 @@ final class PostgresPluginRevocationStore
         PluginRevocationOutboxStore,
         PluginRevocationOutboxInspectionStore,
         PluginRevocationDeadLetterReplayStore,
-        PluginRevocationOperatorActionInspectionStore {
+        PluginRevocationOperatorActionInspectionStore,
+        PluginRevocationScopedQueryStore {
   final Pool<dynamic> _pool;
   final Random _random;
+  final PluginRevocationPageCursorCodec? _cursorCodec;
   bool _closed = false;
 
   PostgresPluginRevocationStore(
     this._pool, {
     Random? random,
-  }) : _random = random ?? Random.secure();
+    List<int>? cursorSecret,
+  })  : _random = random ?? Random.secure(),
+        _cursorCodec = cursorSecret == null
+            ? null
+            : PluginRevocationPageCursorCodec(cursorSecret);
 
   /// Creates a pooled adapter from a PostgreSQL connection URL.
   ///
@@ -30,8 +36,13 @@ final class PostgresPluginRevocationStore
   factory PostgresPluginRevocationStore.fromUrl(
     String url, {
     Random? random,
+    List<int>? cursorSecret,
   }) =>
-      PostgresPluginRevocationStore(Pool.withUrl(url), random: random);
+      PostgresPluginRevocationStore(
+        Pool.withUrl(url),
+        random: random,
+        cursorSecret: cursorSecret,
+      );
 
   /// Journal contract view backed by the same PostgreSQL pool.
   PluginRevocationJournalStore get journalStore =>
@@ -64,7 +75,7 @@ final class PostgresPluginRevocationStore
         'SELECT COALESCE(MAX(version), 0) AS version FROM alhambra_plugin_revocation_schema',
       );
       final currentVersion = schema.first.toColumnMap()['version'] as int;
-      if (currentVersion > 4) {
+      if (currentVersion > 5) {
         throw UnsupportedError('Database schema version $currentVersion is newer than this adapter supports.');
       }
       await tx.execute('''
@@ -155,6 +166,10 @@ final class PostgresPluginRevocationStore
         await tx.execute('CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_journal_scope_updated ON alhambra_plugin_revocation_journal(scope_id, updated_at DESC, idempotency_key DESC)');
         await tx.execute('CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_outbox_scope_occurred ON alhambra_plugin_revocation_outbox(scope_id, occurred_at DESC, event_id DESC)');
         await tx.execute("INSERT INTO alhambra_plugin_revocation_schema (version) VALUES (4) ON CONFLICT (version) DO NOTHING");
+      }
+      if (currentVersion < 5) {
+        await tx.execute('CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_operator_scope_occurred ON alhambra_plugin_revocation_operator_action(scope_id, occurred_at DESC, action_id DESC)');
+        await tx.execute("INSERT INTO alhambra_plugin_revocation_schema (version) VALUES (5) ON CONFLICT (version) DO NOTHING");
       }
     });
   }
@@ -397,6 +412,599 @@ final class PostgresPluginRevocationStore
       }
       await _enqueue(tx, record);
     });
+  }
+
+  PluginRevocationPageCursorCodec get _requiredCursorCodec =>
+      _cursorCodec ??
+      (throw StateError(
+        'Configure a stable cursorSecret of at least 32 bytes before using paged inspection.',
+      ));
+
+  String _bind(List<Object?> parameters, Object? value) {
+    parameters.add(value);
+    return '\
+    _assertOpen();
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_outbox ORDER BY occurred_at, event_id',
+    );
+    return List.unmodifiable(
+      rows.map((row) => _message(row.toColumnMap())),
+    );
+  }
+
+  @override
+  Future<PluginRevocationReplayResult?> replayDeadLetter(
+    PluginRevocationReplayRequest request,
+  ) async {
+    _assertOpen();
+    return _pool.runTx((tx) async {
+      await tx.execute(
+        r'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        parameters: [request.actionId],
+      );
+      final priorRows = await tx.execute(
+        r'SELECT * FROM alhambra_plugin_revocation_operator_action WHERE action_id = $1',
+        parameters: [request.actionId],
+      );
+      if (priorRows.isNotEmpty) {
+        final row = priorRows.first.toColumnMap();
+        if (row['target_event_id'] != request.targetEventId ||
+            row['actor_id'] != request.actorId ||
+            row['scope_id'] != request.scopeId ||
+            row['reason'] != request.reason ||
+            row['approval_reference'] != request.approvalReference) {
+          throw StateError(
+            'Operator action ID was already used with different replay details.',
+          );
+        }
+        final replayRows = await tx.execute(
+          r'SELECT * FROM alhambra_plugin_revocation_outbox WHERE event_id = $1',
+          parameters: [row['replay_event_id']],
+        );
+        if (replayRows.isEmpty) {
+          throw StateError('Recorded replay event is missing.');
+        }
+        final audit = PluginRevocationOperatorAction(
+          actionId: row['action_id'] as String,
+          actorId: row['actor_id'] as String,
+          scopeId: row['scope_id'] as String,
+          reason: row['reason'] as String,
+          approvalReference: row['approval_reference'] as String,
+          targetEventId: row['target_event_id'] as String,
+          replayEventId: row['replay_event_id'] as String,
+          replayGeneration: row['replay_generation'] as int,
+          occurredAt: _date(row['occurred_at']),
+        );
+        return PluginRevocationReplayResult(
+          audit,
+          _message(replayRows.first.toColumnMap()),
+        );
+      }
+      final sourceRows = await tx.execute(
+        r"SELECT * FROM alhambra_plugin_revocation_outbox "
+        r"WHERE event_id = $1 AND state = 'deadLetter' FOR UPDATE",
+        parameters: [request.targetEventId],
+      );
+      if (sourceRows.isEmpty) return null;
+      final source = sourceRows.first.toColumnMap();
+      if (source['scope_id'] != request.scopeId) {
+        throw StateError('Dead-letter event is outside the requested scope.');
+      }
+      final generationRows = await tx.execute(
+        r'SELECT COALESCE(MAX(replay_generation), 0) AS generation '
+        r'FROM alhambra_plugin_revocation_operator_action WHERE target_event_id = $1',
+        parameters: [request.targetEventId],
+      );
+      final generation =
+          (generationRows.first.toColumnMap()['generation'] as int) + 1;
+      final sourceEventId = source['event_id'] as String;
+      final replayEventId = '$sourceEventId:replay:$generation';
+      final replayKey = '${source['idempotency_key']}:replay:$generation';
+      final at = request.occurredAt.toUtc();
+      final inserted = await tx.execute(
+        r'''
+          INSERT INTO alhambra_plugin_revocation_outbox
+          (event_id, scope_id, idempotency_key, operation_id, plugin_id, provider_owner_id,
+           action, outcome, occurred_at, detail, state, attempts, next_attempt_at,
+           replay_of_event_id, replay_generation)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 0, $9, $11, $12)
+          RETURNING *
+        ''',
+        parameters: [
+          replayEventId, source['scope_id'], replayKey, source['operation_id'], source['plugin_id'],
+          source['provider_owner_id'], source['action'], source['outcome'],
+          at, source['detail'], sourceEventId, generation,
+        ],
+      );
+      await tx.execute(
+        r'''
+          INSERT INTO alhambra_plugin_revocation_operator_action
+          (action_id, actor_id, scope_id, reason, approval_reference, target_event_id,
+           replay_event_id, replay_generation, occurred_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ''',
+        parameters: [
+          request.actionId, request.actorId, request.scopeId, request.reason,
+          request.approvalReference, sourceEventId, replayEventId, generation, at,
+        ],
+      );
+      final audit = PluginRevocationOperatorAction(
+        actionId: request.actionId,
+        actorId: request.actorId,
+        scopeId: request.scopeId,
+        reason: request.reason,
+        approvalReference: request.approvalReference,
+        targetEventId: sourceEventId,
+        replayEventId: replayEventId,
+        replayGeneration: generation,
+        occurredAt: at,
+      );
+      return PluginRevocationReplayResult(
+        audit,
+        _message(inserted.first.toColumnMap()),
+      );
+    });
+  }
+
+  @override
+  Future<List<PluginRevocationOperatorAction>> readOperatorActions() async {
+    _assertOpen();
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_operator_action ORDER BY occurred_at, action_id',
+    );
+    return List.unmodifiable(rows.map((row) {
+      final value = row.toColumnMap();
+      return PluginRevocationOperatorAction(
+        actionId: value['action_id'] as String,
+        actorId: value['actor_id'] as String,
+        scopeId: value['scope_id'] as String,
+        reason: value['reason'] as String,
+        approvalReference: value['approval_reference'] as String,
+        targetEventId: value['target_event_id'] as String,
+        replayEventId: value['replay_event_id'] as String,
+        replayGeneration: value['replay_generation'] as int,
+        occurredAt: _date(value['occurred_at']),
+      );
+    }));
+  }
+
+  @override
+  Future<List<PluginRevocationOutboxMessage>> claim({
+    required String workerId,
+    required DateTime now,
+    required Duration leaseDuration,
+    required int limit,
+    required int maxAttempts,
+  }) async {
+    _assertOpen();
+    if (workerId.trim().isEmpty ||
+        leaseDuration <= Duration.zero ||
+        limit < 1 ||
+        maxAttempts < 1) {
+      throw ArgumentError('Invalid outbox claim parameters.');
+    }
+    final instant = now.toUtc();
+    return _pool.runTx((tx) async {
+      await tx.execute(
+        r'''
+          UPDATE alhambra_plugin_revocation_outbox
+          SET state = 'deadLetter', lease_owner = NULL, lease_token = NULL,
+              lease_until = NULL,
+              last_error_code = 'lease_expired_after_max_attempts'
+          WHERE state = 'leased' AND lease_until <= $1 AND attempts >= $2
+        ''',
+        parameters: [instant, maxAttempts],
+      );
+
+      final rows = await tx.execute(
+        r'''
+          WITH due AS (
+            SELECT event_id
+            FROM alhambra_plugin_revocation_outbox
+            WHERE attempts < $1 AND (
+              (state = 'pending' AND next_attempt_at <= $2) OR
+              (state = 'leased' AND lease_until <= $2)
+            )
+            ORDER BY occurred_at, event_id
+            LIMIT $3
+            FOR UPDATE SKIP LOCKED
+          )
+          UPDATE alhambra_plugin_revocation_outbox AS outbox
+          SET state = 'leased',
+              attempts = outbox.attempts + 1,
+              lease_owner = $4,
+              lease_token = $5 || ':' || outbox.event_id || ':' ||
+                (outbox.attempts + 1)::text || ':' || $6::text,
+              lease_until = $7
+          FROM due
+          WHERE outbox.event_id = due.event_id
+          RETURNING outbox.*
+        ''',
+        parameters: [
+          maxAttempts,
+          instant,
+          limit,
+          workerId,
+          workerId,
+          '${instant.microsecondsSinceEpoch}-${_random.nextInt(1 << 32)}',
+          instant.add(leaseDuration),
+        ],
+      );
+      final messages = rows
+          .map((row) => _message(row.toColumnMap()))
+          .toList(growable: false)
+        ..sort((a, b) => a.event.occurredAt.compareTo(b.event.occurredAt));
+      return List.unmodifiable(messages);
+    });
+  }
+
+  @override
+  Future<bool> markDelivered({
+    required String eventId,
+    required String leaseToken,
+    required DateTime deliveredAt,
+  }) async {
+    _assertOpen();
+    final result = await _pool.execute(
+      r'''
+        UPDATE alhambra_plugin_revocation_outbox
+        SET state = 'delivered', delivered_at = $1, lease_owner = NULL,
+            lease_token = NULL, lease_until = NULL, last_error_code = NULL
+        WHERE event_id = $2 AND state = 'leased' AND lease_token = $3
+      ''',
+      parameters: [deliveredAt.toUtc(), eventId, leaseToken],
+    );
+    return result.affectedRows == 1;
+  }
+
+  @override
+  Future<bool> reschedule({
+    required String eventId,
+    required String leaseToken,
+    required DateTime nextAttemptAt,
+    required String errorCode,
+    required int maxAttempts,
+  }) async {
+    _assertOpen();
+    final result = await _pool.execute(
+      r'''
+        UPDATE alhambra_plugin_revocation_outbox
+        SET state = CASE WHEN attempts >= $1 THEN 'deadLetter' ELSE 'pending' END,
+            next_attempt_at = $2, lease_owner = NULL, lease_token = NULL,
+            lease_until = NULL, last_error_code = $3
+        WHERE event_id = $4 AND state = 'leased' AND lease_token = $5
+      ''',
+      parameters: [
+        maxAttempts,
+        nextAttemptAt.toUtc(),
+        errorCode,
+        eventId,
+        leaseToken,
+      ],
+    );
+    return result.affectedRows == 1;
+  }
+
+  Future<PluginRevocationJournalEntry?> _readJournal(
+    String idempotencyKey,
+  ) async {
+    _assertOpen();
+    final rows = await _pool.execute(
+      r'SELECT * FROM alhambra_plugin_revocation_journal WHERE idempotency_key = $1',
+      parameters: [idempotencyKey],
+    );
+    return rows.isEmpty ? null : _journal(rows.first.toColumnMap());
+  }
+
+  Future<List<PluginRevocationJournalEntry>> _readAllJournal() async {
+    _assertOpen();
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_journal ORDER BY created_at, idempotency_key',
+    );
+    return List.unmodifiable(rows.map((row) => _journal(row.toColumnMap())));
+  }
+
+  Future<bool> _insertJournalIfAbsent(
+    PluginRevocationJournalEntry entry,
+  ) async {
+    _assertOpen();
+    final rows = await _pool.execute(
+      r'''
+        INSERT INTO alhambra_plugin_revocation_journal
+          (idempotency_key, scope_id, schema_version, operation_id, plugin_id,
+           provider_owner_id, action, status, revision, created_at,
+           updated_at, correlation_id, detail)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        RETURNING idempotency_key
+      ''',
+      parameters: [
+        entry.idempotencyKey,
+        entry.scopeId,
+        entry.schemaVersion,
+        entry.operationId,
+        entry.pluginId,
+        entry.providerOwnerId,
+        entry.action.name,
+        entry.status.name,
+        entry.revision,
+        entry.createdAt.toUtc(),
+        entry.updatedAt.toUtc(),
+        entry.correlationId,
+        entry.detail,
+      ],
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<bool> _compareAndSetJournal({
+    required String idempotencyKey,
+    required int expectedRevision,
+    required PluginRevocationJournalEntry replacement,
+  }) async {
+    _assertOpen();
+    if (replacement.idempotencyKey != idempotencyKey ||
+        replacement.revision != expectedRevision + 1) {
+      throw ArgumentError('Replacement must retain the key and increment revision once.');
+    }
+    final rows = await _pool.execute(
+      r'''
+        UPDATE alhambra_plugin_revocation_journal
+        SET scope_id = $1, schema_version = $2, operation_id = $3, plugin_id = $4,
+            provider_owner_id = $5, action = $6, status = $7, revision = $8,
+            created_at = $9, updated_at = $10, correlation_id = $11, detail = $12
+        WHERE idempotency_key = $13 AND revision = $14 AND scope_id = $1
+        RETURNING idempotency_key
+      ''',
+      parameters: [
+        replacement.scopeId,
+        replacement.schemaVersion,
+        replacement.operationId,
+        replacement.pluginId,
+        replacement.providerOwnerId,
+        replacement.action.name,
+        replacement.status.name,
+        replacement.revision,
+        replacement.createdAt.toUtc(),
+        replacement.updatedAt.toUtc(),
+        replacement.correlationId,
+        replacement.detail,
+        idempotencyKey,
+        expectedRevision,
+      ],
+    );
+    return rows.isNotEmpty;
+  }
+}
+
+final class _PostgresPluginRevocationJournalStore
+    implements PluginRevocationJournalStore {
+  final PostgresPluginRevocationStore _store;
+  _PostgresPluginRevocationJournalStore(this._store);
+
+  @override
+  Future<PluginRevocationJournalEntry?> read(String idempotencyKey) =>
+      _store._readJournal(idempotencyKey);
+
+  @override
+  Future<List<PluginRevocationJournalEntry>> readAll() =>
+      _store._readAllJournal();
+
+  @override
+  Future<bool> insertIfAbsent(PluginRevocationJournalEntry entry) =>
+      _store._insertJournalIfAbsent(entry);
+
+  @override
+  Future<bool> compareAndSet({
+    required String idempotencyKey,
+    required int expectedRevision,
+    required PluginRevocationJournalEntry replacement,
+  }) =>
+      _store._compareAndSetJournal(
+        idempotencyKey: idempotencyKey,
+        expectedRevision: expectedRevision,
+        replacement: replacement,
+      );
+}
+${parameters.length};
+  }
+
+  @override
+  Future<PluginRevocationScopedPage<PluginRevocationJournalEntry>>
+      queryJournalPage(PluginRevocationJournalPageQuery query) async {
+    _assertOpen();
+    final filters = query.statuses.map((value) => value.name).toList()..sort();
+    final position = query.cursor == null
+        ? null
+        : _requiredCursorCodec.decode(
+            token: query.cursor!,
+            family: 'journal',
+            query: query,
+            filters: filters,
+          );
+    final snapshotAt = position?.snapshotAt ?? DateTime.now().toUtc();
+    final parameters = <Object?>[];
+    final where = <String>[
+      'scope_id = ${_bind(parameters, query.scopeId)}',
+      'updated_at <= ${_bind(parameters, snapshotAt)}',
+    ];
+    if (query.fromInclusive != null) {
+      where.add('updated_at >= ${_bind(parameters, query.fromInclusive!.toUtc())}');
+    }
+    if (query.toExclusive != null) {
+      where.add('updated_at < ${_bind(parameters, query.toExclusive!.toUtc())}');
+    }
+    if (filters.isNotEmpty) {
+      final placeholders = filters.map((value) => _bind(parameters, value)).join(', ');
+      where.add('status IN ($placeholders)');
+    }
+    if (position != null) {
+      final before = _bind(parameters, position.lastAt);
+      final equal = _bind(parameters, position.lastAt);
+      final id = _bind(parameters, position.lastId);
+      where.add('(updated_at < $before OR (updated_at = $equal AND idempotency_key < $id))');
+    }
+    final limit = _bind(parameters, query.pageSize + 1);
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_journal WHERE ${where.join(' AND ')} '
+      'ORDER BY updated_at DESC, idempotency_key DESC LIMIT $limit',
+      parameters: parameters,
+    );
+    final hasMore = rows.length > query.pageSize;
+    final selected = rows.take(query.pageSize).toList(growable: false);
+    final entries = selected
+        .map((row) => _journal(row.toColumnMap()))
+        .toList(growable: false);
+    final nextCursor = hasMore && entries.isNotEmpty
+        ? _requiredCursorCodec.encode(
+            family: 'journal',
+            query: query,
+            filters: filters,
+            snapshotAt: snapshotAt,
+            lastAt: entries.last.updatedAt,
+            lastId: entries.last.idempotencyKey,
+          )
+        : null;
+    return PluginRevocationScopedPage(
+      items: entries,
+      nextCursor: nextCursor,
+      snapshotAt: snapshotAt,
+    );
+  }
+
+  @override
+  Future<PluginRevocationScopedPage<PluginRevocationOutboxMessage>>
+      queryOutboxPage(PluginRevocationOutboxPageQuery query) async {
+    _assertOpen();
+    final filters = query.states.map((value) => value.name).toList()..sort();
+    final position = query.cursor == null
+        ? null
+        : _requiredCursorCodec.decode(
+            token: query.cursor!,
+            family: 'outbox',
+            query: query,
+            filters: filters,
+          );
+    final snapshotAt = position?.snapshotAt ?? DateTime.now().toUtc();
+    final parameters = <Object?>[];
+    final where = <String>[
+      'scope_id = ${_bind(parameters, query.scopeId)}',
+      'occurred_at <= ${_bind(parameters, snapshotAt)}',
+    ];
+    if (query.fromInclusive != null) {
+      where.add('occurred_at >= ${_bind(parameters, query.fromInclusive!.toUtc())}');
+    }
+    if (query.toExclusive != null) {
+      where.add('occurred_at < ${_bind(parameters, query.toExclusive!.toUtc())}');
+    }
+    if (filters.isNotEmpty) {
+      final placeholders = filters.map((value) => _bind(parameters, value)).join(', ');
+      where.add('state IN ($placeholders)');
+    }
+    if (position != null) {
+      final before = _bind(parameters, position.lastAt);
+      final equal = _bind(parameters, position.lastAt);
+      final id = _bind(parameters, position.lastId);
+      where.add('(occurred_at < $before OR (occurred_at = $equal AND event_id < $id))');
+    }
+    final limit = _bind(parameters, query.pageSize + 1);
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_outbox WHERE ${where.join(' AND ')} '
+      'ORDER BY occurred_at DESC, event_id DESC LIMIT $limit',
+      parameters: parameters,
+    );
+    final hasMore = rows.length > query.pageSize;
+    final selected = rows.take(query.pageSize).toList(growable: false);
+    final messages = selected
+        .map((row) => _message(row.toColumnMap()))
+        .toList(growable: false);
+    final nextCursor = hasMore && messages.isNotEmpty
+        ? _requiredCursorCodec.encode(
+            family: 'outbox',
+            query: query,
+            filters: filters,
+            snapshotAt: snapshotAt,
+            lastAt: messages.last.event.occurredAt,
+            lastId: messages.last.event.eventId,
+          )
+        : null;
+    return PluginRevocationScopedPage(
+      items: messages,
+      nextCursor: nextCursor,
+      snapshotAt: snapshotAt,
+    );
+  }
+
+  @override
+  Future<PluginRevocationScopedPage<PluginRevocationOperatorAction>>
+      queryOperatorActionPage(
+    PluginRevocationOperatorActionPageQuery query,
+  ) async {
+    _assertOpen();
+    const filters = <String>[];
+    final position = query.cursor == null
+        ? null
+        : _requiredCursorCodec.decode(
+            token: query.cursor!,
+            family: 'operator-action',
+            query: query,
+            filters: filters,
+          );
+    final snapshotAt = position?.snapshotAt ?? DateTime.now().toUtc();
+    final parameters = <Object?>[];
+    final where = <String>[
+      'scope_id = ${_bind(parameters, query.scopeId)}',
+      'occurred_at <= ${_bind(parameters, snapshotAt)}',
+    ];
+    if (query.fromInclusive != null) {
+      where.add('occurred_at >= ${_bind(parameters, query.fromInclusive!.toUtc())}');
+    }
+    if (query.toExclusive != null) {
+      where.add('occurred_at < ${_bind(parameters, query.toExclusive!.toUtc())}');
+    }
+    if (position != null) {
+      final before = _bind(parameters, position.lastAt);
+      final equal = _bind(parameters, position.lastAt);
+      final id = _bind(parameters, position.lastId);
+      where.add('(occurred_at < $before OR (occurred_at = $equal AND action_id < $id))');
+    }
+    final limit = _bind(parameters, query.pageSize + 1);
+    final rows = await _pool.execute(
+      'SELECT * FROM alhambra_plugin_revocation_operator_action WHERE ${where.join(' AND ')} '
+      'ORDER BY occurred_at DESC, action_id DESC LIMIT $limit',
+      parameters: parameters,
+    );
+    final hasMore = rows.length > query.pageSize;
+    final selected = rows.take(query.pageSize).toList(growable: false);
+    final actions = selected.map((row) {
+      final value = row.toColumnMap();
+      return PluginRevocationOperatorAction(
+        actionId: value['action_id']! as String,
+        actorId: value['actor_id']! as String,
+        scopeId: value['scope_id']! as String,
+        reason: value['reason']! as String,
+        approvalReference: value['approval_reference']! as String,
+        targetEventId: value['target_event_id']! as String,
+        replayEventId: value['replay_event_id']! as String,
+        replayGeneration: value['replay_generation']! as int,
+        occurredAt: _date(value['occurred_at']),
+      );
+    }).toList(growable: false);
+    final nextCursor = hasMore && actions.isNotEmpty
+        ? _requiredCursorCodec.encode(
+            family: 'operator-action',
+            query: query,
+            filters: filters,
+            snapshotAt: snapshotAt,
+            lastAt: actions.last.occurredAt,
+            lastId: actions.last.actionId,
+          )
+        : null;
+    return PluginRevocationScopedPage(
+      items: actions,
+      nextCursor: nextCursor,
+      snapshotAt: snapshotAt,
+    );
   }
 
   @override
