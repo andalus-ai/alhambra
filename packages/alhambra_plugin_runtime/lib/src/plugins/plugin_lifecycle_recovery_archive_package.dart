@@ -438,7 +438,7 @@ final class PluginRecoveryArchivePackageImporter {
     PluginRecoveryArchivePackageImportPlan plan,
   ) async {
     if (!plan.canImport) {
-      throw StateError('Package import is blocked: \${plan.disposition.name}.');
+      throw StateError('Package import is blocked: ${plan.disposition.name}.');
     }
     final fresh = await inspect(plan.archivePackage);
     final approvedIds = [...plan.validJobIds, ...plan.alreadyPresentJobIds];
