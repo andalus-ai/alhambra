@@ -127,6 +127,26 @@ void main() {
   });
 
   group('PluginLifecycleRecoveryJobArchiveMigrationPlanner', () {
+    test('current snapshot codec emits archive format v2', () {
+      expect(
+        const PluginLifecycleRecoveryJobSnapshotCodec().encode(_job()),
+        contains('"formatVersion":2'),
+      );
+    });
+
+    test('current verifier rejects v1 until it is explicitly migrated', () async {
+      final source = _Archive()..records['job-1'] = _record(formatVersion: 1);
+      final report = await PluginLifecycleRecoveryJobArchiveVerifier(
+        archive: source,
+        digestProvider: _DigestProvider(),
+      ).verify('job-1');
+
+      expect(
+        report.disposition,
+        PluginRecoveryArchiveVerificationDisposition.unsupportedFormat,
+      );
+    });
+
     test('previews migration without changing source archive', () async {
       final source = _Archive()..records['job-1'] = _record();
       final plan = await PluginLifecycleRecoveryJobArchiveMigrationPlanner(
