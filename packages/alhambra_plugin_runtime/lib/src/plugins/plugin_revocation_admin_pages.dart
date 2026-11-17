@@ -65,7 +65,7 @@ final class PluginRevocationAdminPageService {
         query.fromInclusive?.toUtc().toIso8601String() ?? '',
         query.toExclusive?.toUtc().toIso8601String() ?? '',
         query.pageSize.toString(),
-        ...query.statuses.map((value) => value.name),
+        ..._sortedNames(query.statuses.map((value) => value.name)),
       ]),
     );
     final store = _requireStore();
@@ -94,7 +94,7 @@ final class PluginRevocationAdminPageService {
         query.fromInclusive?.toUtc().toIso8601String() ?? '',
         query.toExclusive?.toUtc().toIso8601String() ?? '',
         query.pageSize.toString(),
-        ...query.states.map((value) => value.name),
+        ..._sortedNames(query.states.map((value) => value.name)),
       ]),
     );
     final store = _requireStore();
@@ -191,3 +191,6 @@ final class PluginRevocationScopedQueryUnavailableException
   String toString() =>
       'Database-native scoped revocation queries are not configured.';
 }
+
+List<String> _sortedNames(Iterable<String> values) =>
+    values.toList()..sort();
