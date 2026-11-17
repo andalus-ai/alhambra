@@ -166,3 +166,13 @@ Identical retries are no-ops; conflicting payloads or terminal outcomes throw
 Queries use indexed time and operation-ID sort keys with deterministic keyset
 pagination. The adapter does not own or close the supplied database.
 
+
+
+Queryable audit stores also expose `inspectRecovery(operationId)`. A start
+record without a terminal record is reported as `outcomeUnknown`; the host
+must reconcile the underlying storage before considering replay. Decode or
+database errors surface as inspection failures. The adapter test suite applies
+the shared `defineCompositionLifecycleStorageMaintenanceAuditStoreContractTests`
+behavioral contract in addition to its SQLite migration and persistence tests.
+The isolate worker does not yet expose the audit-store query API; use the
+dedicated adapter with a host-owned connection to the same database.
