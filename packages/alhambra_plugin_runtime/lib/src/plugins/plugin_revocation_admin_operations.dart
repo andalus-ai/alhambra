@@ -45,6 +45,11 @@ final class PluginRevocationOperationsAccessAudit {
   final PluginRevocationOperationsAccessDecision decision;
   final String? denialCode;
   final DateTime occurredAt;
+  /// Optional operation metadata for paginated administrative reads.
+  final String? resource;
+  final int? pageSize;
+  final bool? continuationRequested;
+  final String? queryFingerprint;
 
   PluginRevocationOperationsAccessAudit({
     required this.actorId,
@@ -52,9 +57,19 @@ final class PluginRevocationOperationsAccessAudit {
     required this.decision,
     required this.occurredAt,
     this.denialCode,
+    this.resource,
+    this.pageSize,
+    this.continuationRequested,
+    this.queryFingerprint,
   }) {
     if (actorId.trim().isEmpty || scopeId.trim().isEmpty) {
       throw ArgumentError('Access audit actor and scope are required.');
+    }
+    if (pageSize != null && (pageSize! < 1 || pageSize! > 200)) {
+      throw ArgumentError.value(pageSize, 'pageSize');
+    }
+    if (queryFingerprint != null && queryFingerprint!.trim().isEmpty) {
+      throw ArgumentError.value(queryFingerprint, 'queryFingerprint');
     }
     if (decision == PluginRevocationOperationsAccessDecision.allowed &&
         denialCode != null) {

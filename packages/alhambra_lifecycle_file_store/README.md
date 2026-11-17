@@ -147,3 +147,12 @@ conflicting terminal outcomes. It ignores an unterminated trailing fragment on
 read and repairs that fragment before the next append. It is single-process:
 use an external lock if multiple processes can write the same audit file.
 
+
+
+Queryable audit stores also expose `inspectRecovery(operationId)`. A start
+record without a terminal record is reported as `outcomeUnknown`; the host
+must reconcile the underlying storage before considering replay. Malformed
+newline-terminated records remain corruption and surface as query/inspection
+errors. The adapter test suite applies the shared
+`defineCompositionLifecycleStorageMaintenanceAuditStoreContractTests`
+behavioral contract in addition to its JSONL-specific interrupted-tail tests.
