@@ -193,6 +193,19 @@ void main() {
       );
       expect((await verifier.verify(modified)).disposition,
           PluginRecoveryArchivePackageAuthenticityDisposition.invalidSignature);
+
+      final changedKey = PluginRecoveryArchiveSignedPackage(
+        archivePackage: signed.archivePackage,
+        signature: PluginRecoveryArchivePackageSignature(
+          version: signed.signature.version,
+          algorithm: signed.signature.algorithm,
+          keyId: 'different-key',
+          value: signed.signature.value,
+        ),
+      );
+      expect((await verifier.verify(changedKey)).disposition,
+          PluginRecoveryArchivePackageAuthenticityDisposition.invalidSignature);
+
     });
 
     test('fails closed for unsupported signature versions', () async {
