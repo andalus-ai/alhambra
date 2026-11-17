@@ -140,7 +140,12 @@ final class PluginRecoveryArchivePackageSigningService {
     final signature = await signer.sign(
       algorithm: algorithm,
       keyId: keyId,
-      canonicalPayload: codec.encode(archivePackage),
+      canonicalPayload: _signingPayload(
+        codec: codec,
+        archivePackage: archivePackage,
+        algorithm: algorithm,
+        keyId: keyId,
+      ),
     );
     return PluginRecoveryArchiveSignedPackage(
       archivePackage: archivePackage,
@@ -203,7 +208,12 @@ final class PluginRecoveryArchivePackageAuthenticityVerifier {
     final valid = await signatureVerifier.verify(
       algorithm: signature.algorithm,
       keyId: signature.keyId,
-      canonicalPayload: codec.encode(package),
+      canonicalPayload: _signingPayload(
+        codec: codec,
+        archivePackage: package,
+        algorithm: signature.algorithm,
+        keyId: signature.keyId,
+      ),
       signature: signature.value,
     );
     return _report(
@@ -354,7 +364,14 @@ final class PluginRecoveryArchiveAuthenticatedPackageImporter {
       );
     }
     final packagePlan = plan.packagePlan;
-    if (packagePlan == null || !plan.canImport) {
+    if (packagePlan == null ||
+        !plan.canImport ||
+        const PluginRecoveryArchivePackageCodec().encode(
+              packagePlan.archivePackage,
+            ) !=
+            const PluginRecoveryArchivePackageCodec().encode(
+              plan.signedPackage.archivePackage,
+            )) {
       throw StateError('Authenticated archive import is blocked by its preview plan.');
     }
     final importReport = await packageImporter.importPackage(packagePlan);
@@ -364,3 +381,16 @@ final class PluginRecoveryArchiveAuthenticatedPackageImporter {
     );
   }
 }
+
+
+String _signingPayload({
+  required PluginRecoveryArchivePackageCodec codec,
+  required PluginRecoveryArchivePackage archivePackage,
+  required String algorithm,
+  required String keyId,
+}) => jsonEncode({
+  'domain': 'alhambra.recovery-archive-package.signature.v1',
+  'algorithm': algorithm,
+  'keyId': keyId,
+  'package': jsonDecode(codec.encode(archivePackage)),
+});
