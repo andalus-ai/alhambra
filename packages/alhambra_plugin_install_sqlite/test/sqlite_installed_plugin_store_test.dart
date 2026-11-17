@@ -132,13 +132,14 @@ void main() {
       // Recovery takeover advances mutation authority but preserves operation
       // ownership, allowing compensation for the interrupted installation.
       await store.advanceFence(operationId: 'install-owner', fencingToken: 2);
+      await store.advanceFence(operationId: 'different-operation', fencingToken: 1);
       expect(
         await store.removeIfMatchesFenced(
           candidate,
           operationId: 'different-operation',
           fencingToken: 1,
         ),
-        throwsStateError,
+        isFalse,
       );
       expect(
         await store.removeIfMatchesFenced(
