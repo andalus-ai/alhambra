@@ -64,3 +64,4 @@ Update this index whenever an architecture or developer document is added.
 - [Local plugin installation filesystem package](../packages/alhambra_plugin_install_filesystem/README.md) — adapter usage and operational constraints.
 
 - [Recovery archive package authenticity](RECOVERY_ARCHIVE_PACKAGE_AUTHENTICITY.md) — host-owned detached signatures, trust policy, and authenticated import.
+- [Recovery provenance and key governance](RECOVERY_PROVENANCE_AND_KEY_GOVERNANCE.md) — append-only archive operation history, chain verification, and signing-key lifecycle metadata.
