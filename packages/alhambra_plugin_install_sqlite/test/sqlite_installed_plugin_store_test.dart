@@ -221,6 +221,47 @@ void main() {
       expect(outcomes.where((created) => !created), hasLength(1));
     });
 
+
+    test('coexists with journal and lease adapters in one database', () async {
+      final directory =
+          await Directory.systemTemp.createTemp('alhambra-installed-shared-db-');
+      final database = '${directory.path}/shared.sqlite';
+      final journal = SqlitePluginInstallJournal(database);
+      final leases = SqlitePluginInstallOperationLeaseStore(database);
+      final store = SqliteInstalledPluginStore(database);
+      addTearDown(() async {
+        store.close();
+        leases.close();
+        journal.close();
+        await directory.delete(recursive: true);
+      });
+
+      final lease = await leases.acquire(
+        operationId: 'shared-operation',
+        ownerId: 'worker',
+        now: DateTime.utc(2026, 11, 17),
+        leaseDuration: const Duration(minutes: 1),
+      );
+      expect(lease, isNotNull);
+      await journal.advanceFence(
+        operationId: 'shared-operation',
+        fencingToken: lease!.fencingToken,
+      );
+      await store.advanceFence(
+        operationId: 'shared-operation',
+        fencingToken: lease.fencingToken,
+      );
+      expect(
+        await store.createIfAbsentFenced(
+          record(),
+          operationId: 'shared-operation',
+          fencingToken: lease.fencingToken,
+        ),
+        isTrue,
+      );
+      expect(await store.find('example.demo'), isNotNull);
+    });
+
     test('fencing tokens survive store reopen', () async {
       final directory =
           await Directory.systemTemp.createTemp('alhambra-installed-fence-');
