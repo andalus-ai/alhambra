@@ -91,6 +91,20 @@ void main() {
     });
 
     test('detects a broken predecessor link', () async {
+      final seedStore = InMemoryPluginRecoveryProvenanceStore();
+      final first = await PluginRecoveryProvenanceAppender(
+        store: seedStore,
+        digestProvider: _Digest(),
+        digestAlgorithm: 'test-digest',
+      ).append(
+        eventId: 'event-1',
+        action: PluginRecoveryProvenanceAction.exported,
+        occurredAt: DateTime.utc(2026, 1, 1),
+        sourceDeploymentId: 'deployment-a',
+        packageId: 'package-1',
+        packageDigestAlgorithm: 'sha256',
+        packageDigest: 'package-digest',
+      );
       final invalid = PluginRecoveryProvenanceEvent(
         eventId: 'event-2',
         sequence: 2,
@@ -105,11 +119,11 @@ void main() {
         eventDigest: 'unused',
       );
       final report = await PluginRecoveryProvenanceVerifier(
-        store: _FixedProvenanceStore([invalid]),
+        store: _FixedProvenanceStore([first, invalid]),
         digestProvider: _Digest(),
       ).verify();
 
-      expect(report.disposition, PluginRecoveryProvenanceDisposition.sequenceGap);
+      expect(report.disposition, PluginRecoveryProvenanceDisposition.previousDigestMismatch);
       expect(report.failingEventId, 'event-2');
     });
 
