@@ -108,3 +108,32 @@ The versioned `CompositionLifecycleStorageMaintenanceAuditJsonCodec` is shared
 by the file and SQLite adapters. Maintenance audit metrics must contain
 JSON-compatible values; unsupported values fail encoding rather than being
 silently stringified. Concrete adapters are optional and host-owned.
+
+
+### Inspecting one operation's recovery state
+
+Queryable audit stores expose a bounded convenience inspection:
+
+```dart
+final recovery = await audit.inspectRecovery('maintenance-2026-11-17');
+
+switch (recovery.state) {
+  case CompositionLifecycleStorageMaintenanceRecoveryState.outcomeUnknown:
+    // Reconcile the backend before considering any replay.
+    break;
+  case CompositionLifecycleStorageMaintenanceRecoveryState.completed:
+    // recovery.terminalStatus contains the recorded terminal status.
+    break;
+  default:
+    // notFound, incompleteHistory, or conflictingHistory need host handling.
+    break;
+}
+```
+
+The inspection reads at most three records for the operation. Malformed
+persisted records surface as an inspection error; they are not discarded or
+interpreted as permission to retry. The shared
+`alhambra_lifecycle_store_test` package provides
+`defineCompositionLifecycleStorageMaintenanceAuditStoreContractTests` so
+adapter suites can verify the same append, conflict, filtering, cursor, and
+recovery semantics.
