@@ -90,6 +90,39 @@ void main() {
       expect(report.verifiedEvents, 2);
     });
 
+    test('rejects a concurrent append based on a stale chain head', () async {
+      final store = InMemoryPluginRecoveryProvenanceStore();
+      final appender = PluginRecoveryProvenanceAppender(
+        store: store,
+        digestProvider: _Digest(),
+        digestAlgorithm: 'test-digest',
+      );
+
+      Future<bool> attempt(String eventId) async {
+        try {
+          await appender.append(
+            eventId: eventId,
+            action: PluginRecoveryProvenanceAction.exported,
+            occurredAt: DateTime.utc(2026, 1, 1),
+            sourceDeploymentId: 'deployment-a',
+            packageId: 'package-1',
+            packageDigestAlgorithm: 'sha256',
+            packageDigest: 'package-digest',
+          );
+          return true;
+        } on StateError {
+          return false;
+        }
+      }
+
+      final outcomes = await Future.wait([
+        attempt('concurrent-1'),
+        attempt('concurrent-2'),
+      ]);
+      expect(outcomes.where((success) => success), hasLength(1));
+      expect(await store.readAll(), hasLength(1));
+    });
+
     test('detects a broken predecessor link', () async {
       final seedStore = InMemoryPluginRecoveryProvenanceStore();
       final first = await PluginRecoveryProvenanceAppender(
