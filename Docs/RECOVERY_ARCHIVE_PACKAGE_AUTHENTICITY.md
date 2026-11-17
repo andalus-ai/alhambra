@@ -13,8 +13,9 @@ cryptography providers, private keys, or a trust store in Alhambra.
    `PluginRecoveryArchivePackageExporter`.
 2. Call `PluginRecoveryArchivePackageSigningService.sign()` with an explicit
    signature algorithm and key identifier.
-3. The host signer signs the deterministic full package encoding, including
-   manifest, records, and package digest.
+3. The host signer signs a domain-separated payload binding the signature
+   algorithm and key identifier to the deterministic full package encoding,
+   including manifest, records, and package digest.
 4. Serialize the signed envelope with
    `PluginRecoveryArchiveSignedPackageCodec`.
 
