@@ -112,3 +112,22 @@ final persistence = PostgresPluginRevocationStore.fromUrl(
 ```
 
 The secret must contain at least 32 bytes, be shared across instances serving the same cursor domain, and survive restarts. Keep it in a secret manager. HMAC-SHA256 cursors bind query family, scope, normalized filters, time range and page size; mismatches and tampering fail closed. The captured snapshot is an ordering-timestamp ceiling, not a strict insertion or serializable cross-table snapshot. Late-arriving backdated rows may become visible during traversal.
+
+
+## Administrative access audit persistence
+
+`PostgresPluginRevocationAccessAuditStore` implements the runtime access-audit append and scoped inspection contracts. Pass a caller-owned `Pool`; call `migrate()` using a deployment/migration role before using the adapter in the admin service.
+
+```dart
+final auditPool = Pool.withUrl(auditDatabaseUrl);
+final accessAudits = PostgresPluginRevocationAccessAuditStore(auditPool);
+await accessAudits.migrate();
+
+final adminPages = PluginRevocationAdminPageService(
+  authorizer: hostAuthorizer,
+  accessAuditStore: accessAudits,
+  queryStore: revocationStore,
+);
+```
+
+Each append runs in a database transaction. Scoped reads filter by `scope_id` in SQL, order newest-first with a stable audit-id tie-breaker, and support a half-open time range plus a bounded limit (1–500). The adapter does not own or close the supplied pool. Use a dedicated least-privilege audit role where operationally appropriate, and define retention, backup and access-review policies for the audit table.

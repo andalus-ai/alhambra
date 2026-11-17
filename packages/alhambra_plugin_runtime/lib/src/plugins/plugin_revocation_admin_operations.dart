@@ -88,6 +88,18 @@ abstract interface class PluginRevocationOperationsAccessAuditStore {
   Future<void> append(PluginRevocationOperationsAccessAudit audit);
 }
 
+/// Optional read contract for durable administrative audit inspection.
+/// Implementations must return records in descending occurrence order and
+/// enforce the requested scope in the storage query.
+abstract interface class PluginRevocationOperationsAccessAuditInspectionStore {
+  Future<List<PluginRevocationOperationsAccessAudit>> readAccessAudits({
+    required String scopeId,
+    int limit = 100,
+    DateTime? fromInclusive,
+    DateTime? toExclusive,
+  });
+}
+
 final class InMemoryPluginRevocationOperationsAccessAuditStore
     implements PluginRevocationOperationsAccessAuditStore {
   final List<PluginRevocationOperationsAccessAudit> _records = [];

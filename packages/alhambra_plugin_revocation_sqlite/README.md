@@ -83,3 +83,24 @@ final persistence = SqlitePluginRevocationStore(
 ```
 
 The same secret must be shared by all instances serving the same cursor domain and preserved across restarts. Store it in a secret manager; never derive it from a database URL or tenant ID. Without a configured secret, paged queries fail closed. Cursors are HMAC-SHA256 authenticated and bound to query family, scope, filters, time range, and page size. The first page captures an ordering-timestamp ceiling, not a strict insertion or cross-table repeatable-read snapshot. Late-arriving rows with backdated timestamps may become visible during traversal.
+
+
+## Administrative access audit persistence
+
+`SqlitePluginRevocationAccessAuditStore` implements the runtime access-audit append and scoped inspection contracts. It accepts a caller-owned `sqlite3.Database`; call `migrate()` before passing it to `PluginRevocationAdminPageService` or `PluginRevocationAdminOperationsService`.
+
+```dart
+import 'package:sqlite3/sqlite3.dart' as sqlite3;
+
+final auditDb = sqlite3.open('/var/lib/app/revocation-admin-audit.sqlite');
+final accessAudits = SqlitePluginRevocationAccessAuditStore(auditDb)
+  ..migrate();
+
+final adminPages = PluginRevocationAdminPageService(
+  authorizer: hostAuthorizer,
+  accessAuditStore: accessAudits,
+  queryStore: revocationStore,
+);
+```
+
+Audit writes use `BEGIN IMMEDIATE` and commit before the service begins the protected inspection query. Reads are scope-filtered in SQL, ordered newest-first with a stable audit-id tie-breaker, and support a half-open time range plus a bounded limit (1–500). The adapter does not own or close the supplied database. Keep this database file and its backups under the same access controls as other security audit data; consider a separate file from the operational revocation store when independent retention or access controls are required.
