@@ -164,3 +164,231 @@ CompositionLifecycleEvent _event(
       nodeIds: const ['command:contract'],
       ownerIds: ownerIds,
     );
+
+
+typedef MaintenanceAuditStoreFactory =
+    Future<CompositionLifecycleStorageMaintenanceAuditStore> Function();
+typedef MaintenanceAuditStoreDisposer =
+    Future<void> Function(CompositionLifecycleStorageMaintenanceAuditStore store);
+
+/// Defines the shared behavioral contract for durable maintenance audit stores.
+///
+/// Adapter-specific file recovery, SQLite migrations, durability guarantees,
+/// and process coordination remain in each adapter's own test suite.
+void defineCompositionLifecycleStorageMaintenanceAuditStoreContractTests({
+  required String name,
+  required MaintenanceAuditStoreFactory createStore,
+  required MaintenanceAuditStoreDisposer disposeStore,
+}) {
+  group('$name maintenance audit contract', () {
+    late CompositionLifecycleStorageMaintenanceAuditStore store;
+    final requestedAt = DateTime.utc(2026, 11, 17, 1);
+    final startedAt = DateTime.utc(2026, 11, 17, 1, 0, 1);
+
+    CompositionLifecycleStorageMaintenanceOperationRecord record(
+      String id,
+      CompositionLifecycleStorageMaintenanceOperationStatus status, {
+      DateTime? completedAt,
+      int maxEvents = 100,
+    }) =>
+        CompositionLifecycleStorageMaintenanceOperationRecord(
+          operationId: id,
+          status: status,
+          requestedAt: requestedAt,
+          startedAt: startedAt,
+          completedAt: completedAt,
+          request: CompositionLifecycleStorageMaintenanceRequest(
+            maxEvents: maxEvents,
+          ),
+          result: status ==
+                  CompositionLifecycleStorageMaintenanceOperationStatus.started
+              ? null
+              : CompositionLifecycleStorageMaintenanceResult(
+                  startedAt: startedAt,
+                  completedAt: completedAt!,
+                  recordsRemoved: 2,
+                  checkpointRequested: false,
+                ),
+        );
+
+    setUp(() async {
+      store = await createStore();
+    });
+
+    tearDown(() async {
+      await disposeStore(store);
+    });
+
+    test('supports idempotent start and terminal appends', () async {
+      final start = record(
+        'contract-operation',
+        CompositionLifecycleStorageMaintenanceOperationStatus.started,
+      );
+      final terminal = record(
+        'contract-operation',
+        CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
+        completedAt: startedAt.add(const Duration(seconds: 1)),
+      );
+      await store.append(start);
+      await store.append(start);
+      await store.append(terminal);
+      await store.append(terminal);
+
+      final records = await store.query(
+        CompositionLifecycleStorageMaintenanceAuditQuery(
+          operationId: 'contract-operation',
+        ),
+      );
+      expect(records.map((value) => value.status), [
+        CompositionLifecycleStorageMaintenanceOperationStatus.started,
+        CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
+      ]);
+    });
+
+    test('rejects conflicting identity reuse and a second terminal result', () async {
+      await store.append(record(
+        'conflict-operation',
+        CompositionLifecycleStorageMaintenanceOperationStatus.started,
+      ));
+      await expectLater(
+        store.append(record(
+          'conflict-operation',
+          CompositionLifecycleStorageMaintenanceOperationStatus.started,
+          maxEvents: 200,
+        )),
+        throwsA(isA<CompositionLifecycleStorageMaintenanceAuditIdentityConflictException>()),
+      );
+      await store.append(record(
+        'conflict-operation',
+        CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
+        completedAt: startedAt.add(const Duration(seconds: 1)),
+      ));
+      await expectLater(
+        store.append(record(
+          'conflict-operation',
+          CompositionLifecycleStorageMaintenanceOperationStatus.failed,
+          completedAt: startedAt.add(const Duration(seconds: 2)),
+        )),
+        throwsA(isA<CompositionLifecycleStorageMaintenanceAuditIdentityConflictException>()),
+      );
+    });
+
+    test('applies operation, status and inclusive time filters before limit', () async {
+      await store.append(record(
+        'filter-a',
+        CompositionLifecycleStorageMaintenanceOperationStatus.started,
+      ));
+      await store.append(record(
+        'filter-b',
+        CompositionLifecycleStorageMaintenanceOperationStatus.started,
+      ));
+      await store.append(record(
+        'filter-b',
+        CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
+        completedAt: startedAt.add(const Duration(seconds: 1)),
+      ));
+
+      final page = await store.query(
+        CompositionLifecycleStorageMaintenanceAuditQuery(
+          operationId: 'filter-b',
+          status: CompositionLifecycleStorageMaintenanceOperationStatus.started,
+          from: startedAt,
+          to: startedAt,
+          limit: 1,
+        ),
+      );
+      expect(page.map((value) => value.operationId), ['filter-b']);
+    });
+
+    test('uses an exclusive stable cursor for equal timestamps', () async {
+      for (final id in ['d', 'b', 'a', 'c']) {
+        await store.append(record(
+          id,
+          CompositionLifecycleStorageMaintenanceOperationStatus.started,
+        ));
+      }
+      final first = await store.query(
+        CompositionLifecycleStorageMaintenanceAuditQuery(limit: 2),
+      );
+      expect(first.map((value) => value.operationId), ['a', 'b']);
+      final next = await store.query(
+        CompositionLifecycleStorageMaintenanceAuditQuery(
+          after: CompositionLifecycleStorageMaintenanceAuditCursor(
+            startedAt: startedAt,
+            operationId: first.last.operationId,
+            status: first.last.status,
+          ),
+          limit: 2,
+        ),
+      );
+      expect(next.map((value) => value.operationId), ['c', 'd']);
+    });
+
+    test('classifies unknown and completed outcomes conservatively', () async {
+      await store.append(record(
+        'unknown-operation',
+        CompositionLifecycleStorageMaintenanceOperationStatus.started,
+      ));
+      final unknown = await store.inspectRecovery('unknown-operation');
+      expect(
+        unknown.state,
+        CompositionLifecycleStorageMaintenanceRecoveryState.outcomeUnknown,
+      );
+      expect(unknown.requiresReconciliation, isTrue);
+      expect(unknown.automaticRetryAllowed, isFalse);
+
+      await store.append(record(
+        'completed-operation',
+        CompositionLifecycleStorageMaintenanceOperationStatus.started,
+      ));
+      await store.append(record(
+        'completed-operation',
+        CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
+        completedAt: startedAt.add(const Duration(seconds: 1)),
+      ));
+      final completed = await store.inspectRecovery('completed-operation');
+      expect(
+        completed.state,
+        CompositionLifecycleStorageMaintenanceRecoveryState.completed,
+      );
+      expect(
+        completed.terminalStatus,
+        CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
+      );
+      expect(completed.automaticRetryAllowed, isFalse);
+    });
+
+    test('reports missing and terminal-only histories', () async {
+      expect(
+        (await store.inspectRecovery('absent')).state,
+        CompositionLifecycleStorageMaintenanceRecoveryState.notFound,
+      );
+      await store.append(record(
+        'terminal-only',
+        CompositionLifecycleStorageMaintenanceOperationStatus.failed,
+        completedAt: startedAt.add(const Duration(seconds: 1)),
+      ));
+      expect(
+        (await store.inspectRecovery('terminal-only')).state,
+        CompositionLifecycleStorageMaintenanceRecoveryState.incompleteHistory,
+      );
+    });
+
+    test('returns immutable query pages', () async {
+      await store.append(record(
+        'immutable',
+        CompositionLifecycleStorageMaintenanceOperationStatus.started,
+      ));
+      final page = await store.query(
+        CompositionLifecycleStorageMaintenanceAuditQuery(),
+      );
+      expect(
+        () => page.add(record(
+          'mutate',
+          CompositionLifecycleStorageMaintenanceOperationStatus.started,
+        )),
+        throwsUnsupportedError,
+      );
+    });
+  });
+}

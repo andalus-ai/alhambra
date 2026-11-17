@@ -225,3 +225,32 @@ bool _sameRequest(
     left.retainFrom == right.retainFrom &&
     left.maxEvents == right.maxEvents &&
     left.checkpoint == right.checkpoint;
+
+
+/// Convenience recovery inspection for a single maintenance operation.
+///
+/// The bounded query intentionally requests three records: the normal history
+/// contains at most one start and one terminal record, while a third record is
+/// already sufficient to classify the history as conflicting. The store's
+/// decoder may throw if persisted records are malformed; callers should treat
+/// that as an inspection failure, never as permission to replay the operation.
+extension CompositionLifecycleStorageMaintenanceAuditRecoveryInspection
+    on CompositionLifecycleStorageMaintenanceAuditStore {
+  Future<CompositionLifecycleStorageMaintenanceRecovery> inspectRecovery(
+    String operationId,
+  ) async {
+    if (operationId.trim().isEmpty) {
+      throw ArgumentError.value(operationId, 'operationId', 'Must not be empty.');
+    }
+    final records = await query(
+      CompositionLifecycleStorageMaintenanceAuditQuery(
+        operationId: operationId,
+        limit: 3,
+      ),
+    );
+    return CompositionLifecycleStorageMaintenanceRecovery.classify(
+      operationId: operationId,
+      records: records,
+    );
+  }
+}
