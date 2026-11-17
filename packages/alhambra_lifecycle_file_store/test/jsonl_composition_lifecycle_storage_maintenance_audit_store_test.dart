@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:alhambra_lifecycle_file_store/alhambra_lifecycle_file_store.dart';
-import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_lifecycle_store_test/alhambra_lifecycle_store_test.dart';
+import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -156,11 +156,14 @@ void main() {
     );
     expect(await file.readAsString(), isNot(contains('partial')));
   });
+
   late Directory contractDirectory;
   defineCompositionLifecycleStorageMaintenanceAuditStoreContractTests(
     name: 'JSONL',
     createStore: () async {
-      contractDirectory = await Directory.systemTemp.createTemp('alhambra-audit-contract-jsonl-');
+      contractDirectory = await Directory.systemTemp.createTemp(
+        'alhambra-audit-contract-jsonl-',
+      );
       return JsonlCompositionLifecycleStorageMaintenanceAuditStore(
         file: File('${contractDirectory.path}/audit.jsonl'),
       );
@@ -171,5 +174,4 @@ void main() {
       }
     },
   );
-
 }
