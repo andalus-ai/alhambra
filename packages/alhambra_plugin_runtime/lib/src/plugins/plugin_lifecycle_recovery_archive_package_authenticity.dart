@@ -241,8 +241,8 @@ final class PluginRecoveryArchivePackageAuthenticityVerifier {
   );
 }
 
-/// JSON transport for the signed package envelope. The signature covers the
-/// exact package encoding, not this outer envelope.
+/// JSON transport for the signed package envelope. The detached signature
+/// covers a domain-separated payload containing the package and signature metadata.
 final class PluginRecoveryArchiveSignedPackageCodec {
   final PluginRecoveryArchivePackageCodec packageCodec;
 
