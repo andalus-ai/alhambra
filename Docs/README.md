@@ -61,3 +61,5 @@ Update this index whenever an architecture or developer document is added.
 - [SQLite plugin installation adapter](../packages/alhambra_plugin_install_sqlite/README.md) — package usage and supported guarantees.
 - [Crash-safe local plugin installation filesystem](CRASH_SAFE_PLUGIN_INSTALL_FILESYSTEM.md) — fenced staging, promotion, rollback, ownership evidence and crash-recovery limits.
 - [Local plugin installation filesystem package](../packages/alhambra_plugin_install_filesystem/README.md) — adapter usage and operational constraints.
+
+- [Recovery archive package authenticity](RECOVERY_ARCHIVE_PACKAGE_AUTHENTICITY.md) — host-owned detached signatures, trust policy, and authenticated import.
