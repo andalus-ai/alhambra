@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:alhambra_lifecycle_sqlite_store/alhambra_lifecycle_sqlite_store.dart';
-import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_lifecycle_store_test/alhambra_lifecycle_store_test.dart';
+import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -145,12 +145,15 @@ void main() {
       throwsA(isA<CompositionLifecycleStorageMaintenanceAuditIdentityConflictException>()),
     );
   });
+
   late Directory contractDirectory;
   late SqliteCompositionLifecycleEventStore contractEventStore;
   defineCompositionLifecycleStorageMaintenanceAuditStoreContractTests(
     name: 'SQLite',
     createStore: () async {
-      contractDirectory = await Directory.systemTemp.createTemp('alhambra-audit-contract-sqlite-');
+      contractDirectory = await Directory.systemTemp.createTemp(
+        'alhambra-audit-contract-sqlite-',
+      );
       contractEventStore = SqliteCompositionLifecycleEventStore.open(
         path: '${contractDirectory.path}/audit.sqlite',
       );
@@ -165,5 +168,4 @@ void main() {
       }
     },
   );
-
 }
