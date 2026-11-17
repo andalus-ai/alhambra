@@ -119,8 +119,8 @@ final class PluginRecoveryArchivePackageAuthenticityReport {
       disposition == PluginRecoveryArchivePackageAuthenticityDisposition.valid;
 }
 
-/// Signs the exact deterministic package encoding, including its manifest,
-/// records, and package digest.
+/// Signs a domain-separated payload binding algorithm and key ID to the
+/// deterministic package encoding, including manifest, records, and digest.
 final class PluginRecoveryArchivePackageSigningService {
   final PluginRecoveryArchivePackageSigner signer;
   final PluginRecoveryArchivePackageCodec codec;
