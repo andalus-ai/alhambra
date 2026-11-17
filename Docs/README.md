@@ -58,6 +58,7 @@ Update this index whenever an architecture or developer document is added.
 
 - [Transactional plugin installation](TRANSACTIONAL_PLUGIN_INSTALLATION.md) — verified package staging, bounded extraction, reversible promotion, journaling and rollback.
 - [SQLite plugin installation journal and leases](SQLITE_PLUGIN_INSTALL_JOURNAL.md) — durable operation projection, append-only history, fenced CAS, worker leases and operational limits.
+- [SQLite fenced installed-plugin store](SQLITE_INSTALLED_PLUGIN_STORE.md) — durable installed records, create-only writes, compare-and-remove, stable operation ownership and fencing.
 - [SQLite plugin installation adapter](../packages/alhambra_plugin_install_sqlite/README.md) — package usage and supported guarantees.
 - [Crash-safe local plugin installation filesystem](CRASH_SAFE_PLUGIN_INSTALL_FILESYSTEM.md) — fenced staging, promotion, rollback, ownership evidence and crash-recovery limits.
 - [Local plugin installation filesystem package](../packages/alhambra_plugin_install_filesystem/README.md) — adapter usage and operational constraints.

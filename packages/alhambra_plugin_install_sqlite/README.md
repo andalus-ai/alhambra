@@ -1,6 +1,7 @@
 # Alhambra SQLite Plugin Installation Persistence
 
 This package provides durable SQLite adapters for plugin installation:
+- `SqliteInstalledPluginStore` implements `FencedTransactionalInstalledPluginStore`.
 - `SqlitePluginInstallJournal` implements `FencedPluginInstallRecoveryJournal`.
 - `SqlitePluginInstallOperationLeaseStore` implements
   `PluginInstallOperationLeaseStore`.
@@ -81,3 +82,26 @@ must provide a consistent authoritative clock (preferably database-derived).
   multi-region distributed coordination.
 - This does not provide exactly-once external effects or automatic retry of
   ambiguous operations.
+
+
+## Installed-plugin records
+
+Use `SqliteInstalledPluginStore` with the same database path as the journal
+and lease store:
+
+```dart
+final installedStore = SqliteInstalledPluginStore(databasePath);
+final journal = SqlitePluginInstallJournal(databasePath);
+final leases = SqlitePluginInstallOperationLeaseStore(databasePath);
+```
+
+The installed-record adapter persists one row per plugin ID, including
+publisher metadata and the operation ID that created a transactional record.
+It atomically enforces the current fencing token on create and compensating
+remove operations. A recovery worker may remove a record created by the same
+operation after advancing to a newer token; a different operation cannot
+remove it. Legacy unfenced APIs are restricted to unowned rows and cannot
+overwrite or delete transaction-owned records.
+
+See [the installed-store design and guarantees](../../Docs/SQLITE_INSTALLED_PLUGIN_STORE.md).
+
