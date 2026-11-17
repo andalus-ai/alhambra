@@ -17,7 +17,7 @@ final class PluginRecoveryArchivePackageSignature {
     required this.keyId,
     required this.value,
   }) {
-    if (version != currentVersion) {
+    if (version < 1) {
       throw ArgumentError.value(version, 'version');
     }
     if (algorithm.trim().isEmpty) {
