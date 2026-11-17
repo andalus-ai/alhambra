@@ -75,7 +75,7 @@ PluginLifecycleRecoveryJob _job() => PluginLifecycleRecoveryJob(
   updatedAt: DateTime.utc(2026, 11, 1, 0, 1),
 );
 
-Future<PluginRecoveryArchivePackage> _package(_Digest digest) async {
+Future<PluginRecoveryArchivePackage> _package(_Digest digest, {String packageId = 'bundle-a'}) async {
   final job = _job();
   final archivedAt = DateTime.utc(2026, 11, 1, 0, 2);
   const snapshotCodec = PluginLifecycleRecoveryJobSnapshotCodec();
@@ -96,7 +96,7 @@ Future<PluginRecoveryArchivePackage> _package(_Digest digest) async {
     digestProvider: digest,
     digestAlgorithm: 'package-test',
   ).create(
-    packageId: 'bundle-a',
+    packageId: packageId,
     producer: 'test-host',
     createdAt: DateTime.utc(2026, 11, 2),
     records: [record],
@@ -152,7 +152,7 @@ void main() {
       final report = await authenticatedImporter.importPackage(plan);
       expect(report.authenticity.isValid, isTrue);
       expect(report.importReport?.importedJobIds, ['job-a']);
-      expect(destination.records.keys, ['job-a']);
+      expect(destination.records.keys.toList(), ['job-a']);
     });
 
     test('rejects unknown, revoked, disallowed, and cryptographically invalid signatures', () async {
@@ -213,6 +213,44 @@ void main() {
       );
       expect((await verifier.verify(futureVersion)).disposition,
           PluginRecoveryArchivePackageAuthenticityDisposition.unsupportedSignatureVersion);
+    });
+
+
+    test('does not allow a valid signature plan to authorize a different package', () async {
+      final digest = _Digest();
+      final signedPackage = await _package(digest);
+      final differentPackage = await _package(digest, packageId: 'bundle-other');
+      final signed = await PluginRecoveryArchivePackageSigningService(
+        signer: _Signer(),
+      ).sign(
+        archivePackage: signedPackage,
+        algorithm: 'test-signature',
+        keyId: 'publisher-key-1',
+      );
+      final trust = _TrustPolicy();
+      final authenticityVerifier = PluginRecoveryArchivePackageAuthenticityVerifier(
+        signatureVerifier: _SignatureVerifier(),
+        trustPolicy: trust,
+      );
+      final destination = _Archive();
+      final packageImporter = PluginRecoveryArchivePackageImporter(
+        destinationArchive: destination,
+        digestProvider: digest,
+      );
+      final forgedPlan = PluginRecoveryArchiveAuthenticatedImportPlan(
+        signedPackage: signed,
+        authenticity: await authenticityVerifier.verify(signed),
+        packagePlan: await packageImporter.inspect(differentPackage),
+      );
+      final importer = PluginRecoveryArchiveAuthenticatedPackageImporter(
+        authenticityVerifier: authenticityVerifier,
+        packageImporter: packageImporter,
+      );
+      await expectLater(
+        importer.importPackage(forgedPlan),
+        throwsStateError,
+      );
+      expect(destination.records, isEmpty);
     });
 
     test('rechecks trust before import and does not write after revocation', () async {
