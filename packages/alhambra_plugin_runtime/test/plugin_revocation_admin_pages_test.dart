@@ -176,9 +176,10 @@ void main() {
   test('outbox and operator-action methods use distinct query families',
       () async {
     final events = <String>[];
+    final audit = _AuditStore(events);
     final service = PluginRevocationAdminPageService(
       authorizer: _Authorizer(events),
-      accessAuditStore: _AuditStore(events),
+      accessAuditStore: audit,
       queryStore: _PageStore(events),
     );
 
@@ -203,9 +204,7 @@ void main() {
       'audit:operatorActions',
       'query:operatorActions:$scope',
     ]);
-    expect(
-      (events.isNotEmpty),
-      isTrue,
-    );
+    expect(audit.records.first.continuationRequested, isTrue);
+    expect(audit.records.last.continuationRequested, isFalse);
   });
 }
