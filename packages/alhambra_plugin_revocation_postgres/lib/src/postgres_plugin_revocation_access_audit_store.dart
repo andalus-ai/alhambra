@@ -80,11 +80,11 @@ final class PostgresPluginRevocationAccessAuditStore
     final parameters = <Object?>[scopeId];
     if (fromInclusive != null) {
       parameters.add(fromInclusive.toUtc());
-      clauses.add('occurred_at >= \\${parameters.length}');
+      clauses.add('occurred_at >= ' + r'$' + parameters.length.toString());
     }
     if (toExclusive != null) {
       parameters.add(toExclusive.toUtc());
-      clauses.add('occurred_at < \\${parameters.length}');
+      clauses.add('occurred_at < ' + r'$' + parameters.length.toString());
     }
     parameters.add(limit);
     final limitParameter = parameters.length;
@@ -94,7 +94,7 @@ final class PostgresPluginRevocationAccessAuditStore
       'resource, page_size, continuation_requested, query_fingerprint '
       'FROM alhambra_plugin_revocation_access_audit '
       'WHERE ${clauses.join(' AND ')} '
-      'ORDER BY occurred_at DESC, audit_id DESC LIMIT \\${limitParameter}',
+      'ORDER BY occurred_at DESC, audit_id DESC LIMIT ' + r'$' + limitParameter.toString(),
       parameters: parameters,
     );
 
