@@ -90,6 +90,8 @@ The same secret must be shared by all instances serving the same cursor domain a
 `SqlitePluginRevocationAccessAuditStore` implements the runtime access-audit append and scoped inspection contracts. It accepts a caller-owned `sqlite3.Database`; call `migrate()` before passing it to `PluginRevocationAdminPageService` or `PluginRevocationAdminOperationsService`.
 
 ```dart
+import 'package:sqlite3/sqlite3.dart' as sqlite3;
+
 final auditDb = sqlite3.open('/var/lib/app/revocation-admin-audit.sqlite');
 final accessAudits = SqlitePluginRevocationAccessAuditStore(auditDb)
   ..migrate();
