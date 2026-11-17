@@ -546,9 +546,9 @@ final class PluginRecoverySigningKeyHistoryInspector {
         currentlyRevoked: false,
       );
     }
-    final activated = history.where((event) =>
-      event.action == PluginRecoverySigningKeyLifecycleAction.activated ||
-      event.action == PluginRecoverySigningKeyLifecycleAction.rotated).firstOrNull;
+    final activations = history.where((event) =>
+      event.action == PluginRecoverySigningKeyLifecycleAction.activated).toList();
+    final activated = activations.isEmpty ? null : activations.first;
     if (activated == null) {
       return PluginRecoverySigningKeyAssessment(
         keyId: keyId,
@@ -556,11 +556,13 @@ final class PluginRecoverySigningKeyHistoryInspector {
         currentlyRevoked: false,
       );
     }
-    final revoked = history.where((event) =>
-      event.action == PluginRecoverySigningKeyLifecycleAction.revoked).firstOrNull;
-    final retired = history.where((event) =>
+    final revocations = history.where((event) =>
+      event.action == PluginRecoverySigningKeyLifecycleAction.revoked).toList();
+    final retirements = history.where((event) =>
       event.action == PluginRecoverySigningKeyLifecycleAction.retired ||
-      event.action == PluginRecoverySigningKeyLifecycleAction.rotated).firstOrNull;
+      event.action == PluginRecoverySigningKeyLifecycleAction.rotated).toList();
+    final revoked = revocations.isEmpty ? null : revocations.first;
+    final retired = retirements.isEmpty ? null : retirements.first;
     final instant = signingTime.toUtc();
     final disposition = instant.isBefore((activated.validFrom ?? activated.occurredAt).toUtc())
         ? PluginRecoverySigningKeyAssessmentDisposition.notYetValid
