@@ -257,7 +257,7 @@ void main() {
       operationId: operationId,
       fencingToken: originalLease.fencingToken,
     ), isTrue);
-    expect(await reopenedFileSystem.advanceFence(
+    expect(await fileSystem.advanceFence(
       operationId: operationId,
       fencingToken: originalLease.fencingToken,
     ), isTrue);
@@ -338,7 +338,7 @@ void main() {
       operationId: operationId,
       fencingToken: recoveryLease.fencingToken,
     ), isTrue);
-    expect(await fileSystem.advanceFence(
+    expect(await reopenedFileSystem.advanceFence(
       operationId: operationId,
       fencingToken: recoveryLease.fencingToken,
     ), isTrue);
@@ -368,7 +368,7 @@ void main() {
 
     final completed = await PluginInstallRecoveryExecutor(
       journal: reopenedJournal,
-      fileSystem: fileSystem,
+      fileSystem: reopenedFileSystem,
       installedStore: reopenedStore,
       leaseStore: reopenedLeases,
       workerId: 'recovery-worker',
