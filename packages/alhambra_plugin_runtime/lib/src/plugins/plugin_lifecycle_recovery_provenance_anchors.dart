@@ -134,23 +134,30 @@ final class PluginRecoveryProvenanceAnchorPublisher {
     }
     final head = events.last;
     final existing = await anchorStore.readAll(chainId);
+    for (var i = 0; i < existing.length; i++) {
+      final anchor = existing[i];
+      if (anchor.chainId != chainId ||
+          anchor.anchorSequence != i + 1 ||
+          anchor.provenanceSequence > head.sequence ||
+          (i > 0 &&
+              (anchor.provenanceSequence <= existing[i - 1].provenanceSequence ||
+               anchor.anchoredAt.isBefore(existing[i - 1].anchoredAt)))) {
+        throw StateError('Stored anchor history is inconsistent.');
+      }
+      final referencedEvent = events[anchor.provenanceSequence - 1];
+      if (referencedEvent.sequence != anchor.provenanceSequence ||
+          referencedEvent.eventDigestAlgorithm != anchor.headEventDigestAlgorithm ||
+          referencedEvent.eventDigest != anchor.headEventDigest) {
+        throw StateError('Stored anchor does not match the current provenance chain.');
+      }
+    }
     if (existing.isNotEmpty) {
       final latest = existing.last;
-      if (latest.anchorSequence != existing.length) {
-        throw StateError('Stored anchor sequence is not contiguous.');
-      }
-      if (latest.provenanceSequence > head.sequence) {
-        throw StateError('Stored anchor is ahead of the current provenance chain.');
-      }
       if (latest.provenanceSequence == head.sequence) {
         if (latest.headEventDigest != head.eventDigest) {
           throw StateError('Stored anchor conflicts with the current provenance head.');
         }
         throw StateError('The current provenance head is already anchored.');
-      }
-      if (latest.provenanceSequence < 1 ||
-          events[latest.provenanceSequence - 1].eventDigest != latest.headEventDigest) {
-        throw StateError('Stored anchor does not match the current provenance chain.');
       }
     }
     final unsigned = PluginRecoveryProvenanceAnchor(
