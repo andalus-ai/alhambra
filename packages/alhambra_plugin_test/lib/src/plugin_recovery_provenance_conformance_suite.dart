@@ -126,6 +126,27 @@ final class PluginRecoveryProvenanceConformanceSuite {
       'A stale expected digest was rejected.',
       'The adapter accepted a stale chain head.',
     );
+    final second = fixture(
+      eventId: 'provenance-$runId-event-2',
+      sequence: 2,
+      previousEventDigest: first.eventDigest,
+    );
+    final secondAccepted = await store.appendIfHeadMatches(
+      expectedSequence: 1,
+      expectedHeadDigest: first.eventDigest,
+      event: second,
+    );
+    final ordered = await store.readAll();
+    _record(
+      checks,
+      'provenance events preserve append order',
+      secondAccepted &&
+          ordered.length == 2 &&
+          ordered[0].eventId == first.eventId &&
+          ordered[1].eventId == second.eventId,
+      'Two committed events are returned in sequence order.',
+      'The second event was rejected or read order differs from append order.',
+    );
     return PluginRecoveryAdapterConformanceReport(checks);
   }
 
@@ -177,6 +198,25 @@ final class PluginRecoveryProvenanceConformanceSuite {
       !duplicateAccepted && (await store.readAll()).length == 1,
       'Duplicate key lifecycle event ID was rejected.',
       'Duplicate key lifecycle event ID was accepted.',
+    );
+    final second = fixture(
+      eventId: 'key-history-$runId-event-2',
+      sequence: 2,
+    );
+    final secondAccepted = await store.appendIfSequenceMatches(
+      expectedSequence: 1,
+      event: second,
+    );
+    final ordered = await store.readAll();
+    _record(
+      checks,
+      'key-history events preserve append order',
+      secondAccepted &&
+          ordered.length == 2 &&
+          ordered[0].eventId == first.eventId &&
+          ordered[1].eventId == second.eventId,
+      'Two key lifecycle events are returned in sequence order.',
+      'The second event was rejected or read order differs from append order.',
     );
     return PluginRecoveryAdapterConformanceReport(checks);
   }
