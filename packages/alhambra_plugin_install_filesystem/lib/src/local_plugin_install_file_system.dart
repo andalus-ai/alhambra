@@ -385,7 +385,7 @@ final class LocalPluginInstallFileSystem
         }
         await _assertNoSymlink(expected);
         if (!await Directory(expected).exists() ||
-            !await _hasOwnerMarker(expected, staging.operationId, staging.fencingToken)) {
+            !await _hasOwnerMarker(expected, staging.operationId, staging.pluginId)) {
           throw StateError('Cannot finalize a destination not owned by this operation.');
         }
         // Keep the tiny ownership marker in the installed tree. It is a
