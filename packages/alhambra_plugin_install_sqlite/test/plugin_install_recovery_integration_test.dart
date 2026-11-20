@@ -175,10 +175,13 @@ void main() {
     final installedStore = SqliteInstalledPluginStore(databasePath);
     final fileSystem = LocalPluginInstallFileSystem(rootDirectory: installRoot);
 
+    var originalAdaptersClosed = false;
     addTearDown(() async {
-      journal.close();
-      leases.close();
-      installedStore.close();
+      if (!originalAdaptersClosed) {
+        journal.close();
+        leases.close();
+        installedStore.close();
+      }
       if (await directory.exists()) {
         await directory.delete(recursive: true);
       }
@@ -259,6 +262,7 @@ void main() {
     journal.close();
     leases.close();
     installedStore.close();
+    originalAdaptersClosed = true;
     final reopenedJournal = SqlitePluginInstallJournal(databasePath);
     final reopenedLeases = SqlitePluginInstallOperationLeaseStore(databasePath);
     final reopenedStore = SqliteInstalledPluginStore(databasePath);
