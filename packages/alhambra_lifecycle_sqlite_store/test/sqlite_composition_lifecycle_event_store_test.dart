@@ -718,6 +718,34 @@ void main() {
     );
   });
 
+  test('worker audit history survives worker shutdown and reopen', () async {
+    final path = '${directory.path}/worker-audit-reopen.sqlite';
+    var worker = await SqliteLifecycleEventStoreWorker.open(path: path);
+    await worker.maintenanceAuditStore.append(
+      CompositionLifecycleStorageMaintenanceOperationRecord(
+        operationId: 'restart-unknown',
+        status: CompositionLifecycleStorageMaintenanceOperationStatus.started,
+        requestedAt: DateTime.utc(2026, 11, 20, 5),
+        startedAt: DateTime.utc(2026, 11, 20, 5, 0, 1),
+        request: CompositionLifecycleStorageMaintenanceRequest(
+          maxEvents: 10,
+        ),
+      ),
+    );
+    await worker.close();
+
+    worker = await SqliteLifecycleEventStoreWorker.open(path: path);
+    addTearDown(worker.close);
+    final recovery = await worker.maintenanceAuditStore.inspectRecovery(
+      'restart-unknown',
+    );
+    expect(
+      recovery.state,
+      CompositionLifecycleStorageMaintenanceRecoveryState.outcomeUnknown,
+    );
+    expect(recovery.automaticRetryAllowed, isFalse);
+  });
+
   test('worker audit proxy shares command ordering with lifecycle writes', () async {
     final worker = await SqliteLifecycleEventStoreWorker.open(
       path: '${directory.path}/worker-audit-order.sqlite',
