@@ -34,7 +34,6 @@ void main() {
     },
   );
 
-
   late Directory auditContractDirectory;
   late SqliteLifecycleEventStoreWorker auditContractWorker;
   defineCompositionLifecycleStorageMaintenanceAuditStoreContractTests(
@@ -637,7 +636,6 @@ void main() {
     expect(events.map((event) => event.eventId), ['worker-maintenance-new']);
   });
 
-
   test('worker audit proxy persists, queries, and inspects recovery on its connection', () async {
     final worker = await SqliteLifecycleEventStoreWorker.open(
       path: '${directory.path}/worker-audit.sqlite',
@@ -741,7 +739,9 @@ void main() {
         status: CompositionLifecycleStorageMaintenanceOperationStatus.started,
         requestedAt: timestamp,
         startedAt: timestamp,
-        request: CompositionLifecycleStorageMaintenanceRequest(),
+        request: CompositionLifecycleStorageMaintenanceRequest(
+          checkpoint: true,
+        ),
       ),
     );
     final events = await worker.query(CompositionLifecycleEventQuery());
@@ -751,6 +751,4 @@ void main() {
     expect(events.single.eventId, 'before-audit');
     expect(audits.single.operationId, 'ordered-audit');
   });
-
-
 }
