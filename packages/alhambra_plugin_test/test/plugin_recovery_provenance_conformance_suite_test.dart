@@ -78,7 +78,7 @@ void main() {
       expect(keys.isConformant, isTrue);
       expect(keys.passedCount, 4);
       expect(anchors.isConformant, isTrue);
-      expect(anchors.passedCount, 3);
+      expect(anchors.passedCount, 4);
     });
 
     test('rejects unsafe run identifiers and empty chain identifiers', () async {
