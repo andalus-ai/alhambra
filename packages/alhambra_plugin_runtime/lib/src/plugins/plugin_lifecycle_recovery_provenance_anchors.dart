@@ -131,12 +131,21 @@ final class PluginRecoveryProvenanceAnchorPublisher {
     final existing = await anchorStore.readAll(chainId);
     if (existing.isNotEmpty) {
       final latest = existing.last;
+      if (latest.anchorSequence != existing.length) {
+        throw StateError('Stored anchor sequence is not contiguous.');
+      }
       if (latest.provenanceSequence > head.sequence) {
         throw StateError('Stored anchor is ahead of the current provenance chain.');
       }
-      if (latest.provenanceSequence == head.sequence &&
-          latest.headEventDigest == head.eventDigest) {
+      if (latest.provenanceSequence == head.sequence) {
+        if (latest.headEventDigest != head.eventDigest) {
+          throw StateError('Stored anchor conflicts with the current provenance head.');
+        }
         throw StateError('The current provenance head is already anchored.');
+      }
+      if (latest.provenanceSequence < 1 ||
+          events[latest.provenanceSequence - 1].eventDigest != latest.headEventDigest) {
+        throw StateError('Stored anchor does not match the current provenance chain.');
       }
     }
     final unsigned = PluginRecoveryProvenanceAnchor(
@@ -240,7 +249,9 @@ final class PluginRecoveryProvenanceAnchorVerifier {
       PluginRecoveryProvenanceAnchorDisposition? failure;
       if (anchor.chainId != chainId) {
         failure = PluginRecoveryProvenanceAnchorDisposition.chainIdMismatch;
-      } else if (anchor.anchorSequence != i + 1) {
+      } else if (anchor.anchorSequence != i + 1 ||
+          (i > 0 && anchor.provenanceSequence <= anchors[i - 1].provenanceSequence) ||
+          (i > 0 && anchor.anchoredAt.isBefore(anchors[i - 1].anchoredAt))) {
         failure = PluginRecoveryProvenanceAnchorDisposition.sequenceGap;
       } else if (anchor.provenanceSequence > events.length) {
         failure = PluginRecoveryProvenanceAnchorDisposition.provenanceHeadMissing;
