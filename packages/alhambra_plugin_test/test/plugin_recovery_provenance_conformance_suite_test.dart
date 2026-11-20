@@ -74,9 +74,9 @@ void main() {
       );
 
       expect(provenance.isConformant, isTrue);
-      expect(provenance.passedCount, 4);
+      expect(provenance.passedCount, 5);
       expect(keys.isConformant, isTrue);
-      expect(keys.passedCount, 3);
+      expect(keys.passedCount, 4);
       expect(anchors.isConformant, isTrue);
       expect(anchors.passedCount, 3);
     });
