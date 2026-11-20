@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'plugin_lifecycle_recovery_provenance.dart';
 import 'plugin_lifecycle_recovery_archive_package_authenticity.dart';
 
