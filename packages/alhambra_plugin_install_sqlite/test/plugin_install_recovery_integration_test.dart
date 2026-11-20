@@ -257,7 +257,7 @@ void main() {
       operationId: operationId,
       fencingToken: originalLease.fencingToken,
     ), isTrue);
-    expect(await fileSystem.advanceFence(
+    expect(await reopenedFileSystem.advanceFence(
       operationId: operationId,
       fencingToken: originalLease.fencingToken,
     ), isTrue);
@@ -317,6 +317,8 @@ void main() {
     final reopenedJournal = SqlitePluginInstallJournal(databasePath);
     final reopenedLeases = SqlitePluginInstallOperationLeaseStore(databasePath);
     final reopenedStore = SqliteInstalledPluginStore(databasePath);
+    final reopenedFileSystem =
+        LocalPluginInstallFileSystem(rootDirectory: installRoot);
     addTearDown(() async {
       reopenedJournal.close();
       reopenedLeases.close();
@@ -354,7 +356,7 @@ void main() {
 
     final report = await PluginInstallRecoveryPlanner(
       journal: reopenedJournal,
-      fileSystem: fileSystem,
+      fileSystem: reopenedFileSystem,
       installedStore: reopenedStore,
       clock: advancingClock,
     ).inspect();
