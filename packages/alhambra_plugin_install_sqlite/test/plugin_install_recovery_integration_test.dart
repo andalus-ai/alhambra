@@ -6,6 +6,57 @@ import 'package:alhambra_plugin_install_sqlite/alhambra_plugin_install_sqlite.da
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 import 'package:test/test.dart';
 
+
+final class _ArchivePackage implements PluginPackageArchive {
+  @override
+  PluginPackageManifest get manifest => PluginPackageManifest(
+        id: PluginId('example.e2e'),
+        name: 'End-to-end Example',
+        version: const SemanticVersion(1, 0, 0),
+        hostApi: HostApiConstraint(min: const SemanticVersion(1, 0, 0)),
+      );
+
+  @override
+  PluginPackageMetadata get metadata => PluginPackageMetadata(
+        packageId: 'example.e2e',
+        version: const SemanticVersion(1, 0, 0),
+        contentHash:
+            'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        formatVersion: 1,
+      );
+
+  @override
+  PluginPublisher? get publisher => null;
+
+  @override
+  PluginPackageSignature? get signature => null;
+
+  @override
+  Stream<PluginArchiveEntry> listEntries() async* {
+    yield const PluginArchiveEntry(
+      path: 'lib/main.dart',
+      kind: PluginArchiveEntryKind.file,
+      declaredSizeBytes: 3,
+    );
+  }
+
+  @override
+  Stream<List<int>> readPayload(String path) async* {
+    yield [1, 2, 3];
+  }
+}
+
+final class _AcceptingVerifier implements PluginPackageVerifier {
+  @override
+  Future<PackageVerificationResult> verify(PluginPackage package) async =>
+      const PackageVerified(PluginTrustLevel.verified);
+}
+
+final class _AcceptingPreflight implements PluginInstallPreflight {
+  @override
+  Future<void> validate(PluginPackage package) async {}
+}
+
 void main() {
   test('recovery takeover rolls back a promoted tree with a newer fencing token',
       () async {
@@ -330,6 +381,49 @@ void main() {
     expect(await reopenedStore.find(pluginId), isNotNull);
     expect(await Directory(destination).exists(), isTrue);
     expect(await reopenedJournal.unresolved(), isEmpty);
+  });
+
+  test('transactional installer commits using all durable host adapters',
+      () async {
+    final directory =
+        await Directory.systemTemp.createTemp('alhambra-install-e2e-');
+    final installRoot = await Directory('${directory.path}/install').create();
+    final databasePath = '${directory.path}/install.sqlite';
+    final journal = SqlitePluginInstallJournal(databasePath);
+    final leases = SqlitePluginInstallOperationLeaseStore(databasePath);
+    final installedStore = SqliteInstalledPluginStore(databasePath);
+    final fileSystem = LocalPluginInstallFileSystem(rootDirectory: installRoot);
+    addTearDown(() async {
+      journal.close();
+      leases.close();
+      installedStore.close();
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    });
+
+    final installer = TransactionalPluginInstaller(
+      verifier: _AcceptingVerifier(),
+      preflight: _AcceptingPreflight(),
+      fileSystem: fileSystem,
+      installedStore: installedStore,
+      journal: journal,
+      leaseStore: leases,
+      workerId: 'integration-installer',
+      leaseDuration: const Duration(minutes: 1),
+      clock: () => DateTime.utc(2026, 11, 19, 1),
+      operationIdFactory: () => 'install-e2e-success',
+    );
+
+    final result = await installer.install(_ArchivePackage());
+    expect(result, isA<PluginInstalled>());
+    final installed = await installedStore.find('example.e2e');
+    expect(installed, isNotNull);
+    expect(installed!.version, const SemanticVersion(1, 0, 0));
+    expect(installed.contentHash,
+        'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc');
+    expect(await Directory(result.installPath).exists(), isTrue);
+    expect(await journal.unresolved(), isEmpty);
   });
 
 }
