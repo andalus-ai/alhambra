@@ -6,22 +6,6 @@ import 'package:alhambra_plugin_install_sqlite/alhambra_plugin_install_sqlite.da
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 import 'package:test/test.dart';
 
-final class _EmptyInstalledPluginStore implements InstalledPluginStore {
-  @override
-  Future<List<InstalledPluginRecord>> all() async => const [];
-
-  @override
-  Future<InstalledPluginRecord?> find(String pluginId) async => null;
-
-  @override
-  Future<void> remove(String pluginId) async {}
-
-  @override
-  Future<void> save(InstalledPluginRecord plugin) async {
-    throw StateError('This recovery scenario must not write installed records.');
-  }
-}
-
 void main() {
   test('recovery takeover rolls back a promoted tree with a newer fencing token',
       () async {
@@ -32,11 +16,12 @@ void main() {
     var journal = SqlitePluginInstallJournal(databasePath);
     var leases = SqlitePluginInstallOperationLeaseStore(databasePath);
     var fileSystem = LocalPluginInstallFileSystem(rootDirectory: installRoot);
-    final installedStore = _EmptyInstalledPluginStore();
+    final installedStore = SqliteInstalledPluginStore(databasePath);
 
     addTearDown(() async {
       journal.close();
       leases.close();
+      installedStore.close();
       if (await directory.exists()) {
         await directory.delete(recursive: true);
       }
@@ -67,6 +52,13 @@ void main() {
     );
     expect(
       await fileSystem.advanceFence(
+        operationId: operationId,
+        fencingToken: originalLease.fencingToken,
+      ),
+      isTrue,
+    );
+    expect(
+      await installedStore.advanceFence(
         operationId: operationId,
         fencingToken: originalLease.fencingToken,
       ),
@@ -127,6 +119,13 @@ void main() {
       ),
       isTrue,
     );
+    expect(
+      await installedStore.advanceFence(
+        operationId: operationId,
+        fencingToken: recoveryLease.fencingToken,
+      ),
+      isTrue,
+    );
 
     var clockValue = takeoverAt;
     DateTime advancingClock() {
@@ -165,4 +164,168 @@ void main() {
     expect(await Directory(destination).exists(), isFalse);
     expect(await journal.unresolved(), isEmpty);
   });
+  test('recovery finalizes a promoted tree after installed record survived a crash',
+      () async {
+    final directory =
+        await Directory.systemTemp.createTemp('alhambra-install-finalize-');
+    final installRoot = await Directory('${directory.path}/install').create();
+    final databasePath = '${directory.path}/install.sqlite';
+    final journal = SqlitePluginInstallJournal(databasePath);
+    final leases = SqlitePluginInstallOperationLeaseStore(databasePath);
+    final installedStore = SqliteInstalledPluginStore(databasePath);
+    final fileSystem = LocalPluginInstallFileSystem(rootDirectory: installRoot);
+
+    addTearDown(() async {
+      journal.close();
+      leases.close();
+      installedStore.close();
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    });
+
+    final startedAt = DateTime.utc(2026, 11, 18, 1);
+    const operationId = 'install-finalize-after-crash';
+    const pluginId = 'example.finalize';
+    const version = '2.0.0';
+    const contentHash =
+        'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    final originalLease = await leases.acquire(
+      operationId: operationId,
+      ownerId: 'installer-worker',
+      now: startedAt,
+      leaseDuration: const Duration(seconds: 1),
+    );
+    expect(originalLease, isNotNull);
+    expect(originalLease!.fencingToken, 1);
+
+    expect(await journal.advanceFence(
+      operationId: operationId,
+      fencingToken: originalLease.fencingToken,
+    ), isTrue);
+    expect(await fileSystem.advanceFence(
+      operationId: operationId,
+      fencingToken: originalLease.fencingToken,
+    ), isTrue);
+    expect(await installedStore.advanceFence(
+      operationId: operationId,
+      fencingToken: originalLease.fencingToken,
+    ), isTrue);
+
+    final staging = await fileSystem.createStaging(
+      operationId: operationId,
+      pluginId: pluginId,
+      version: version,
+      fencingToken: originalLease.fencingToken,
+    );
+    await fileSystem.writeFile(
+      staging: staging,
+      relativePath: 'lib/main.dart',
+      bytes: Stream<List<int>>.value([1, 2, 3]),
+      maxBytes: 16,
+    );
+    final destination = await fileSystem.destinationPathFor(
+      pluginId: pluginId,
+      version: version,
+    );
+    await fileSystem.promote(staging, destinationPath: destination);
+
+    final installedRecord = InstalledPluginRecord(
+      id: pluginId,
+      version: SemanticVersion.parse(version),
+      contentHash: contentHash,
+      installedAt: startedAt,
+      installPath: destination,
+    );
+    expect(await installedStore.createIfAbsentFenced(
+      installedRecord,
+      operationId: operationId,
+      fencingToken: originalLease.fencingToken,
+    ), isTrue);
+
+    await journal.write(PluginInstallJournalEntry(
+      operationId: operationId,
+      pluginId: pluginId,
+      version: version,
+      status: PluginInstallJournalStatus.installedRecordSaved,
+      updatedAt: startedAt.add(const Duration(milliseconds: 500)),
+      stagingHandle: staging.opaqueHandle,
+      promotedPath: destination,
+      contentHash: contentHash,
+      fencingToken: originalLease.fencingToken,
+    ));
+
+    // Simulate process restart: close and reopen every durable adapter.
+    journal.close();
+    leases.close();
+    installedStore.close();
+    final reopenedJournal = SqlitePluginInstallJournal(databasePath);
+    final reopenedLeases = SqlitePluginInstallOperationLeaseStore(databasePath);
+    final reopenedStore = SqliteInstalledPluginStore(databasePath);
+    addTearDown(() async {
+      reopenedJournal.close();
+      reopenedLeases.close();
+      reopenedStore.close();
+    });
+
+    final takeoverAt = startedAt.add(const Duration(seconds: 2));
+    final recoveryLease = await reopenedLeases.acquire(
+      operationId: operationId,
+      ownerId: 'recovery-worker',
+      now: takeoverAt,
+      leaseDuration: const Duration(seconds: 30),
+    );
+    expect(recoveryLease, isNotNull);
+    expect(recoveryLease!.fencingToken, 2);
+    expect(await reopenedJournal.advanceFence(
+      operationId: operationId,
+      fencingToken: recoveryLease.fencingToken,
+    ), isTrue);
+    expect(await fileSystem.advanceFence(
+      operationId: operationId,
+      fencingToken: recoveryLease.fencingToken,
+    ), isTrue);
+    expect(await reopenedStore.advanceFence(
+      operationId: operationId,
+      fencingToken: recoveryLease.fencingToken,
+    ), isTrue);
+
+    var clockValue = takeoverAt;
+    DateTime advancingClock() {
+      final current = clockValue;
+      clockValue = clockValue.add(const Duration(milliseconds: 1));
+      return current;
+    }
+
+    final report = await PluginInstallRecoveryPlanner(
+      journal: reopenedJournal,
+      fileSystem: fileSystem,
+      installedStore: reopenedStore,
+      clock: advancingClock,
+    ).inspect();
+    expect(report.findings, hasLength(1));
+    final finding = report.findings.single;
+    expect(finding.action, PluginInstallRecoveryAction.finalizePromotion);
+    expect(finding.installedRecordExists, isTrue);
+    expect(finding.installedRecordMatches, isTrue);
+
+    final completed = await PluginInstallRecoveryExecutor(
+      journal: reopenedJournal,
+      fileSystem: fileSystem,
+      installedStore: reopenedStore,
+      leaseStore: reopenedLeases,
+      workerId: 'recovery-worker',
+      clock: advancingClock,
+    ).execute(
+      finding,
+      approvedBy: 'test-operator',
+      approvalId: 'approval-finalize-after-crash',
+    );
+
+    expect(completed.status, PluginInstallJournalStatus.committed);
+    expect(await reopenedStore.find(pluginId), isNotNull);
+    expect(await Directory(destination).exists(), isTrue);
+    expect(await reopenedJournal.unresolved(), isEmpty);
+  });
+
 }
