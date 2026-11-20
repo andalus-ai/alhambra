@@ -107,3 +107,44 @@ degraded result. Negotiation does not grant permissions.
 - It does not simulate process crashes, durable storage, cross-process races,
   or external side-effect recovery.
 - It does not provide exactly-once execution guarantees.
+
+
+## Recovery provenance adapter conformance
+
+Use `PluginRecoveryProvenanceConformanceSuite` with fresh disposable store
+instances to exercise the append-only provenance, signing-key history, and
+external checkpoint anchor contracts:
+
+```dart
+const suite = PluginRecoveryProvenanceConformanceSuite();
+
+final provenance = await suite.verifyProvenanceStore(
+  store: provenanceStore,
+  fixture: provenanceFixture,
+  runId: 'isolated-run-001',
+);
+final keyHistory = await suite.verifySigningKeyHistoryStore(
+  store: keyHistoryStore,
+  fixture: keyLifecycleFixture,
+  runId: 'isolated-run-002',
+);
+final anchors = await suite.verifyAnchorStore(
+  store: anchorStore,
+  chainId: 'audit-chain-a',
+  runId: 'isolated-run-003',
+);
+
+if (!provenance.isConformant ||
+    !keyHistory.isConformant ||
+    !anchors.isConformant) {
+  throw StateError('A recovery provenance adapter failed conformance.');
+}
+```
+
+The suite writes append-only records and does not delete them. Use a unique
+isolated namespace/database per run. Its concurrent futures exercise one
+process only; persistent adapters still need independent-connection or
+multi-worker tests, durability tests, and backup/restore validation.
+
+See [Recovery provenance production readiness](../../Docs/RECOVERY_PROVENANCE_PRODUCTION_READINESS.md)
+for external checkpoint anchoring and deployment guidance.
