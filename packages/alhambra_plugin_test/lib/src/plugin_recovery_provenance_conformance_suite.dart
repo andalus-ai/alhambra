@@ -274,6 +274,27 @@ final class PluginRecoveryProvenanceConformanceSuite {
       'An anchor submitted under a different chain ID was rejected.',
       'An anchor was accepted under the wrong chain identity.',
     );
+    final second = _anchor(
+      chainId: chainId,
+      sequence: 2,
+      digest: 'anchor-$runId-head-2',
+    );
+    final secondAccepted = await store.appendIfSequenceMatches(
+      chainId: chainId,
+      expectedAnchorSequence: 1,
+      anchor: second,
+    );
+    final ordered = await store.readAll(chainId);
+    _record(
+      checks,
+      'anchor checkpoints preserve append order',
+      secondAccepted &&
+          ordered.length == 2 &&
+          ordered[0].anchorSequence == 1 &&
+          ordered[1].anchorSequence == 2,
+      'Two checkpoints are returned in anchor sequence order.',
+      'The second checkpoint was rejected or returned out of order.',
+    );
     return PluginRecoveryAdapterConformanceReport(checks);
   }
 
