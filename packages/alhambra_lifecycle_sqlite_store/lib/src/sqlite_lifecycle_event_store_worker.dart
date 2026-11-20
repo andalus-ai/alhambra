@@ -5,6 +5,7 @@ import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 
 import 'sqlite_composition_lifecycle_event_store.dart';
+import 'sqlite_composition_lifecycle_storage_maintenance_audit_store.dart';
 
 /// A lifecycle event store whose SQLite connection is owned by a worker
 /// isolate. No SQLite object crosses the isolate boundary.
@@ -29,6 +30,11 @@ final class SqliteLifecycleEventStoreWorker
   int _nextRequestId = 0;
   bool _closing = false;
   bool _closed = false;
+
+  /// Audit operations share this worker's SQLite connection and command queue.
+  late final SqliteCompositionLifecycleStorageMaintenanceAuditStoreWorker
+      maintenanceAuditStore =
+      SqliteCompositionLifecycleStorageMaintenanceAuditStoreWorker._(this);
 
   SqliteLifecycleEventStoreWorker._({
     required ReceivePort responses,
@@ -154,6 +160,13 @@ final class SqliteLifecycleEventStoreWorker
       if (type == 'CompositionLifecycleEventIdentityConflictException') {
         throw CompositionLifecycleEventIdentityConflictException(
           response['eventId']?.toString() ?? '',
+        );
+      }
+      if (type == 'CompositionLifecycleStorageMaintenanceAuditIdentityConflictException') {
+        throw CompositionLifecycleStorageMaintenanceAuditIdentityConflictException(
+          operationId: response['operationId']?.toString() ?? '',
+          status: CompositionLifecycleStorageMaintenanceOperationStatus.values
+              .byName(response['status'] as String),
         );
       }
       throw StateError('$type: $message');
@@ -334,6 +347,9 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
   final path = arguments[1] as String;
   final commands = ReceivePort();
   final store = SqliteCompositionLifecycleEventStore.open(path: path);
+  final auditStore = SqliteCompositionLifecycleStorageMaintenanceAuditStore(
+    database: store.database,
+  );
   host.send({'type': 'ready', 'port': commands.sendPort});
 
   await for (final raw in commands) {
@@ -363,6 +379,24 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
             'id': id,
             'ok': true,
             'events': events.map(codec.encode).toList(growable: false),
+          });
+          break;
+        case 'appendMaintenanceAudit':
+          final record = const CompositionLifecycleStorageMaintenanceAuditJsonCodec()
+              .decode(payload['record'] as String);
+          await auditStore.append(record);
+          host.send({'id': id, 'ok': true});
+          break;
+        case 'queryMaintenanceAudit':
+          final query = _decodeMaintenanceAuditQuery(
+            Map<Object?, Object?>.from(payload['query'] as Map),
+          );
+          final records = await auditStore.query(query);
+          const codec = CompositionLifecycleStorageMaintenanceAuditJsonCodec();
+          host.send({
+            'id': id,
+            'ok': true,
+            'records': records.map(codec.encode).toList(growable: false),
           });
           break;
         case 'maintain':
@@ -443,7 +477,91 @@ Future<void> _sqliteLifecycleWorkerMain(List<Object?> arguments) async {
         'errorMessage': error.toString(),
         if (error is CompositionLifecycleEventIdentityConflictException)
           'eventId': error.eventId,
+        if (error is CompositionLifecycleStorageMaintenanceAuditIdentityConflictException) ...{
+          'operationId': error.operationId,
+          'status': error.status.name,
+        },
       });
     }
   }
+}
+
+
+/// Maintenance audit proxy that routes every operation through the SQLite
+/// worker's existing command port. It never receives or owns a Database.
+final class SqliteCompositionLifecycleStorageMaintenanceAuditStoreWorker
+    implements CompositionLifecycleStorageMaintenanceAuditStore {
+  final SqliteLifecycleEventStoreWorker _worker;
+
+  SqliteCompositionLifecycleStorageMaintenanceAuditStoreWorker._(this._worker);
+
+  @override
+  Future<void> append(
+    CompositionLifecycleStorageMaintenanceOperationRecord record,
+  ) async {
+    await _worker._request('appendMaintenanceAudit', {
+      'record': const CompositionLifecycleStorageMaintenanceAuditJsonCodec()
+          .encode(record),
+    });
+  }
+
+  @override
+  Future<List<CompositionLifecycleStorageMaintenanceOperationRecord>> query(
+    CompositionLifecycleStorageMaintenanceAuditQuery query,
+  ) async {
+    final response = await _worker._request('queryMaintenanceAudit', {
+      'query': _encodeMaintenanceAuditQuery(query),
+    });
+    final values = response['records'] as List<Object?>;
+    const codec = CompositionLifecycleStorageMaintenanceAuditJsonCodec();
+    return List<CompositionLifecycleStorageMaintenanceOperationRecord>.unmodifiable(
+      values.map((value) => codec.decode(value as String)),
+    );
+  }
+}
+
+Map<String, Object?> _encodeMaintenanceAuditQuery(
+  CompositionLifecycleStorageMaintenanceAuditQuery query,
+) =>
+    {
+      'operationId': query.operationId,
+      'status': query.status?.name,
+      'from': query.from?.toUtc().toIso8601String(),
+      'to': query.to?.toUtc().toIso8601String(),
+      'after': query.after == null
+          ? null
+          : {
+              'startedAt': query.after!.startedAt.toUtc().toIso8601String(),
+              'operationId': query.after!.operationId,
+              'status': query.after!.status.name,
+            },
+      'limit': query.limit,
+    };
+
+CompositionLifecycleStorageMaintenanceAuditQuery _decodeMaintenanceAuditQuery(
+  Map<Object?, Object?> value,
+) {
+  final rawCursor = value['after'];
+  Map<Object?, Object?>? cursor;
+  if (rawCursor is Map) cursor = Map<Object?, Object?>.from(rawCursor);
+  return CompositionLifecycleStorageMaintenanceAuditQuery(
+    operationId: value['operationId'] as String?,
+    status: value['status'] == null
+        ? null
+        : CompositionLifecycleStorageMaintenanceOperationStatus.values
+            .byName(value['status'] as String),
+    from: value['from'] == null
+        ? null
+        : DateTime.parse(value['from'] as String),
+    to: value['to'] == null ? null : DateTime.parse(value['to'] as String),
+    after: cursor == null
+        ? null
+        : CompositionLifecycleStorageMaintenanceAuditCursor(
+            startedAt: DateTime.parse(cursor['startedAt'] as String),
+            operationId: cursor['operationId'] as String,
+            status: CompositionLifecycleStorageMaintenanceOperationStatus.values
+                .byName(cursor['status'] as String),
+          ),
+    limit: value['limit'] as int,
+  );
 }
