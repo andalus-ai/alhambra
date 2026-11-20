@@ -174,5 +174,27 @@ must reconcile the underlying storage before considering replay. Decode or
 database errors surface as inspection failures. The adapter test suite applies
 the shared `defineCompositionLifecycleStorageMaintenanceAuditStoreContractTests`
 behavioral contract in addition to its SQLite migration and persistence tests.
-The isolate worker does not yet expose the audit-store query API; use the
-dedicated adapter with a host-owned connection to the same database.
+The isolate worker exposes the same audit capability through
+`worker.maintenanceAuditStore`. Audit appends and queries are sent through the
+worker's existing command port and run against its existing SQLite connection;
+no second connection is opened and no SQLite object crosses the isolate
+boundary.
+
+```dart
+final worker = await SqliteLifecycleEventStoreWorker.open(
+  path: '${supportDirectory.path}/alhambra/lifecycle.sqlite',
+);
+final audit = worker.maintenanceAuditStore;
+
+await audit.append(startedRecord);
+final recovery = await audit.inspectRecovery(startedRecord.operationId);
+
+// Close the worker once; it owns the database connection used by both APIs.
+await worker.close();
+```
+
+The worker proxy implements
+`CompositionLifecycleStorageMaintenanceAuditStore`, including bounded
+queries, keyset pagination, typed identity-conflict errors, and the shared
+`inspectRecovery(operationId)` extension. Commands from the event-store and
+audit-store APIs share one ordered command queue.

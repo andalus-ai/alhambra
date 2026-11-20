@@ -34,6 +34,27 @@ void main() {
     },
   );
 
+  late Directory auditContractDirectory;
+  late SqliteLifecycleEventStoreWorker auditContractWorker;
+  defineCompositionLifecycleStorageMaintenanceAuditStoreContractTests(
+    name: 'SQLite worker',
+    createStore: () async {
+      auditContractDirectory = await Directory.systemTemp.createTemp(
+        'alhambra-sqlite-worker-audit-contract-',
+      );
+      auditContractWorker = await SqliteLifecycleEventStoreWorker.open(
+        path: '${auditContractDirectory.path}/audit.sqlite',
+      );
+      return auditContractWorker.maintenanceAuditStore;
+    },
+    disposeStore: (value) async {
+      await auditContractWorker.close();
+      if (await auditContractDirectory.exists()) {
+        await auditContractDirectory.delete(recursive: true);
+      }
+    },
+  );
+
   test('creates the schema and records its migration version', () async {
     store = SqliteCompositionLifecycleEventStore.open(
       path: '${directory.path}/schema.sqlite',
@@ -615,4 +636,147 @@ void main() {
     expect(events.map((event) => event.eventId), ['worker-maintenance-new']);
   });
 
+  test('worker audit proxy persists, queries, and inspects recovery on its connection', () async {
+    final worker = await SqliteLifecycleEventStoreWorker.open(
+      path: '${directory.path}/worker-audit.sqlite',
+    );
+    addTearDown(worker.close);
+    final audit = worker.maintenanceAuditStore;
+    final requestedAt = DateTime.utc(2026, 11, 20, 3);
+    final startedAt = DateTime.utc(2026, 11, 20, 3, 0, 1);
+    CompositionLifecycleStorageMaintenanceOperationRecord record(
+      String id,
+      CompositionLifecycleStorageMaintenanceOperationStatus status, {
+      DateTime? completedAt,
+      int maxEvents = 50,
+    }) =>
+        CompositionLifecycleStorageMaintenanceOperationRecord(
+          operationId: id,
+          status: status,
+          requestedAt: requestedAt,
+          startedAt: startedAt,
+          completedAt: completedAt,
+          request: CompositionLifecycleStorageMaintenanceRequest(
+            maxEvents: maxEvents,
+          ),
+          result: status ==
+                  CompositionLifecycleStorageMaintenanceOperationStatus.started
+              ? null
+              : CompositionLifecycleStorageMaintenanceResult(
+                  startedAt: startedAt,
+                  completedAt: completedAt!,
+                  recordsRemoved: 1,
+                  checkpointRequested: false,
+                ),
+        );
+
+    final started = record(
+      'worker-audit-operation',
+      CompositionLifecycleStorageMaintenanceOperationStatus.started,
+    );
+    await audit.append(started);
+    final unknown = await audit.inspectRecovery('worker-audit-operation');
+    expect(
+      unknown.state,
+      CompositionLifecycleStorageMaintenanceRecoveryState.outcomeUnknown,
+    );
+    expect(unknown.automaticRetryAllowed, isFalse);
+
+    final terminal = record(
+      'worker-audit-operation',
+      CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
+      completedAt: startedAt.add(const Duration(seconds: 2)),
+    );
+    await audit.append(terminal);
+    final recovered = await audit.inspectRecovery('worker-audit-operation');
+    expect(
+      recovered.state,
+      CompositionLifecycleStorageMaintenanceRecoveryState.completed,
+    );
+    expect(
+      recovered.terminalStatus,
+      CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
+    );
+
+    final filtered = await audit.query(
+      CompositionLifecycleStorageMaintenanceAuditQuery(
+        operationId: 'worker-audit-operation',
+        status: CompositionLifecycleStorageMaintenanceOperationStatus.succeeded,
+        from: startedAt,
+        to: startedAt,
+      ),
+    );
+    expect(filtered.single.result!.recordsRemoved, 1);
+
+    await expectLater(
+      audit.append(record(
+        'worker-audit-operation',
+        CompositionLifecycleStorageMaintenanceOperationStatus.failed,
+        completedAt: startedAt.add(const Duration(seconds: 3)),
+      )),
+      throwsA(isA<CompositionLifecycleStorageMaintenanceAuditIdentityConflictException>()),
+    );
+  });
+
+  test('worker audit history survives worker shutdown and reopen', () async {
+    final path = '${directory.path}/worker-audit-reopen.sqlite';
+    var worker = await SqliteLifecycleEventStoreWorker.open(path: path);
+    await worker.maintenanceAuditStore.append(
+      CompositionLifecycleStorageMaintenanceOperationRecord(
+        operationId: 'restart-unknown',
+        status: CompositionLifecycleStorageMaintenanceOperationStatus.started,
+        requestedAt: DateTime.utc(2026, 11, 20, 5),
+        startedAt: DateTime.utc(2026, 11, 20, 5, 0, 1),
+        request: CompositionLifecycleStorageMaintenanceRequest(
+          maxEvents: 10,
+        ),
+      ),
+    );
+    await worker.close();
+
+    worker = await SqliteLifecycleEventStoreWorker.open(path: path);
+    addTearDown(worker.close);
+    final recovery = await worker.maintenanceAuditStore.inspectRecovery(
+      'restart-unknown',
+    );
+    expect(
+      recovery.state,
+      CompositionLifecycleStorageMaintenanceRecoveryState.outcomeUnknown,
+    );
+    expect(recovery.automaticRetryAllowed, isFalse);
+  });
+
+  test('worker audit proxy shares command ordering with lifecycle writes', () async {
+    final worker = await SqliteLifecycleEventStoreWorker.open(
+      path: '${directory.path}/worker-audit-order.sqlite',
+    );
+    addTearDown(worker.close);
+    final timestamp = DateTime.utc(2026, 11, 20, 4);
+    await worker.append(CompositionLifecycleEvent(
+      eventId: 'before-audit',
+      correlationId: 'worker-audit-order',
+      operation: CompositionLifecycleOperation.activate,
+      status: CompositionLifecycleStatus.succeeded,
+      timestamp: timestamp,
+      nodeIds: const ['command:worker-audit-order'],
+      ownerIds: const ['owner-worker-audit-order'],
+    ));
+    await worker.maintenanceAuditStore.append(
+      CompositionLifecycleStorageMaintenanceOperationRecord(
+        operationId: 'ordered-audit',
+        status: CompositionLifecycleStorageMaintenanceOperationStatus.started,
+        requestedAt: timestamp,
+        startedAt: timestamp,
+        request: CompositionLifecycleStorageMaintenanceRequest(
+          checkpoint: true,
+        ),
+      ),
+    );
+    final events = await worker.query(CompositionLifecycleEventQuery());
+    final audits = await worker.maintenanceAuditStore.query(
+      CompositionLifecycleStorageMaintenanceAuditQuery(),
+    );
+    expect(events.single.eventId, 'before-audit');
+    expect(audits.single.operationId, 'ordered-audit');
+  });
 }
