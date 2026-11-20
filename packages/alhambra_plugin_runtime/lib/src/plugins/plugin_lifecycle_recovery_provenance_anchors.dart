@@ -127,6 +127,11 @@ final class PluginRecoveryProvenanceAnchorPublisher {
     }
     final events = await provenanceStore.readAll();
     if (events.isEmpty) throw StateError('Cannot anchor an empty provenance chain.');
+    for (var i = 0; i < events.length; i++) {
+      if (events[i].sequence != i + 1) {
+        throw StateError('Provenance store must return a contiguous, sequence-ordered chain.');
+      }
+    }
     final head = events.last;
     final existing = await anchorStore.readAll(chainId);
     if (existing.isNotEmpty) {
@@ -255,8 +260,12 @@ final class PluginRecoveryProvenanceAnchorVerifier {
         failure = PluginRecoveryProvenanceAnchorDisposition.sequenceGap;
       } else if (anchor.provenanceSequence > events.length) {
         failure = PluginRecoveryProvenanceAnchorDisposition.provenanceHeadMissing;
-      } else if (events[anchor.provenanceSequence - 1].eventDigest !=
-          anchor.headEventDigest) {
+      } else if (events[anchor.provenanceSequence - 1].sequence !=
+              anchor.provenanceSequence ||
+          events[anchor.provenanceSequence - 1].eventDigestAlgorithm !=
+              anchor.headEventDigestAlgorithm ||
+          events[anchor.provenanceSequence - 1].eventDigest !=
+              anchor.headEventDigest) {
         failure = PluginRecoveryProvenanceAnchorDisposition.provenanceDigestMismatch;
       }
       if (failure != null) {
