@@ -200,6 +200,26 @@ void main() {
       ).verify();
       expect(report.disposition,
         PluginRecoveryProvenanceAnchorDisposition.provenanceDigestMismatch);
+
+      anchorStore.anchor = PluginRecoveryProvenanceAnchor(
+        chainId: anchor.chainId,
+        anchorSequence: anchor.anchorSequence,
+        provenanceSequence: anchor.provenanceSequence,
+        headEventDigestAlgorithm: anchor.headEventDigestAlgorithm,
+        headEventDigest: anchor.headEventDigest,
+        anchoredAt: anchor.anchoredAt,
+        signerKeyId: anchor.signerKeyId,
+        signatureAlgorithm: anchor.signatureAlgorithm,
+        signature: 'invalid-signature',
+      );
+      final invalidSignature = await PluginRecoveryProvenanceAnchorVerifier(
+        chainId: 'chain-a',
+        provenanceStore: provenanceStore,
+        anchorStore: anchorStore,
+        signatureVerifier: _SignatureVerifier(),
+      ).verify();
+      expect(invalidSignature.disposition,
+        PluginRecoveryProvenanceAnchorDisposition.invalidSignature);
     });
   });
 }
