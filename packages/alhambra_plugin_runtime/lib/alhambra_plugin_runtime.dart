@@ -161,3 +161,4 @@ export 'src/plugins/plugin_lifecycle_recovery_archive_package.dart';
 export 'src/plugins/plugin_lifecycle_recovery_archive_package_authenticity.dart';
 export 'src/plugins/plugin_lifecycle_recovery_provenance.dart';
 export 'src/plugins/plugin_lifecycle_recovery_provenance_anchors.dart';
+export 'src/plugins/plugin_lifecycle_recovery_provenance_observability.dart';

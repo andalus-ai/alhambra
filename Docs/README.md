@@ -66,3 +66,4 @@ Update this index whenever an architecture or developer document is added.
 - [Recovery archive package authenticity](RECOVERY_ARCHIVE_PACKAGE_AUTHENTICITY.md) — host-owned detached signatures, trust policy, and authenticated import.
 - [Recovery provenance and key governance](RECOVERY_PROVENANCE_AND_KEY_GOVERNANCE.md) — append-only archive operation history, chain verification, and signing-key lifecycle metadata.
 - [Recovery provenance production readiness](RECOVERY_PROVENANCE_PRODUCTION_READINESS.md) — adapter conformance, externally signed checkpoints, and production deployment guidance.
+- [Recovery provenance operational observability](RECOVERY_PROVENANCE_OPERATIONAL_OBSERVABILITY.md) — read-only timeline queries, chain/anchor/key health summaries, incident classification, and JSON audit exports.
