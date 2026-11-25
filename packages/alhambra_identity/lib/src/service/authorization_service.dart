@@ -6,14 +6,14 @@ import '../policy/policy_evaluator.dart';
 import '../repository/membership_repository.dart';
 import '../repository/role_repository.dart';
 
-/// Complete, production-grade authorization engine implementing the P11 security pipeline:
+/// Deny-by-default authorization engine.
 ///
-/// 1. Principal verification (System, Service, Agent, User)
-/// 2. Hard tenant isolation (request org vs resource org)
-/// 3. Active membership verification for UserPrincipal
-/// 4. Role and permission resolution
-/// 5. Policy evaluation with Deny-overrides-allow semantics
-/// 6. Optional audit emission
+/// User access requires an explicit organization context, active membership,
+/// configured membership and role repositories, and a matching role permission.
+/// Agent, service, and system principals require explicit permission allowlists.
+/// Optional policies are deny-only vetoes; they do not replace the permission
+/// checks above. Configure [requireAudit] when every decision must be persisted
+/// by a host-provided [AuthorizationAuditSink].
 final class DefaultAuthorizationService implements AuthorizationService {
   final MembershipRepository? _membershipRepo;
   final RoleRepository? _roleRepo;
@@ -21,6 +21,12 @@ final class DefaultAuthorizationService implements AuthorizationService {
   final List<AuthorizationPolicy> _policies;
   final Map<String, Set<String>> _agentPermissions;
   final Map<String, Set<String>> _servicePermissions;
+  final Set<String> _systemPermissions;
+  final AuthorizationAuditSink? _auditSink;
+  final bool _requireAudit;
+
+  /// Legacy synchronous notification. This callback is not a durable audit
+  /// guarantee; prefer [auditSink] for production audit persistence.
   final void Function(AuthorizationRequest request, AuthorizationDecision decision)?
       _auditCallback;
 
@@ -31,6 +37,10 @@ final class DefaultAuthorizationService implements AuthorizationService {
     List<AuthorizationPolicy> policies = const [],
     Map<String, Set<String>> agentPermissions = const {},
     Map<String, Set<String>> servicePermissions = const {},
+    Set<String> systemPermissions = const {},
+    AuthorizationAuditSink? auditSink,
+    bool requireAudit = false,
+    @Deprecated('Use auditSink for an awaitable audit persistence contract.')
     void Function(AuthorizationRequest request, AuthorizationDecision decision)?
         auditCallback,
   })  : _membershipRepo = membershipRepository,
@@ -39,7 +49,14 @@ final class DefaultAuthorizationService implements AuthorizationService {
         _policies = List.unmodifiable(policies),
         _agentPermissions = Map.unmodifiable(agentPermissions),
         _servicePermissions = Map.unmodifiable(servicePermissions),
-        _auditCallback = auditCallback;
+        _systemPermissions = Set.unmodifiable(systemPermissions),
+        _auditSink = auditSink,
+        _requireAudit = requireAudit,
+        _auditCallback = auditCallback {
+    if (auditSink != null && auditCallback != null) {
+      throw ArgumentError('Configure auditSink or auditCallback, not both.');
+    }
+  }
 
   @override
   Future<bool> isAllowed(AuthorizationRequest request) async {
@@ -50,94 +67,138 @@ final class DefaultAuthorizationService implements AuthorizationService {
   @override
   Future<AuthorizationDecision> authorize(AuthorizationRequest request) async {
     final decision = await _evaluateInternal(request);
+    final sink = _auditSink;
+
+    if (_requireAudit && sink == null) {
+      return const AuthorizationDecision.deny(
+        'Required authorization audit sink is not configured',
+      );
+    }
+
+    if (sink != null) {
+      try {
+        await sink.record(request, decision);
+      } catch (_) {
+        if (_requireAudit) {
+          return const AuthorizationDecision.deny(
+            'Required authorization audit persistence failed',
+          );
+        }
+      }
+    }
+
     _auditCallback?.call(request, decision);
     return decision;
   }
 
   Future<AuthorizationDecision> _evaluateInternal(
-      AuthorizationRequest request) async {
-    // 1. System principal has elevated access
-    if (request.principal is SystemPrincipal) {
-      return const AuthorizationDecision.allow(
-        reason: 'Allowed: Elevated SystemPrincipal',
-      );
-    }
-
-    // 2. Tenant isolation check: request org must match resource org if both are specified
-    final resOrg = request.resource.organizationId;
-    final reqOrg = request.organizationId;
-    if (resOrg != null && reqOrg != null && resOrg != reqOrg) {
+    AuthorizationRequest request,
+  ) async {
+    // Tenant-bound resources require an explicit matching request scope.
+    final resourceOrg = request.resource.organizationId;
+    final requestOrg = request.organizationId;
+    if (resourceOrg != null && requestOrg != resourceOrg) {
       return AuthorizationDecision.deny(
-        'Cross-tenant violation: request org ($reqOrg) does not match resource org ($resOrg)',
+        'Organization scope mismatch: request org (' +
+            requestOrg.toString() +
+            ') does not match resource org (' +
+            resourceOrg.toString() +
+            ')',
       );
     }
 
-    // 3. User Principal membership check
-    final targetOrg = resOrg ?? reqOrg;
-    if (request.principal is UserPrincipal) {
-      final userPrincipal = request.principal as UserPrincipal;
-      final membershipRepo = _membershipRepo;
-      if (targetOrg != null && membershipRepo != null) {
+    switch (request.principal) {
+      case UserPrincipal(:final userId):
+        if (requestOrg == null) {
+          return const AuthorizationDecision.deny(
+            'User authorization requires an explicit organization scope',
+          );
+        }
+
+        final membershipRepo = _membershipRepo;
+        if (membershipRepo == null) {
+          return const AuthorizationDecision.deny(
+            'Membership repository is not configured',
+          );
+        }
+
         final membership = await membershipRepo.findByUserAndOrg(
-          userPrincipal.userId,
-          targetOrg,
+          userId,
+          requestOrg,
         );
         if (membership == null || !membership.active) {
           return AuthorizationDecision.deny(
-            'User ${userPrincipal.userId} has no active membership in organization $targetOrg',
+            'User ' +
+                userId.toString() +
+                ' has no active membership in organization ' +
+                requestOrg.toString(),
           );
         }
 
-        // Check RBAC permissions from roles
         final roleRepo = _roleRepo;
-        if (roleRepo != null) {
-          final roleIds = membership.roleIds.map(RoleId.new);
-          final roles = await roleRepo.findByIds(roleIds);
-          final hasPerm = roles.any(
-            (r) => r.hasPermissionKey(request.permission.key),
+        if (roleRepo == null) {
+          return const AuthorizationDecision.deny(
+            'Role repository is not configured',
           );
-
-          if (!hasPerm) {
-            return AuthorizationDecision.deny(
-              'User ${userPrincipal.userId} lacks permission ${request.permission.key}',
-            );
-          }
         }
-      }
-    } else if (request.principal is AgentPrincipal) {
-      final agentId = (request.principal as AgentPrincipal).agentId;
-      final allowedPerms = _agentPermissions[agentId] ?? const {};
-      if (!allowedPerms.contains(request.permission.key)) {
-        return AuthorizationDecision.deny(
-          'Agent $agentId lacks permission ${request.permission.key}',
+
+        final roleIds = membership.roleIds.map(RoleId.new);
+        final roles = await roleRepo.findByIds(roleIds);
+        final hasPermission = roles.any(
+          (role) => role.hasPermissionKey(request.permission.key),
         );
-      }
-    } else if (request.principal is ServicePrincipal) {
-      final serviceId = (request.principal as ServicePrincipal).serviceId;
-      final allowedPerms = _servicePermissions[serviceId] ?? const {};
-      if (!allowedPerms.contains(request.permission.key)) {
-        return AuthorizationDecision.deny(
-          'Service $serviceId lacks permission ${request.permission.key}',
-        );
-      }
+        if (!hasPermission) {
+          return AuthorizationDecision.deny(
+            'User ' +
+                userId.toString() +
+                ' lacks permission ' +
+                request.permission.key,
+          );
+        }
+
+      case AgentPrincipal(:final agentId):
+        final allowed = _agentPermissions[agentId] ?? const <String>{};
+        if (!allowed.contains(request.permission.key)) {
+          return AuthorizationDecision.deny(
+            'Agent ' + agentId + ' lacks permission ' + request.permission.key,
+          );
+        }
+
+      case ServicePrincipal(:final serviceId):
+        final allowed = _servicePermissions[serviceId] ?? const <String>{};
+        if (!allowed.contains(request.permission.key)) {
+          return AuthorizationDecision.deny(
+            'Service ' +
+                serviceId +
+                ' lacks permission ' +
+                request.permission.key,
+          );
+        }
+
+      case SystemPrincipal():
+        if (!_systemPermissions.contains(request.permission.key)) {
+          return AuthorizationDecision.deny(
+            'System principal lacks explicitly configured permission ' +
+                request.permission.key,
+          );
+        }
     }
 
-    // 4. Governance & explicit deny policy evaluation (veto gate)
-    // Policies here act as deny-only vetoes — if a deny policy matches it blocks
-    // the request, but the absence of an allow policy is not itself a denial.
+    // Policies are optional deny-only vetoes. A policy allow cannot grant
+    // permission that the principal did not already possess.
     if (_policies.isNotEmpty) {
       final policyDecision = _policyEvaluator.evaluate(
         request: request,
         policies: _policies,
       );
-      // Only block if an explicit deny policy fired (not default-deny)
-      if (!policyDecision.allowed && policyDecision.matchedPolicies.isNotEmpty) {
+      if (!policyDecision.allowed &&
+          policyDecision.matchedPolicies.isNotEmpty) {
         return policyDecision;
       }
     }
 
     return const AuthorizationDecision.allow(
-      reason: 'Allowed: Passed RBAC and policy checks',
+      reason: 'Allowed: explicit principal permission and policy checks passed',
     );
   }
 }
