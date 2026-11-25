@@ -12,7 +12,7 @@ import '../repository/role_repository.dart';
 /// configured membership and role repositories, and a matching role permission.
 /// Agent, service, and system principals require explicit permission allowlists.
 /// Optional policies are deny-only vetoes; they do not replace the permission
-/// checks above. Configure [requireAudit] when every decision must be persisted
+/// checks above. Configure `requireAudit` when every decision must be persisted
 /// by a host-provided [AuthorizationAuditSink].
 final class DefaultAuthorizationService implements AuthorizationService {
   final MembershipRepository? _membershipRepo;
@@ -26,7 +26,7 @@ final class DefaultAuthorizationService implements AuthorizationService {
   final bool _requireAudit;
 
   /// Legacy synchronous notification. This callback is not a durable audit
-  /// guarantee; prefer [auditSink] for production audit persistence.
+  /// guarantee; prefer `auditSink` for production audit persistence.
   final void Function(AuthorizationRequest request, AuthorizationDecision decision)?
       _auditCallback;
 
