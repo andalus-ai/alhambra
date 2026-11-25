@@ -103,7 +103,7 @@ final class DefaultAuthorizationService implements AuthorizationService {
     final requestOrg = request.organizationId;
     if (resourceOrg != null && requestOrg != resourceOrg) {
       return AuthorizationDecision.deny(
-        'Organization scope mismatch: request org (' +
+        'Cross-tenant violation: organization scope mismatch: request org ( +
             requestOrg.toString() +
             ') does not match resource org (' +
             resourceOrg.toString() +
