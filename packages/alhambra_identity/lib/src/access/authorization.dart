@@ -65,3 +65,16 @@ abstract interface class AuthorizationService {
   /// Convenience method returning a boolean allowance.
   Future<bool> isAllowed(AuthorizationRequest request);
 }
+
+
+/// Host-provided authorization audit persistence contract.
+///
+/// Production adapters should persist the decision durably and return only
+/// after the write is committed. When required audit is enabled on
+/// [DefaultAuthorizationService], a missing sink or failed write causes denial.
+abstract interface class AuthorizationAuditSink {
+  Future<void> record(
+    AuthorizationRequest request,
+    AuthorizationDecision decision,
+  );
+}
