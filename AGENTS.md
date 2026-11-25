@@ -68,6 +68,15 @@ neighboring implementation and tests. Do not assume a directory name proves curr
 - Keep transport DTOs, persistence entities and product domain aggregates out of shared UI APIs.
 - Do not silently change defaults, ordering, retry behavior or failure semantics.
 
+## Identity and authorization safety
+
+- Authorization MUST deny by default. Missing tenant context, membership/role repositories, membership, role, permission, or required audit persistence MUST NOT become an allow.
+- A client-supplied principal type or organization scope is not proof of identity or authority. Hosts establish principals and scopes from trusted authentication and resource ownership data.
+- SystemPrincipal is a public in-process marker, not an unforgeable credential. Construct it only inside trusted host infrastructure and grant only narrow explicit permissions.
+- Capability declarations and UI visibility are not authorization. Every privileged action is checked by the owning backend.
+- In-memory identity repositories are test/reference adapters, not production persistence.
+- A synchronous audit callback is not durable audit. Use an awaitable audit sink and require it for operations whose policy mandates persisted audit.
+
 ## Plugin lifecycle, capability and recovery safety
 
 Plugin code may perform side effects. Changes in this area require explicit failure analysis.
