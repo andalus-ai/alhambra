@@ -98,6 +98,29 @@ Future<({
   );
 }
 
+class _RecordingAuditSink implements AuthorizationAuditSink {
+  final List<(AuthorizationRequest, AuthorizationDecision)> log;
+  _RecordingAuditSink(this.log);
+
+  @override
+  Future<void> record(
+    AuthorizationRequest request,
+    AuthorizationDecision decision,
+  ) async {
+    log.add((request, decision));
+  }
+}
+
+class _FailingAuditSink implements AuthorizationAuditSink {
+  @override
+  Future<void> record(
+    AuthorizationRequest request,
+    AuthorizationDecision decision,
+  ) async {
+    throw StateError('audit storage unavailable');
+  }
+}
+
 // ---------------------------------------------------------------------------
 // P11 Tests
 // ---------------------------------------------------------------------------
@@ -449,21 +472,112 @@ void main() {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 9. SystemPrincipal bypasses all checks
+  // 9. SystemPrincipal requires an explicit permission allowlist
   // ─────────────────────────────────────────────────────────────────────────
-  group('P11 SystemPrincipal elevated access', () {
-    test('SystemPrincipal always allowed regardless of org mismatch', () async {
+  group('P11 SystemPrincipal explicit permissions', () {
+    test('SystemPrincipal is denied by default', () async {
       final env = await _buildSvc(permKey: 'workspace:read');
       final req = _request(
         principal: const SystemPrincipal(),
         resource: 'workspace',
+        action: 'read',
+      );
+      final decision = await env.svc.authorize(req);
+      expect(decision.allowed, isFalse);
+      expect(decision.reason, contains('explicitly configured permission'));
+    });
+
+    test('SystemPrincipal only receives configured permission', () async {
+      final svc = DefaultAuthorizationService(
+        systemPermissions: {'workspace:read'},
+      );
+      final allowed = _request(
+        principal: const SystemPrincipal(),
+        resource: 'workspace',
+        action: 'read',
+      );
+      final denied = _request(
+        principal: const SystemPrincipal(),
+        resource: 'workspace',
         action: 'delete',
+      );
+      expect((await svc.authorize(allowed)).allowed, isTrue);
+      expect((await svc.authorize(denied)).allowed, isFalse);
+    });
+
+    test('SystemPrincipal cannot bypass organization mismatch', () async {
+      final svc = DefaultAuthorizationService(
+        systemPermissions: {'workspace:read'},
+      );
+      final req = _request(
+        principal: const SystemPrincipal(),
+        resource: 'workspace',
+        action: 'read',
         requestOrg: OrganizationId('org-x'),
         resourceOrg: OrganizationId('org-y'),
       );
-      final decision = await env.svc.authorize(req);
-      expect(decision.allowed, isTrue);
-      expect(decision.reason, contains('SystemPrincipal'));
+      expect((await svc.authorize(req)).allowed, isFalse);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 9b. Missing security dependencies fail closed
+  // ─────────────────────────────────────────────────────────────────────────
+  group('P11 Missing authorization context fails closed', () {
+    test('UserPrincipal without organization scope is denied', () async {
+      final env = await _buildSvc(permKey: 'workspace:read');
+      final req = _request(
+        principal: UserPrincipal(userId: env.userId),
+        resource: 'workspace',
+        action: 'read',
+      );
+      expect((await env.svc.authorize(req)).allowed, isFalse);
+    });
+
+    test('UserPrincipal with missing membership repository is denied', () async {
+      final svc = DefaultAuthorizationService(
+        roleRepository: InMemoryRoleRepository(),
+      );
+      final req = _request(
+        principal: UserPrincipal(userId: UserId('user-1')),
+        resource: 'workspace',
+        action: 'read',
+        requestOrg: OrganizationId('org-1'),
+      );
+      expect((await svc.authorize(req)).allowed, isFalse);
+    });
+
+    test('UserPrincipal with missing role repository is denied', () async {
+      final membershipRepo = InMemoryMembershipRepository();
+      final userId = UserId('user-1');
+      final orgId = OrganizationId('org-1');
+      await membershipRepo.save(Membership(
+        id: MembershipId('mbr-1'),
+        userId: userId,
+        organizationId: orgId,
+        roleIds: const {'role-viewer'},
+      ));
+      final svc = DefaultAuthorizationService(
+        membershipRepository: membershipRepo,
+      );
+      final req = _request(
+        principal: UserPrincipal(userId: userId),
+        resource: 'workspace',
+        action: 'read',
+        requestOrg: orgId,
+      );
+      expect((await svc.authorize(req)).allowed, isFalse);
+    });
+
+    test('Tenant resource without request organization is denied', () async {
+      final env = await _buildSvc(permKey: 'workspace:read');
+      final req = _request(
+        principal: UserPrincipal(userId: env.userId),
+        resource: 'workspace',
+        action: 'read',
+        resourceOrg: env.orgId,
+      );
+      expect((await env.svc.authorize(req)).allowed, isFalse);
     });
   });
 
@@ -781,6 +895,63 @@ void main() {
   // 15. Audit callback integration
   // ─────────────────────────────────────────────────────────────────────────
   group('P11 Audit callback integration', () {
+    test('required audit without a sink denies authorization', () async {
+      final env = await _buildSvc(permKey: 'workspace:read');
+      final svc = DefaultAuthorizationService(
+        membershipRepository: env.membershipRepo,
+        roleRepository: env.roleRepo,
+        requireAudit: true,
+      );
+      final req = _request(
+        principal: UserPrincipal(userId: env.userId),
+        resource: 'workspace',
+        action: 'read',
+        requestOrg: env.orgId,
+        resourceOrg: env.orgId,
+      );
+      expect((await svc.authorize(req)).allowed, isFalse);
+    });
+
+    test('required audit sink records decision before allow returns', () async {
+      final env = await _buildSvc(permKey: 'workspace:read');
+      final auditLog = <(AuthorizationRequest, AuthorizationDecision)>[];
+      final sink = _RecordingAuditSink(auditLog);
+      final svc = DefaultAuthorizationService(
+        membershipRepository: env.membershipRepo,
+        roleRepository: env.roleRepo,
+        auditSink: sink,
+        requireAudit: true,
+      );
+      final req = _request(
+        principal: UserPrincipal(userId: env.userId),
+        resource: 'workspace',
+        action: 'read',
+        requestOrg: env.orgId,
+        resourceOrg: env.orgId,
+      );
+      final decision = await svc.authorize(req);
+      expect(decision.allowed, isTrue);
+      expect(auditLog, hasLength(1));
+      expect(auditLog.single.$2.allowed, isTrue);
+    });
+
+    test('required audit sink failure denies authorization', () async {
+      final env = await _buildSvc(permKey: 'workspace:read');
+      final svc = DefaultAuthorizationService(
+        membershipRepository: env.membershipRepo,
+        roleRepository: env.roleRepo,
+        auditSink: _FailingAuditSink(),
+        requireAudit: true,
+      );
+      final req = _request(
+        principal: UserPrincipal(userId: env.userId),
+        resource: 'workspace',
+        action: 'read',
+        requestOrg: env.orgId,
+        resourceOrg: env.orgId,
+      );
+      expect((await svc.authorize(req)).allowed, isFalse);
+    });
     test('callback is invoked on ALLOW decision', () async {
       final auditLog = <(AuthorizationRequest, AuthorizationDecision)>[];
       final env = await _buildSvc(
