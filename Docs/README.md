@@ -15,6 +15,7 @@ Start here:
 - [Examples index](../examples/README.md) — all maintained examples.
 
 ## Architecture and ownership
+- [Identity authorization security contract](IDENTITY_AUTHORIZATION_SECURITY.md) — fail-closed behavior, principal trust boundaries, audit sink semantics and production limitations.
 - [Jezaku host integration contract](JEZAKU_HOST_INTEGRATION_CONTRACT.md) — consumer responsibilities, dependency pinning, backend authority, plugin execution boundary and adoption gates.
 - [UI package boundaries](ALHAMBRA_UI_PACKAGE_BOUNDARIES.md) — dependency direction and presentation-only rules.
 - [Application host composition](APPLICATION_HOST_COMPOSITION.md) — product ownership, profiles, layout selection and composition roots.
