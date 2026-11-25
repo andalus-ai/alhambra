@@ -47,8 +47,12 @@ final class DefaultAuthorizationService implements AuthorizationService {
         _roleRepo = roleRepository,
         _policyEvaluator = policyEvaluator,
         _policies = List.unmodifiable(policies),
-        _agentPermissions = Map.unmodifiable(agentPermissions),
-        _servicePermissions = Map.unmodifiable(servicePermissions),
+        _agentPermissions = Map.unmodifiable(agentPermissions.map(
+          (key, value) => MapEntry(key, Set<String>.unmodifiable(value)),
+        )),
+        _servicePermissions = Map.unmodifiable(servicePermissions.map(
+          (key, value) => MapEntry(key, Set<String>.unmodifiable(value)),
+        )),
         _systemPermissions = Set.unmodifiable(systemPermissions),
         _auditSink = auditSink,
         _requireAudit = requireAudit,
