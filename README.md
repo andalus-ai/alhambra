@@ -21,7 +21,7 @@ its product-specific composition belong in
 | `packages/alhambra_plugin_api` | Stable contracts for application and UI contributions |
 | `packages/alhambra_plugin_runtime` | Plugin lifecycle, registries, composition, and runtime services |
 | `packages/alhambra_sdk` | Developer-facing SDK for Alhambra extensions |
-| `packages/alhambra_identity` | Optional identity integration |
+| `packages/alhambra_identity` | Optional identity and authorization contracts/reference service (see security contract before production use) |
 | `packages/alhambra_workspace` | Optional generic workspace domain services |
 | `packages/alhambra_services` | Optional application services |
 | `packages/alhambra_data*` | Optional persistence adapters |
@@ -45,6 +45,10 @@ search services, or intelligence integrations.
 
 Product-specific packages may depend on Alhambra's public contracts. Alhambra
 must not depend on Cifr UI, Wayang, or another downstream product.
+
+## Identity and authorization security
+
+The optional `alhambra_identity` package includes identity/organization contracts and a deny-by-default reference authorization service. Its in-memory repositories are test/reference implementations; production hosts must supply durable adapters and trusted authentication boundaries. See [Identity authorization security contract](Docs/IDENTITY_AUTHORIZATION_SECURITY.md) before adopting it for privileged operations.
 
 ## Architecture principles
 
