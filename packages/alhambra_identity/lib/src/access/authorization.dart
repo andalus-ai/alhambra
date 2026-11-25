@@ -70,8 +70,8 @@ abstract interface class AuthorizationService {
 /// Host-provided authorization audit persistence contract.
 ///
 /// Production adapters should persist the decision durably and return only
-/// after the write is committed. When required audit is enabled on
-/// [DefaultAuthorizationService], a missing sink or failed write causes denial.
+/// after the write is committed. If the host requires audit persistence, it
+/// must configure this sink and deny access when persistence fails.
 abstract interface class AuthorizationAuditSink {
   Future<void> record(
     AuthorizationRequest request,
