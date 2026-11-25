@@ -453,6 +453,29 @@ void main() {
       expect(decision.reason, contains('no active membership'));
     });
 
+    test('An allow policy cannot replace missing user membership', () async {
+      final env = await _buildSvc(permKey: 'workspace:read');
+      final allowPolicy = FunctionalAuthorizationPolicy(
+        id: 'allow-everything',
+        name: 'Allow Everything',
+        effect: PolicyEffect.allow,
+        predicate: (_) => true,
+      );
+      final svc = DefaultAuthorizationService(
+        membershipRepository: env.membershipRepo,
+        roleRepository: env.roleRepo,
+        policies: [allowPolicy],
+      );
+      final req = _request(
+        principal: UserPrincipal(userId: UserId('user-stranger')),
+        resource: 'workspace',
+        action: 'read',
+        requestOrg: env.orgId,
+        resourceOrg: env.orgId,
+      );
+      expect((await svc.authorize(req)).allowed, isFalse);
+    });
+
     test('Inactive membership DENIES access', () async {
       final env = await _buildSvc(permKey: 'workspace:read');
       final membership =
