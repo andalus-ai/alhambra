@@ -24,9 +24,9 @@ final identityStore = SqliteIdentityStore(database);
 await identityStore.initialize();
 
 final authorization = DefaultAuthorizationService(
-  membershipRepository: identityStore,
-  roleRepository: identityStore,
-  auditSink: identityStore,
+  membershipRepository: identityStore.memberships,
+  roleRepository: identityStore.roles,
+  auditSink: identityStore.auditSink,
   requireAudit: true,
 );
 ```
