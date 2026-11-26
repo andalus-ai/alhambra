@@ -35,13 +35,13 @@ For stronger isolation, hosts should use separate service identities/credentials
 - With required audit enabled, a missing sink or sink failure returns a deny decision.
 - With required audit disabled, a sink is best-effort and its persistence failure does not change the authorization decision.
 - The legacy synchronous `auditCallback` is a notification hook only; it does not prove durability and is deprecated in favor of the sink contract.
-- The package does not provide a database-backed audit adapter merely by defining this interface.
+- The separate `alhambra_identity_sqlite` package provides a SQLite audit-sink adapter. Other database adapters remain host/provider responsibilities.
 
 Hosts remain responsible for audit schema, append-only controls, retention, access control, transaction boundaries, delivery/alerting, and operational recovery.
 
 ## 4. Persistence and deployment limitations
 
-The in-memory membership and role repositories are test/reference implementations. They are not durable, multi-process, or production persistence adapters. A production host must supply repositories with appropriate consistency, revocation visibility, transaction behavior, and operational guarantees.
+The in-memory membership and role repositories are test/reference implementations. The separate `alhambra_identity_sqlite` package supplies SQLite membership and role adapters for a trusted single-host deployment. SQLite is not automatically a shared multi-instance authorization store; clustered deployments need a database adapter designed for concurrent workers, transaction semantics, and immediate revocation visibility. A production host must validate consistency, backup/restore, encryption, revocation visibility, transaction behavior, and operational guarantees.
 
 The permission maps for agent, service, and system principals are host-supplied configuration. They are not a distributed grant store or a replacement for an authenticated service identity system.
 
