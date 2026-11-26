@@ -4,20 +4,24 @@ import 'package:alhambra_core/alhambra_core.dart';
 import 'package:alhambra_data/alhambra_data.dart';
 import 'package:alhambra_identity/alhambra_identity.dart';
 
-/// SQLite-backed membership and role repositories plus authorization audit.
+/// Owns the SQLite schema for Alhambra identity persistence.
 ///
 /// The caller owns the [Database] lifecycle. Call [initialize] after opening
-/// the database and before using any repository method.
-final class SqliteIdentityStore
-    implements MembershipRepository, RoleRepository, AuthorizationAuditSink {
+/// the database and before using [memberships], [roles], or [auditSink].
+final class SqliteIdentityStore {
   final Database _database;
+
+  late final SqliteMembershipRepository memberships =
+      SqliteMembershipRepository(_database);
+  late final SqliteRoleRepository roles = SqliteRoleRepository(_database);
+  late final SqliteAuthorizationAuditSink auditSink =
+      SqliteAuthorizationAuditSink(_database);
 
   SqliteIdentityStore(this._database);
 
-  /// Creates the identity tables and indexes if they do not already exist.
+  /// Creates identity tables and indexes if they do not already exist.
   ///
-  /// Run this during application startup after opening the database. Schema
-  /// evolution beyond this initial version should be managed by host migrations.
+  /// Schema evolution beyond this initial version belongs in host migrations.
   Future<void> initialize() async {
     await _database.execute('''
       CREATE TABLE IF NOT EXISTS alhambra_identity_memberships (
@@ -69,6 +73,13 @@ final class SqliteIdentityStore
       ON alhambra_authorization_audit (organization_id, occurred_at)
     ''');
   }
+}
+
+/// SQLite implementation of [MembershipRepository].
+final class SqliteMembershipRepository implements MembershipRepository {
+  final Database _database;
+
+  SqliteMembershipRepository(this._database);
 
   @override
   Future<Membership?> findByUserAndOrg(
@@ -128,6 +139,42 @@ final class SqliteIdentityStore
     });
   }
 
+  Membership _membershipFromRow(Map<String, Object?> row) {
+    final roleIds = (jsonDecode(_string(row, 'role_ids_json')) as List)
+        .map((value) => value as String)
+        .toSet();
+    final teamIds = (jsonDecode(_string(row, 'team_ids_json')) as List)
+        .map((value) => value as String)
+        .toSet();
+    return Membership(
+      id: MembershipId(_string(row, 'id')),
+      userId: UserId(_string(row, 'user_id')),
+      organizationId: OrganizationId(_string(row, 'organization_id')),
+      roleIds: roleIds,
+      teamIds: teamIds,
+      active: _integer(row, 'active') == 1,
+    );
+  }
+
+  String _string(Map<String, Object?> row, String key) {
+    final value = row[key];
+    if (value is! String) throw FormatException('Invalid $key column value');
+    return value;
+  }
+
+  int _integer(Map<String, Object?> row, String key) {
+    final value = row[key];
+    if (value is int) return value;
+    throw FormatException('Invalid $key column value');
+  }
+}
+
+/// SQLite implementation of [RoleRepository].
+final class SqliteRoleRepository implements RoleRepository {
+  final Database _database;
+
+  SqliteRoleRepository(this._database);
+
   @override
   Future<Role?> findById(RoleId id) async {
     final rows = await _database.query(
@@ -157,8 +204,8 @@ final class SqliteIdentityStore
 
   @override
   Future<void> save(Role role) async {
-    final permissionKeys = role.permissions.map((permission) => permission.key).toList()
-      ..sort();
+    final permissionKeys =
+        role.permissions.map((permission) => permission.key).toList()..sort();
     await _database.execute('''
       INSERT INTO alhambra_identity_roles (id, name, permissions_json)
       VALUES (:id, :name, :permissions_json)
@@ -172,11 +219,40 @@ final class SqliteIdentityStore
     });
   }
 
-  /// Appends an authorization decision. This future completes only after the
-  /// database adapter reports the insert as complete.
-  ///
-  /// For strict audit semantics, use a database configured for durable commits
-  /// and configure the authorization service with requireAudit: true.
+  Role _roleFromRow(Map<String, Object?> row) {
+    final keys = (jsonDecode(_string(row, 'permissions_json')) as List)
+        .map((value) => value as String);
+    return Role(
+      id: RoleId(_string(row, 'id')),
+      name: _string(row, 'name'),
+      permissions: keys.map(_permissionFromKey).toSet(),
+    );
+  }
+
+  Permission _permissionFromKey(String key) {
+    final separator = key.indexOf(':');
+    if (separator <= 0 || separator == key.length - 1) {
+      throw FormatException('Invalid persisted permission key: $key');
+    }
+    return Permission(
+      resource: key.substring(0, separator),
+      action: key.substring(separator + 1),
+    );
+  }
+
+  String _string(Map<String, Object?> row, String key) {
+    final value = row[key];
+    if (value is! String) throw FormatException('Invalid $key column value');
+    return value;
+  }
+}
+
+/// SQLite implementation of [AuthorizationAuditSink].
+final class SqliteAuthorizationAuditSink implements AuthorizationAuditSink {
+  final Database _database;
+
+  SqliteAuthorizationAuditSink(this._database);
+
   @override
   Future<void> record(
     AuthorizationRequest request,
@@ -211,55 +287,5 @@ final class SqliteIdentityStore
       'reason': decision.reason,
       'matched_policies_json': jsonEncode(decision.matchedPolicies),
     });
-  }
-
-  Membership _membershipFromRow(Map<String, Object?> row) {
-    final roleIds = (jsonDecode(_string(row, 'role_ids_json')) as List)
-        .map((value) => value as String)
-        .toSet();
-    final teamIds = (jsonDecode(_string(row, 'team_ids_json')) as List)
-        .map((value) => value as String)
-        .toSet();
-    return Membership(
-      id: MembershipId(_string(row, 'id')),
-      userId: UserId(_string(row, 'user_id')),
-      organizationId: OrganizationId(_string(row, 'organization_id')),
-      roleIds: roleIds,
-      teamIds: teamIds,
-      active: _integer(row, 'active') == 1,
-    );
-  }
-
-  Role _roleFromRow(Map<String, Object?> row) {
-    final keys = (jsonDecode(_string(row, 'permissions_json')) as List)
-        .map((value) => value as String);
-    return Role(
-      id: RoleId(_string(row, 'id')),
-      name: _string(row, 'name'),
-      permissions: keys.map(_permissionFromKey).toSet(),
-    );
-  }
-
-  Permission _permissionFromKey(String key) {
-    final separator = key.indexOf(':');
-    if (separator <= 0 || separator == key.length - 1) {
-      throw FormatException('Invalid persisted permission key: $key');
-    }
-    return Permission(
-      resource: key.substring(0, separator),
-      action: key.substring(separator + 1),
-    );
-  }
-
-  String _string(Map<String, Object?> row, String key) {
-    final value = row[key];
-    if (value is! String) throw FormatException('Invalid $key column value');
-    return value;
-  }
-
-  int _integer(Map<String, Object?> row, String key) {
-    final value = row[key];
-    if (value is int) return value;
-    throw FormatException('Invalid $key column value');
   }
 }
