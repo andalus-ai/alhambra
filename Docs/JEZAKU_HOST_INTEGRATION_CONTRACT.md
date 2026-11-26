@@ -35,7 +35,7 @@ Alhambra must not acquire Jezaku-specific policy or become the source of truth f
 - Every privileged API validates the authenticated principal and current server-side grant/scope. Client route visibility, UI state, Alhambra capabilities, plugin manifests, and JWT role-like display hints are not authorization.
 - Domain services validate ownership and domain invariants even when a request originated from an authenticated admin.
 - High-impact operations use explicit approval/step-up controls where required by Jezaku policy.
-- Alhambra's current identity authorization implementation is not approved as Jezaku's production enforcement point until its fail-closed behavior and persistence/audit adapters have been independently reviewed and tested.
+- Alhambra identity authorization now denies when user tenant context, membership/role repositories, active membership, explicit principal permissions, or required audit persistence are missing. The separate `alhambra_identity_sqlite` package supplies SQLite membership, role, and audit adapters for a deliberate single-host deployment. These remain optional host building blocks, not Jezaku's production enforcement point: Quarkus continues to own Jezaku authentication, grants, policy, scopes and audit. Clustered deployments require a shared persistence adapter and an explicit revocation-consistency strategy.
 
 ## 5. Plugin execution and marketplace boundary
 
@@ -58,19 +58,20 @@ A declarative, schema-validated contribution format may be appropriate for simpl
 - Keep ownership tables and links current.
 
 ### Stage B — Alhambra security hardening
-- Review authorization behavior for every principal type.
-- Require explicit scope and configured policy dependencies; deny on missing security-critical configuration.
-- Constrain privileged/system principals to explicit trusted host boundaries.
-- Define audit sink semantics and distinguish callback notification from durable audit.
-- Add adversarial tests for missing organization, repositories, roles, permissions, inactive membership, cross-scope access and privileged principals.
-- Document which persistence adapters are reference/in-memory versus production-capable.
+- [x] Review authorization behavior for every principal type.
+- [x] Require explicit scope and configured membership/role dependencies; deny on missing security-critical configuration.
+- [x] Constrain system-principal permissions to an explicit host allowlist and document its in-process trust limitation.
+- [x] Define awaitable audit sink semantics and distinguish callback notification from durable audit.
+- [x] Add adversarial tests for missing organization, repositories, policy grants, cross-scope access and privileged principals.
+- [x] Add SQLite membership, role and audit adapters with dedicated analyze/test CI.
+- [x] Document in-memory versus SQLite persistence and single-host deployment limitations.
 
 ### Stage C — UI package adoption
-- Validate package dependency resolution and SDK compatibility from Jezaku.
-- Pin exact revisions.
-- Integrate only the UI packages needed by `UI/jezaku_admin`.
-- Preserve the backend authorization boundary and explicit disconnected/unavailable UI states.
-- Run Flutter analyze, widget tests and supported builds.
+- [ ] Validate package dependency resolution and SDK compatibility from Jezaku.
+- [ ] Pin exact revisions.
+- [ ] Integrate only the UI packages needed by `UI/jezaku_admin`.
+- [ ] Preserve the backend authorization boundary and explicit disconnected/unavailable UI states.
+- [ ] Run Flutter analyze, widget tests and supported builds.
 
 ### Stage D — Extension governance
 - Design Jezaku marketplace policy and package lifecycle.
