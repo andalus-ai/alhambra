@@ -1,0 +1,48 @@
+name: Alhambra Identity SQLite
+
+on:
+  push:
+    paths:
+      - "packages/alhambra_identity_sqlite/**"
+      - "packages/alhambra_identity/**"
+      - "packages/alhambra_data/**"
+      - "packages/alhambra_data_sqlite/**"
+      - "packages/alhambra_core/**"
+      - ".github/workflows/alhambra-identity-sqlite.yml"
+  pull_request:
+    paths:
+      - "packages/alhambra_identity_sqlite/**"
+      - "packages/alhambra_identity/**"
+      - "packages/alhambra_data/**"
+      - "packages/alhambra_data_sqlite/**"
+      - "packages/alhambra_core/**"
+      - ".github/workflows/alhambra-identity-sqlite.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity-sqlite:
+    name: Analyze and test identity SQLite adapters
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/alhambra_identity_sqlite
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Resolve dependencies
+        run: dart pub get
+
+      - name: Analyze
+        run: dart analyze
+
+      - name: Run tests
+        run: dart test
