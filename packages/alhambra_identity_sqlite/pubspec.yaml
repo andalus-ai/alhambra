@@ -1,0 +1,22 @@
+name: alhambra_identity_sqlite
+description: SQLite persistence adapters for Alhambra identity membership, roles, and authorization audit.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  alhambra_core:
+    path: ../alhambra_core
+  alhambra_data:
+    path: ../alhambra_data
+  alhambra_data_sqlite:
+    path: ../alhambra_data_sqlite
+  alhambra_identity:
+    path: ../alhambra_identity
+  meta: ^1.11.0
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^3.0.0
