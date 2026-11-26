@@ -143,7 +143,7 @@ void main() {
   test('required audit persistence composes with authorization service', () async {
     final userId = UserId('user-1');
     final orgId = OrganizationId('org-1');
-    await store.save(Role(
+    await store.roles.save(Role(
       id: RoleId('reader'),
       name: 'Reader',
       permissions: {const Permission(resource: 'workspace', action: 'read')},
