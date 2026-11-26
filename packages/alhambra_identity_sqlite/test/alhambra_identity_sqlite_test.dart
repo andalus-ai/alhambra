@@ -28,8 +28,8 @@ void main() {
       teamIds: {'team-a'},
     );
 
-    await store.save(membership);
-    final actual = await store.findByUserAndOrg(
+    await store.memberships.save(membership);
+    final actual = await store.memberships.findByUserAndOrg(
       UserId('user-1'),
       OrganizationId('org-1'),
     );
@@ -42,13 +42,13 @@ void main() {
   });
 
   test('upserts membership for the same user and organization', () async {
-    await store.save(Membership(
+    await store.memberships.save(Membership(
       id: MembershipId('membership-old'),
       userId: UserId('user-1'),
       organizationId: OrganizationId('org-1'),
       roleIds: {'reader'},
     ));
-    await store.save(Membership(
+    await store.memberships.save(Membership(
       id: MembershipId('membership-new'),
       userId: UserId('user-1'),
       organizationId: OrganizationId('org-1'),
@@ -56,7 +56,7 @@ void main() {
       active: false,
     ));
 
-    final actual = await store.findByUserAndOrg(
+    final actual = await store.memberships.findByUserAndOrg(
       UserId('user-1'),
       OrganizationId('org-1'),
     );
@@ -66,24 +66,24 @@ void main() {
   });
 
   test('lists memberships by user and organization', () async {
-    await store.save(Membership(
+    await store.memberships.save(Membership(
       id: MembershipId('m-1'),
       userId: UserId('user-1'),
       organizationId: OrganizationId('org-1'),
     ));
-    await store.save(Membership(
+    await store.memberships.save(Membership(
       id: MembershipId('m-2'),
       userId: UserId('user-1'),
       organizationId: OrganizationId('org-2'),
     ));
-    await store.save(Membership(
+    await store.memberships.save(Membership(
       id: MembershipId('m-3'),
       userId: UserId('user-2'),
       organizationId: OrganizationId('org-1'),
     ));
 
-    expect(await store.findByUser(UserId('user-1')), hasLength(2));
-    expect(await store.findByOrg(OrganizationId('org-1')), hasLength(2));
+    expect(await store.memberships.findByUser(UserId('user-1')), hasLength(2));
+    expect(await store.memberships.findByOrg(OrganizationId('org-1')), hasLength(2));
   });
 
   test('persists roles and canonical permission keys', () async {
@@ -96,15 +96,15 @@ void main() {
       },
     );
 
-    await store.save(role);
-    final actual = await store.findById(RoleId('tenant-operator'));
+    await store.roles.save(role);
+    final actual = await store.roles.findById(RoleId('tenant-operator'));
 
     expect(actual, isNotNull);
     expect(actual!.name, role.name);
     expect(actual.permissions, role.permissions);
     expect(actual.hasPermissionKey('workspace:read'), isTrue);
-    expect(await store.findByIds([RoleId('tenant-operator')]), hasLength(1));
-    expect(await store.findAll(), hasLength(1));
+    expect(await store.roles.findByIds([RoleId('tenant-operator')]), hasLength(1));
+    expect(await store.roles.findAll(), hasLength(1));
   });
 
   test('persists authorization audit decisions', () async {
@@ -119,7 +119,7 @@ void main() {
       organizationId: OrganizationId('org-1'),
     );
 
-    await store.record(
+    await store.auditSink.record(
       request,
       const AuthorizationDecision.deny(
         'explicit deny',
@@ -148,7 +148,7 @@ void main() {
       name: 'Reader',
       permissions: {const Permission(resource: 'workspace', action: 'read')},
     ));
-    await store.save(Membership(
+    await store.memberships.save(Membership(
       id: MembershipId('membership-1'),
       userId: userId,
       organizationId: orgId,
@@ -156,9 +156,9 @@ void main() {
     ));
 
     final authorization = DefaultAuthorizationService(
-      membershipRepository: store,
-      roleRepository: store,
-      auditSink: store,
+      membershipRepository: store.memberships,
+      roleRepository: store.roles,
+      auditSink: store.auditSink,
       requireAudit: true,
     );
     final decision = await authorization.authorize(AuthorizationRequest(
