@@ -22,6 +22,7 @@ its product-specific composition belong in
 | `packages/alhambra_plugin_runtime` | Plugin lifecycle, registries, composition, and runtime services |
 | `packages/alhambra_sdk` | Developer-facing SDK for Alhambra extensions |
 | `packages/alhambra_identity` | Optional identity and authorization contracts/reference service (see security contract before production use) |
+| `packages/alhambra_identity_sqlite` | Optional SQLite membership, role, and authorization-audit adapters |
 | `packages/alhambra_workspace` | Optional generic workspace domain services |
 | `packages/alhambra_services` | Optional application services |
 | `packages/alhambra_data*` | Optional persistence adapters |
@@ -48,7 +49,7 @@ must not depend on Cifr UI, Wayang, or another downstream product.
 
 ## Identity and authorization security
 
-The optional `alhambra_identity` package includes identity/organization contracts and a deny-by-default reference authorization service. Its in-memory repositories are test/reference implementations; production hosts must supply durable adapters and trusted authentication boundaries. See [Identity authorization security contract](Docs/IDENTITY_AUTHORIZATION_SECURITY.md) before adopting it for privileged operations.
+The optional `alhambra_identity` package includes identity/organization contracts and a deny-by-default reference authorization service. Its in-memory repositories are test/reference implementations. The separate `alhambra_identity_sqlite` package supplies SQLite membership, role, and authorization-audit adapters for suitable single-host deployments; clustered deployments need a shared database adapter. Hosts remain responsible for trusted authentication boundaries, migration/backup, and operational hardening. See [Identity authorization security contract](Docs/IDENTITY_AUTHORIZATION_SECURITY.md) before adopting it for privileged operations.
 
 ## Architecture principles
 
