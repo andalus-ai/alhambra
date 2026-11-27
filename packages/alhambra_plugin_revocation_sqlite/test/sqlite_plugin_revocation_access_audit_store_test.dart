@@ -91,6 +91,48 @@ void main() {
       expect(records.single.actorId, 'operator-10');
     });
 
+    test('backfills pre-existing audit rows on first chain migration', () async {
+      database.execute('''
+        CREATE TABLE alhambra_plugin_revocation_access_audit (
+          audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          actor_id TEXT NOT NULL,
+          scope_id TEXT NOT NULL,
+          decision TEXT NOT NULL,
+          denial_code TEXT,
+          occurred_at TEXT NOT NULL,
+          resource TEXT,
+          page_size INTEGER,
+          continuation_requested INTEGER,
+          query_fingerprint TEXT
+        )
+      ''');
+      database.execute('''
+        INSERT INTO alhambra_plugin_revocation_access_audit (
+          actor_id, scope_id, decision, occurred_at
+        ) VALUES ('legacy-operator', 'legacy-scope', 'allowed',
+                  '2026-11-17T08:00:00.000000Z')
+      ''');
+
+      final migratedStore = SqlitePluginRevocationAccessAuditStore(database)
+        ..migrate();
+      final result = await migratedStore.verifyAccessAuditChain(
+        scopeId: 'legacy-scope',
+      );
+      expect(result.valid, isTrue);
+      expect(result.entriesVerified, 1);
+    });
+
+    test('detects an audit row inserted outside the chained append API', () async {
+      database.execute('''
+        INSERT INTO alhambra_plugin_revocation_access_audit (
+          actor_id, scope_id, decision, occurred_at
+        ) VALUES ('bypass', 'scope-a', 'allowed',
+                  '2026-11-17T08:00:00.000000Z')
+      ''');
+      final result = await store.verifyAccessAuditChain(scopeId: 'scope-a');
+      expect(result.valid, isFalse);
+    });
+
     test('verifies independent per-scope hash chains', () async {
       await store.append(_audit(
         actor: 'operator-a',
