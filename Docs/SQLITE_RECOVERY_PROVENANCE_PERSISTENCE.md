@@ -100,8 +100,10 @@ The package tests exercise close/reopen durability, independent-connection
 append races, the shared `PluginRecoveryProvenanceConformanceSuite` against
 all three SQLite store views, stale-head rejection, duplicate key-history
 sequence rejection, per-chain anchor sequence isolation, health diagnostics,
-and explicit WAL checkpoint behavior. These tests are still in-process and
-independent-connection tests; they do not establish cross-process contention,
-power-loss durability, or backup/restore correctness. Hosts should additionally
-run multi-process tests on the production filesystem and validate their
-backup/restore process against independently retained anchors.
+explicit WAL checkpoint behavior, competing writers in separate OS processes,
+rollback after terminating a process with an open transaction, and a
+`VACUUM INTO` backup/restore round trip. These are integration tests on the
+test host's local filesystem; they do not establish power-loss durability,
+filesystem-specific behavior, off-host backup integrity, or recovery from
+hardware/storage failure. Hosts must still validate their production filesystem
+and backup lifecycle against independently retained signed anchors.
