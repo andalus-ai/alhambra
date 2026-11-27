@@ -49,9 +49,18 @@ The integration suite covers:
    higher token. The stale worker is then challenged against all three fenced
    mutation surfaces (journal, filesystem and installed-plugin store), before
    the recovery worker safely rolls back the interrupted operation.
+5. A journal outage after the recovery side effect, followed by restart and
+   confirmation that a second automated execution is rejected. An operator
+   then records an explicit `absentAndClean` conclusion, which closes the
+   journal and appends a durable audit record without changing filesystem or
+   installed-record state.
 
 The focused integration tests live in
-`packages/alhambra_plugin_install_sqlite/test/plugin_install_recovery_integration_test.dart`.
+`packages/alhambra_plugin_install_sqlite/test/plugin_install_recovery_integration_test.dart`;
+recovery interruption fault-injection coverage lives in
+`packages/alhambra_plugin_install_sqlite/test/plugin_install_recovery_interruption_test.dart`;
+manual reconciliation CAS, audit persistence and schema-reopen coverage lives in
+`packages/alhambra_plugin_install_sqlite/test/sqlite_plugin_install_manual_reconciliation_test.dart`.
 Adapter-specific persistence and concurrency tests remain in their respective
 package test directories.
 
