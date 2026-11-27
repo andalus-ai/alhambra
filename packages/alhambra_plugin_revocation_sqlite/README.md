@@ -104,3 +104,30 @@ final adminPages = PluginRevocationAdminPageService(
 ```
 
 Audit writes use `BEGIN IMMEDIATE` and commit before the service begins the protected inspection query. Reads are scope-filtered in SQL, ordered newest-first with a stable audit-id tie-breaker, and support a half-open time range plus a bounded limit (1–500). The adapter does not own or close the supplied database. Keep this database file and its backups under the same access controls as other security audit data; consider a separate file from the operational revocation store when independent retention or access controls are required.
+
+
+## Tamper-evident access-audit chain
+
+The adapter also implements the optional
+`PluginRevocationAccessAuditChainStore` capability. Each append atomically
+writes the audit row, a per-scope SHA-256 chain entry, and the per-scope chain
+head under `BEGIN IMMEDIATE`.
+
+```dart
+final verification = await accessAudits.verifyAccessAuditChain(
+  scopeId: authorizedScopeId,
+);
+if (!verification.valid) {
+  reportAuditIntegrityFailure(verification);
+}
+```
+
+The first migration that creates the chain tables backfills existing audit
+rows in stable audit-ID order. Later migrations do not silently repair a
+previously created chain. All new records must be appended through the adapter;
+direct audit-table inserts are detected as unchained records. Restrict UPDATE
+and DELETE on the audit, chain, and head tables. A local hash chain detects
+edits to covered rows but cannot prevent a privileged database operator from
+rewriting all local chain state. Use signed external checkpoints or immutable
+archival for stronger tamper evidence. See
+[Revocation Access-Audit Hash Chain](../../Docs/REVOCATION_ACCESS_AUDIT_HASH_CHAIN.md).
