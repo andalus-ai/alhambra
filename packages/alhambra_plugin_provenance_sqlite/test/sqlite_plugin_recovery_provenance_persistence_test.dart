@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:alhambra_plugin_provenance_sqlite/alhambra_plugin_provenance_sqlite.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
+import 'package:alhambra_plugin_test/alhambra_plugin_test.dart';
 import 'package:test/test.dart';
 
 PluginRecoveryProvenanceEvent provenanceEvent({
@@ -144,7 +145,6 @@ void main() {
       ), isFalse);
     });
 
-
     test('rejects duplicate provenance IDs and non-monotonic anchors', () async {
       final store = openStore();
       expect(await store.provenanceStore.appendIfHeadMatches(
@@ -172,6 +172,90 @@ void main() {
         anchor: anchor(sequence: 2, provenanceSequence: 1),
       ), isFalse);
       expect((await store.anchorStore.readAll('chain-a')).length, 1);
+    });
+
+    test('passes the shared recovery provenance adapter conformance suite', () async {
+      final store = openStore();
+      const suite = PluginRecoveryProvenanceConformanceSuite();
+
+      final provenance = await suite.verifyProvenanceStore(
+        store: store.provenanceStore,
+        runId: 'sqlite-provenance',
+        fixture: ({
+          required String eventId,
+          required int sequence,
+          required String? previousEventDigest,
+        }) => provenanceEvent(
+          sequence: sequence,
+          id: eventId,
+          previous: previousEventDigest,
+        ),
+      );
+      final keyHistory = await suite.verifySigningKeyHistoryStore(
+        store: store.keyHistoryStore,
+        runId: 'sqlite-key-history',
+        fixture: ({
+          required String eventId,
+          required int sequence,
+        }) => keyEvent(sequence: sequence, id: eventId),
+      );
+      final anchors = await suite.verifyAnchorStore(
+        store: store.anchorStore,
+        chainId: 'sqlite-conformance-chain',
+        runId: 'sqlite-anchor',
+      );
+
+      expect(provenance.isConformant, isTrue,
+          reason: provenance.checks.map((check) => '${check.name}: ${check.detail}').join('\n'));
+      expect(keyHistory.isConformant, isTrue,
+          reason: keyHistory.checks.map((check) => '${check.name}: ${check.detail}').join('\n'));
+      expect(anchors.isConformant, isTrue,
+          reason: anchors.checks.map((check) => '${check.name}: ${check.detail}').join('\n'));
+    });
+
+    test('reports database configuration, counts, and quick-check health', () async {
+      final store = openStore();
+      expect(await store.provenanceStore.appendIfHeadMatches(
+        expectedSequence: 0,
+        expectedHeadDigest: null,
+        event: provenanceEvent(sequence: 1, id: 'health-event'),
+      ), isTrue);
+      final health = store.inspect();
+
+      expect(health.schemaVersion, 1);
+      expect(health.journalMode.toLowerCase(), 'wal');
+      expect(health.synchronousMode, 2);
+      expect(health.busyTimeoutMilliseconds, 5000);
+      expect(health.provenanceEventCount, 1);
+      expect(health.anchorCount, 0);
+      expect(health.signingKeyEventCount, 0);
+      expect(health.quickCheckResult, 'ok');
+      expect(health.quickCheckPassed, isTrue);
+    });
+
+    test('supports explicit WAL checkpoint and reports its result', () async {
+      final store = openStore();
+      expect(await store.provenanceStore.appendIfHeadMatches(
+        expectedSequence: 0,
+        expectedHeadDigest: null,
+        event: provenanceEvent(sequence: 1, id: 'checkpoint-event'),
+      ), isTrue);
+
+      final checkpoint = store.checkpointWal();
+      expect(checkpoint.busy, 0);
+      expect(
+        checkpoint.checkpointedFrames,
+        lessThanOrEqualTo(checkpoint.logFrames),
+      );
+    });
+
+    test('rejects WAL checkpoint for in-memory databases', () {
+      final store = SqlitePluginRecoveryProvenancePersistence.memory();
+      addTearDown(store.close);
+      expect(
+        () => store.checkpointWal(),
+        throwsStateError,
+      );
     });
 
     test('isolates anchor sequence per chain', () async {

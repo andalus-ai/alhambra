@@ -12,4 +12,6 @@ dependencies:
   sqlite3: ^2.7.5
 
 dev_dependencies:
+  alhambra_plugin_test:
+    path: ../alhambra_plugin_test
   test: ^1.25.0
