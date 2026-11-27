@@ -23,6 +23,9 @@ Start here:
 - [Explicit plugin bundle composition](PLUGIN_BUNDLE_COMPOSITION.md) — compiled host-supplied bundles and activation failures.
 - [Layout plugin extensibility](LAYOUT_PLUGIN_EXTENSIBILITY.md) — layout extension contracts and compatibility.
 
+## Installation and recovery
+- [Transactional installation crash-recovery conformance](INSTALLATION_CRASH_RECOVERY_CONFORMANCE.md) — durable worker fencing, interruption handling, operator-controlled reconciliation and bounded audit inspection.
+
 ## Plugin contracts and lifecycle
 - [Plugin developer guide](PLUGIN_DEVELOPER_GUIDE.md) — implement, compose, test and operate a plugin.
 - [Plugin test utilities](../packages/alhambra_plugin_test/README.md) — in-process test host and metadata, packaging, discovery and lifecycle conformance checks.
