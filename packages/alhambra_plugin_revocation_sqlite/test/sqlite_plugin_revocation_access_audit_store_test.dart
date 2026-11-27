@@ -91,6 +91,67 @@ void main() {
       expect(records.single.actorId, 'operator-10');
     });
 
+    test('verifies independent per-scope hash chains', () async {
+      await store.append(_audit(
+        actor: 'operator-a',
+        scope: 'scope-a',
+        at: DateTime.utc(2026, 11, 17, 8),
+      ));
+      await store.append(_audit(
+        actor: 'operator-b',
+        scope: 'scope-a',
+        at: DateTime.utc(2026, 11, 17, 9),
+      ));
+      await store.append(_audit(
+        actor: 'operator-c',
+        scope: 'scope-b',
+        at: DateTime.utc(2026, 11, 17, 10),
+      ));
+
+      final first = await store.verifyAccessAuditChain(scopeId: 'scope-a');
+      final second = await store.verifyAccessAuditChain(scopeId: 'scope-b');
+      expect(first.valid, isTrue);
+      expect(first.entriesVerified, 2);
+      expect(first.headHash, isNot(PluginRevocationAccessAuditChainCodec.genesisHash));
+      expect(second.valid, isTrue);
+      expect(second.entriesVerified, 1);
+    });
+
+    test('detects audit-row edits and a rewritten chain head', () async {
+      await store.append(_audit(
+        actor: 'operator-a',
+        scope: 'scope-a',
+        at: DateTime.utc(2026, 11, 17, 8),
+      ));
+      expect(
+        (await store.verifyAccessAuditChain(scopeId: 'scope-a')).valid,
+        isTrue,
+      );
+
+      database.execute(
+        "UPDATE alhambra_plugin_revocation_access_audit "
+        "SET actor_id = 'rewritten' WHERE scope_id = 'scope-a'",
+      );
+      final tampered = await store.verifyAccessAuditChain(scopeId: 'scope-a');
+      expect(tampered.valid, isFalse);
+      expect(tampered.failedSequence, 1);
+    });
+
+    test('detects deletion or alteration of the persisted chain head', () async {
+      await store.append(_audit(
+        actor: 'operator-a',
+        scope: 'scope-a',
+        at: DateTime.utc(2026, 11, 17, 8),
+      ));
+      database.execute(
+        "UPDATE alhambra_plugin_revocation_access_audit_chain_head "
+        "SET head_hash = 'bad' WHERE scope_id = 'scope-a'",
+      );
+      final result = await store.verifyAccessAuditChain(scopeId: 'scope-a');
+      expect(result.valid, isFalse);
+      expect(result.failedSequence, 2);
+    });
+
     test('rejects invalid scope, limit and time range', () async {
       await expectLater(
         store.readAccessAudits(scopeId: ' '),
