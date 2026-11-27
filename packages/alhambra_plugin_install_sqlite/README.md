@@ -130,7 +130,7 @@ A successful call appends an immutable reconciliation record and a journal histo
 
 The journal exposes a bounded read-only audit projection through
 `PluginInstallAuditStore`. The default page size is 100 and the maximum is
-500; offsets must be non-negative. Time filters use UTC instants, with
+500; offsets are limited to 0–100,000. Time filters use UTC instants, with
 `from` inclusive and `to` exclusive.
 
 ```dart
