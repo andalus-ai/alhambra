@@ -28,7 +28,9 @@ final class SqlitePluginRecoveryWalCheckpointResult {
       busy == 0 && logFrames == checkpointedFrames;
 }
 
-/// Read-only diagnostics for one SQLite provenance database. The values are\n/// collected by separate statements and are not a transactionally consistent\n/// snapshot while writers are active.
+/// Read-only diagnostics for one SQLite provenance database. The values are
+/// collected by separate statements and are not a transactionally consistent
+/// snapshot while writers are active.
 final class SqlitePluginRecoveryProvenanceDiagnostics {
   final int schemaVersion;
   final String journalMode;
