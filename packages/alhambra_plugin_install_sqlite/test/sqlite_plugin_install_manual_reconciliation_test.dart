@@ -89,6 +89,44 @@ void main() {
       expect(await journal.unresolved(), isEmpty);
     });
 
+    test('rejects reconciliation from a stale fencing token', () async {
+      final journal = SqlitePluginInstallJournal.memory();
+      addTearDown(journal.close);
+      const operationId = 'install-manual-reconcile-fence';
+      final claimedAt = DateTime.utc(2026, 11, 27, 12);
+      expect(await journal.advanceFence(
+        operationId: operationId,
+        fencingToken: 8,
+      ), isTrue);
+      await journal.write(PluginInstallJournalEntry(
+        operationId: operationId,
+        pluginId: 'example.manual.fence',
+        version: '1.0.0',
+        status: PluginInstallJournalStatus.recoveryStarted,
+        updatedAt: claimedAt,
+        fencingToken: 8,
+      ));
+      expect(await journal.advanceFence(
+        operationId: operationId,
+        fencingToken: 9,
+      ), isTrue);
+      await expectLater(
+        journal.reconcileManually(
+          operationId: operationId,
+          expectedUpdatedAt: claimedAt,
+          resolution: PluginInstallManualResolution.residualStateAccepted,
+          resolutionId: 'manual-resolution-stale-fence',
+          operatorId: 'host-operator',
+          evidenceSummary: 'Reviewed after a newer worker took ownership.',
+          resolvedAt: claimedAt.add(const Duration(minutes: 1)),
+        ),
+        throwsStateError,
+      );
+      expect((await journal.read(operationId))?.status,
+          PluginInstallJournalStatus.recoveryStarted);
+      expect(await journal.manualReconciliations(operationId), isEmpty);
+    });
+
     test('rejects stale timestamps and invalid evidence without mutation',
         () async {
       final journal = SqlitePluginInstallJournal.memory();
