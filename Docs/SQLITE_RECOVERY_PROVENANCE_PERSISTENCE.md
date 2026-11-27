@@ -48,6 +48,45 @@ database on object storage or an unreliable network filesystem. Backups,
 restore validation, encryption at rest, retention, and external tamper-evident
 anchors remain host responsibilities.
 
+## Operational diagnostics and maintenance
+
+The adapter exposes an explicit, read-only `inspect()` operation. It reports
+the schema version, journal mode, synchronous setting, busy timeout, row
+counts for each append-only table, and SQLite `PRAGMA quick_check` result.
+The quick check scans database structures and should be scheduled as an
+operational diagnostic, not placed on the append hot path. Values are read in
+separate statements; during concurrent writes, counts are advisory and are
+not a transactionally consistent snapshot. A result other than `ok` should
+trigger host-defined investigation and restore procedures, not an automatic
+repair attempt.
+
+WAL maintenance is explicit through `checkpointWal()`. The default
+`passive` mode avoids waiting for readers; hosts may select `full`,
+`restart`, or `truncate` as part of a controlled maintenance window. A
+truncate checkpoint can wait on readers and must not be run automatically by
+the adapter. The result reports busy status, WAL frame count, and checkpointed
+frame count. A checkpoint is not a backup and does not replace a consistent
+SQLite backup procedure.
+
+Example:
+
+```dart
+final health = persistence.inspect();
+if (!health.integrityCheckPassed) {
+  // Alert and follow the host's incident/restore runbook.
+}
+
+final checkpoint = persistence.checkpointWal();
+if (!checkpoint.fullyCheckpointed) {
+  // Record the incomplete checkpoint and retry under host policy.
+}
+```
+
+The adapter does not delete, compact, or expire provenance records. Retention
+must preserve append-only evidence and be implemented as an explicit,
+externally governed archival policy. Before restoring a backup, verify the
+restored chain against independently retained signed anchors.
+
 ## Validation strategy
 
 The package tests exercise close/reopen durability, independent-connection
