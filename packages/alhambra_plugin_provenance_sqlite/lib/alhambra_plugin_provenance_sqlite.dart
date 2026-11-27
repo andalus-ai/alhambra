@@ -1,0 +1,3 @@
+library alhambra_plugin_provenance_sqlite;
+
+export 'src/sqlite_plugin_recovery_provenance_persistence.dart';
