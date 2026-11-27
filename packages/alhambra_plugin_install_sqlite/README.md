@@ -149,7 +149,7 @@ for (final event in events) {
 ```
 
 Results are ordered newest-first, with event ID as a deterministic tie-breaker.
-Use operation ID filtering for a complete operation-specific timeline. The
+Use operation ID filtering and advance the offset by the returned row count to retrieve a complete operation-specific timeline across pages. The
 projection deliberately omits filesystem paths, staging handles, content
 hashes and package contents. Manual-resolution records are joined to their
 corresponding journal transition so they appear exactly once; evidence summaries
