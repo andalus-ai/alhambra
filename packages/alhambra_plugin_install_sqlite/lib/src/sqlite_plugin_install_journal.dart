@@ -153,6 +153,7 @@ final class SqlitePluginInstallJournal implements
         _db.execute('CREATE INDEX idx_plugin_install_manual_reconciliation_operation ON plugin_install_manual_reconciliation(operation_id, resolved_at)');
         _db.execute('PRAGMA user_version = 3');
       });
+      version = 3;
     }
     if (version == 3) {
       _transaction(() {
