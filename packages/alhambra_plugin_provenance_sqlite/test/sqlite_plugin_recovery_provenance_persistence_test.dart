@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:alhambra_plugin_provenance_sqlite/alhambra_plugin_provenance_sqlite.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 import 'package:alhambra_plugin_test/alhambra_plugin_test.dart';
+import 'package:sqlite3/sqlite3.dart' as sq;
 import 'package:test/test.dart';
 
 PluginRecoveryProvenanceEvent provenanceEvent({
@@ -291,6 +292,47 @@ void main() {
 
       final store = openStore();
       expect((await store.provenanceStore.readAll()).length, 1);
+    });
+
+
+    test('rolls back an uncommitted write after writer process termination', () async {
+      final initialized = sq.sqlite3.open(path);
+      initialized.execute('''
+        CREATE TABLE alhambra_crash_probe (
+          probe_id TEXT PRIMARY KEY
+        )
+      ''');
+      initialized.dispose();
+
+      final process = await Process.start(
+        Platform.resolvedExecutable,
+        [
+          'run',
+          'test/fixtures/sqlite_interrupted_transaction.dart',
+          path,
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      final ready = process.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .first
+          .timeout(const Duration(seconds: 15));
+      expect(await ready, 'READY');
+
+      process.kill(ProcessSignal.sigkill);
+      await process.exitCode;
+
+      final reopened = sq.sqlite3.open(path);
+      try {
+        final rows = reopened.select(
+          'SELECT probe_id FROM alhambra_crash_probe',
+        );
+        expect(rows, isEmpty);
+        expect(reopened.select('PRAGMA quick_check').first.values.first, 'ok');
+      } finally {
+        reopened.dispose();
+      }
     });
 
     test('creates a consistent standalone backup and restores all histories', () async {
