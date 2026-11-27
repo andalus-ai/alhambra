@@ -125,7 +125,7 @@ blindly replaying a potentially completed side effect.
 
 Hosts can expose a read-only installation timeline by adapting
 `PluginInstallAuditStore.queryAudit`. The SQLite implementation supports
-bounded pages (1–500 records; default 100), ordered newest-first with a stable
+bounded pages (1–500 records; default 100; offset 0–100,000), ordered newest-first with a stable
 event-ID tie-breaker. Filters include operation ID, plugin ID, transition
 status, operator ID, and a UTC time range (`from` inclusive, `to` exclusive).
 The database maintains indexes for plugin/time, status/time, operator/time,
