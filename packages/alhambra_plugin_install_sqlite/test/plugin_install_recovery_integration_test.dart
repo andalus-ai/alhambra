@@ -440,13 +440,10 @@ void main() {
     var installedStore = SqliteInstalledPluginStore(databasePath);
     var fileSystem = LocalPluginInstallFileSystem(rootDirectory: installRoot);
 
-    var adaptersClosed = false;
     addTearDown(() async {
-      if (!adaptersClosed) {
-        journal.close();
-        leases.close();
-        installedStore.close();
-      }
+      journal.close();
+      leases.close();
+      installedStore.close();
       if (await directory.exists()) {
         await directory.delete(recursive: true);
       }
@@ -468,12 +465,18 @@ void main() {
     expect(originalLease, isNotNull);
     expect(originalLease!.fencingToken, 1);
 
-    for (final adapter in [journal, fileSystem, installedStore]) {
-      expect(await adapter.advanceFence(
-        operationId: operationId,
-        fencingToken: originalLease.fencingToken,
-      ), isTrue);
-    }
+    expect(await journal.advanceFence(
+      operationId: operationId,
+      fencingToken: originalLease.fencingToken,
+    ), isTrue);
+    expect(await fileSystem.advanceFence(
+      operationId: operationId,
+      fencingToken: originalLease.fencingToken,
+    ), isTrue);
+    expect(await installedStore.advanceFence(
+      operationId: operationId,
+      fencingToken: originalLease.fencingToken,
+    ), isTrue);
 
     final staleStaging = await fileSystem.createStaging(
       operationId: operationId,
@@ -508,7 +511,6 @@ void main() {
     journal.close();
     leases.close();
     installedStore.close();
-    adaptersClosed = true;
     journal = SqlitePluginInstallJournal(databasePath);
     leases = SqlitePluginInstallOperationLeaseStore(databasePath);
     installedStore = SqliteInstalledPluginStore(databasePath);
@@ -524,12 +526,18 @@ void main() {
     expect(recoveryLease, isNotNull);
     expect(recoveryLease!.fencingToken, 2);
 
-    for (final adapter in [journal, fileSystem, installedStore]) {
-      expect(await adapter.advanceFence(
-        operationId: operationId,
-        fencingToken: recoveryLease.fencingToken,
-      ), isTrue);
-    }
+    expect(await journal.advanceFence(
+      operationId: operationId,
+      fencingToken: recoveryLease.fencingToken,
+    ), isTrue);
+    expect(await fileSystem.advanceFence(
+      operationId: operationId,
+      fencingToken: recoveryLease.fencingToken,
+    ), isTrue);
+    expect(await installedStore.advanceFence(
+      operationId: operationId,
+      fencingToken: recoveryLease.fencingToken,
+    ), isTrue);
 
     // A stale worker must not be able to append journal state, mutate the
     // promoted tree, or create an installed record after takeover.
