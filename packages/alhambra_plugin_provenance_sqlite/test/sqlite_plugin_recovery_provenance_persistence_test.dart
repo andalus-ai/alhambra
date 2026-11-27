@@ -260,8 +260,9 @@ void main() {
       );
     });
 
-
     test('serializes competing appenders from independent OS processes', () async {
+      final initialized = openStore();
+      initialized.close();
       final fixture = 'test/fixtures/sqlite_provenance_writer.dart';
       final processes = await Future.wait([
         Process.run(
@@ -284,18 +285,27 @@ void main() {
         );
       }
       final results = processes
-          .map((process) =>
-              jsonDecode(process.stdout.toString().trim()) as Map<String, dynamic>)
+          .map(
+            (process) =>
+                jsonDecode(process.stdout.toString().trim()) as Map<String, dynamic>,
+          )
           .toList(growable: false);
-      expect(results.where((result) => result['appended'] == true).length, 1);
-      expect(results.where((result) => result['appended'] == false).length, 1);
+      expect(
+        results.where((result) => result['appended'] == true).length,
+        1,
+      );
+      expect(
+        results.where((result) => result['appended'] == false).length,
+        1,
+      );
 
       final store = openStore();
       expect((await store.provenanceStore.readAll()).length, 1);
     });
 
-
     test('rolls back an uncommitted write after writer process termination', () async {
+      final configured = openStore();
+      configured.close();
       final initialized = sq.sqlite3.open(path);
       initialized.execute('''
         CREATE TABLE alhambra_crash_probe (
