@@ -17,6 +17,17 @@ void main() {
       legacy.execute(
         'CREATE TABLE plugin_install_operation (operation_id TEXT PRIMARY KEY)',
       );
+      legacy.execute('''
+        CREATE TABLE plugin_install_event (
+          event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          operation_id TEXT NOT NULL,
+          revision INTEGER NOT NULL,
+          plugin_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          occurred_at TEXT NOT NULL,
+          approved_by TEXT
+        )
+      ''');
       legacy.execute('PRAGMA user_version = 2');
       legacy.dispose();
 
