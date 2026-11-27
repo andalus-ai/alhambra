@@ -428,4 +428,181 @@ void main() {
     expect(await journal.unresolved(), isEmpty);
   });
 
+
+  test('restart takeover rejects stale worker mutations across all adapters',
+      () async {
+    final directory =
+        await Directory.systemTemp.createTemp('alhambra-install-stale-worker-');
+    final installRoot = await Directory('${directory.path}/install').create();
+    final databasePath = '${directory.path}/install.sqlite';
+    var journal = SqlitePluginInstallJournal(databasePath);
+    var leases = SqlitePluginInstallOperationLeaseStore(databasePath);
+    var installedStore = SqliteInstalledPluginStore(databasePath);
+    var fileSystem = LocalPluginInstallFileSystem(rootDirectory: installRoot);
+
+    var adaptersClosed = false;
+    addTearDown(() async {
+      if (!adaptersClosed) {
+        journal.close();
+        leases.close();
+        installedStore.close();
+      }
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    });
+
+    final startedAt = DateTime.utc(2026, 11, 20, 1);
+    const operationId = 'install-stale-worker-takeover';
+    const pluginId = 'example.stale';
+    const version = '1.0.0';
+    const contentHash =
+        'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+
+    final originalLease = await leases.acquire(
+      operationId: operationId,
+      ownerId: 'installer-worker',
+      now: startedAt,
+      leaseDuration: const Duration(seconds: 1),
+    );
+    expect(originalLease, isNotNull);
+    expect(originalLease!.fencingToken, 1);
+
+    for (final adapter in [journal, fileSystem, installedStore]) {
+      expect(await adapter.advanceFence(
+        operationId: operationId,
+        fencingToken: originalLease.fencingToken,
+      ), isTrue);
+    }
+
+    final staleStaging = await fileSystem.createStaging(
+      operationId: operationId,
+      pluginId: pluginId,
+      version: version,
+      fencingToken: originalLease.fencingToken,
+    );
+    await fileSystem.writeFile(
+      staging: staleStaging,
+      relativePath: 'lib/main.dart',
+      bytes: Stream<List<int>>.value([1, 2, 3]),
+      maxBytes: 16,
+    );
+    final destination = await fileSystem.destinationPathFor(
+      pluginId: pluginId,
+      version: version,
+    );
+    await journal.write(PluginInstallJournalEntry(
+      operationId: operationId,
+      pluginId: pluginId,
+      version: version,
+      status: PluginInstallJournalStatus.promoting,
+      updatedAt: startedAt,
+      stagingHandle: staleStaging.opaqueHandle,
+      promotedPath: destination,
+      contentHash: contentHash,
+      fencingToken: originalLease.fencingToken,
+    ));
+    await fileSystem.promote(staleStaging, destinationPath: destination);
+
+    // Simulate a full process restart by closing and reopening all adapters.
+    journal.close();
+    leases.close();
+    installedStore.close();
+    adaptersClosed = true;
+    journal = SqlitePluginInstallJournal(databasePath);
+    leases = SqlitePluginInstallOperationLeaseStore(databasePath);
+    installedStore = SqliteInstalledPluginStore(databasePath);
+    fileSystem = LocalPluginInstallFileSystem(rootDirectory: installRoot);
+
+    final takeoverAt = startedAt.add(const Duration(seconds: 2));
+    final recoveryLease = await leases.acquire(
+      operationId: operationId,
+      ownerId: 'recovery-worker',
+      now: takeoverAt,
+      leaseDuration: const Duration(seconds: 30),
+    );
+    expect(recoveryLease, isNotNull);
+    expect(recoveryLease!.fencingToken, 2);
+
+    for (final adapter in [journal, fileSystem, installedStore]) {
+      expect(await adapter.advanceFence(
+        operationId: operationId,
+        fencingToken: recoveryLease.fencingToken,
+      ), isTrue);
+    }
+
+    // A stale worker must not be able to append journal state, mutate the
+    // promoted tree, or create an installed record after takeover.
+    await expectLater(
+      journal.write(PluginInstallJournalEntry(
+        operationId: operationId,
+        pluginId: pluginId,
+        version: version,
+        status: PluginInstallJournalStatus.committed,
+        updatedAt: takeoverAt,
+        promotedPath: destination,
+        contentHash: contentHash,
+        fencingToken: originalLease.fencingToken,
+      )),
+      throwsA(anything),
+    );
+    await expectLater(
+      fileSystem.rollbackPromotion(
+        staleStaging,
+        promotedPath: destination,
+      ),
+      throwsA(anything),
+    );
+    final staleRecord = InstalledPluginRecord(
+      id: pluginId,
+      version: const SemanticVersion(1, 0, 0),
+      contentHash: contentHash,
+      installedAt: startedAt,
+      installPath: destination,
+    );
+    expect(await installedStore.createIfAbsentFenced(
+      staleRecord,
+      operationId: operationId,
+      fencingToken: originalLease.fencingToken,
+    ), isFalse);
+    expect(await installedStore.find(pluginId), isNull);
+
+    var clockValue = takeoverAt;
+    DateTime advancingClock() {
+      final current = clockValue;
+      clockValue = clockValue.add(const Duration(milliseconds: 1));
+      return current;
+    }
+
+    final report = await PluginInstallRecoveryPlanner(
+      journal: journal,
+      fileSystem: fileSystem,
+      installedStore: installedStore,
+      clock: advancingClock,
+    ).inspect();
+    expect(report.findings, hasLength(1));
+    final finding = report.findings.single;
+    expect(finding.action, PluginInstallRecoveryAction.rollbackPromotion);
+    expect(finding.filesystem.destinationOwnedByOperation, isTrue);
+    expect(finding.installedRecordExists, isFalse);
+
+    final completed = await PluginInstallRecoveryExecutor(
+      journal: journal,
+      fileSystem: fileSystem,
+      installedStore: installedStore,
+      leaseStore: leases,
+      workerId: 'recovery-worker',
+      clock: advancingClock,
+    ).execute(
+      finding,
+      approvedBy: 'test-operator',
+      approvalId: 'approval-stale-worker-takeover',
+    );
+
+    expect(completed.status, PluginInstallJournalStatus.rolledBack);
+    expect(await Directory(destination).exists(), isFalse);
+    expect(await installedStore.find(pluginId), isNull);
+    expect(await journal.unresolved(), isEmpty);
+  });
+
 }
