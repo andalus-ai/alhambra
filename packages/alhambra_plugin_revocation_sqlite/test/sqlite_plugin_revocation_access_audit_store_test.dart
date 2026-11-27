@@ -92,6 +92,13 @@ void main() {
     });
 
     test('backfills pre-existing audit rows on first chain migration', () async {
+      database.execute(
+        'DROP TABLE alhambra_plugin_revocation_access_audit_chain_head',
+      );
+      database.execute(
+        'DROP TABLE alhambra_plugin_revocation_access_audit_chain',
+      );
+      database.execute('DROP TABLE alhambra_plugin_revocation_access_audit');
       database.execute('''
         CREATE TABLE alhambra_plugin_revocation_access_audit (
           audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
