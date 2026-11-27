@@ -90,7 +90,11 @@ restored chain against independently retained signed anchors.
 ## Validation strategy
 
 The package tests exercise close/reopen durability, independent-connection
-append races, stale-head rejection, duplicate key-history sequence rejection,
-and per-chain anchor sequence isolation. These are adapter-level tests; hosts
-should additionally run conformance tests against their production filesystem,
-backup/restore process, and deployment topology.
+append races, the shared `PluginRecoveryProvenanceConformanceSuite` against
+all three SQLite store views, stale-head rejection, duplicate key-history
+sequence rejection, per-chain anchor sequence isolation, health diagnostics,
+and explicit WAL checkpoint behavior. These tests are still in-process and
+independent-connection tests; they do not establish cross-process contention,
+power-loss durability, or backup/restore correctness. Hosts should additionally
+run multi-process tests on the production filesystem and validate their
+backup/restore process against independently retained anchors.
