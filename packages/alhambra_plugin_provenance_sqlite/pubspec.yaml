@@ -1,0 +1,15 @@
+name: alhambra_plugin_provenance_sqlite
+description: SQLite-backed durable recovery provenance, signing-key history, and signed anchors for Alhambra.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.13.2 <4.0.0"
+
+dependencies:
+  alhambra_plugin_runtime:
+    path: ../alhambra_plugin_runtime
+  sqlite3: ^2.7.5
+
+dev_dependencies:
+  test: ^1.25.0
