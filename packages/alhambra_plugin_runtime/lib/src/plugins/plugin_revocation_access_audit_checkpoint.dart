@@ -178,7 +178,7 @@ final class PluginRevocationAccessAuditCheckpointService {
     await _authorize(principal, scopeId);
     final verification =
         await chainStore.verifyAccessAuditChain(scopeId: scopeId);
-    if (!verification.valid || verification.entriesVerified < 1) {
+    if (!verification.valid ||\n        verification.scopeId != scopeId ||\n        verification.entriesVerified < 1) {
       throw const PluginRevocationAccessAuditCheckpointIntegrityException(
         'The local audit chain is invalid or empty.',
       );
