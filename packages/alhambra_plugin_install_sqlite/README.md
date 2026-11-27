@@ -17,7 +17,8 @@ This package provides durable SQLite adapters for plugin installation:
   release, expiry, close and reopen.
 - Serializes independent SQLite connections competing for the same operation.
 - Retains approval-ID uniqueness and ordered operation history.
-- Persists append-only operator manual-reconciliation evidence and atomically\n  closes ambiguous recovery operations using compare-and-set.
+- Persists append-only operator manual-reconciliation evidence and atomically
+  closes ambiguous recovery operations using compare-and-set.
 - Supports schema-v1 and schema-v2 journal databases through additive v2/v3
   migrations.
 
