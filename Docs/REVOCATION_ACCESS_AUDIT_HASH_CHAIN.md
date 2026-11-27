@@ -149,3 +149,41 @@ is not sufficient.
 The runtime deliberately does not select a signature algorithm, KMS, cloud
 provider, scheduler, or external storage vendor. It also does not recursively
 append checkpoint events to the audit chain being checkpointed.
+
+
+## Verifiable archive packages
+
+The runtime exposes `PluginRevocationAccessAuditArchiveExporter` and a
+versioned archive package format. A package contains one scope's contiguous
+sequence range, the hash immediately preceding the range, each audit record
+and chain entry, the resulting head hash, and the digest of the trusted
+external checkpoint that anchors the segment's final sequence.
+
+Export performs a full chain verification before and after reading the segment.
+It rejects a changing source chain, gaps, scope mismatches, ranges that do not
+terminate at the supplied checkpoint, and packages that fail their own
+offline verification. SQLite and PostgreSQL adapters provide bounded ordered
+segment reads through `PluginRevocationAccessAuditArchiveSource`.
+
+The package codec can verify the segment without access to the original
+database: it recomputes each canonical audit payload, sequence, previous-hash
+link, entry hash, final head, and package SHA-256 digest. The checkpoint itself
+must be retained alongside the package and verified through the host's
+checkpoint verifier; the package's checkpoint digest is a reference, not a
+replacement for the signed checkpoint.
+
+### Retention safety
+
+Archive export is deliberately separate from deletion or retention. Do not
+purge source rows merely because export succeeded. A host retention workflow
+must independently verify the package after upload, retrieve and verify the
+referenced signed checkpoint, confirm immutable/offline storage durability,
+and retain an external manifest of accepted packages before scheduling any
+source deletion. Deletion should be a separately authorized maintenance
+operation with its own backup and recovery policy.
+
+The first archive format is a contiguous segment ending exactly at an
+externally anchored checkpoint. This allows a restored archive segment to be
+verified from its prior hash and independently anchored final head. It does
+not claim that a package can be used to reconstruct the entire history unless
+all preceding segments and their linking checkpoints are also retained.
