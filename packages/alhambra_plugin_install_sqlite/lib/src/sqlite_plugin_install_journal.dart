@@ -13,7 +13,8 @@ import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 /// companion [SqlitePluginInstallOperationLeaseStore].
 final class SqlitePluginInstallJournal implements
     FencedPluginInstallRecoveryJournal,
-    PluginInstallManualReconciliationStore {
+    PluginInstallManualReconciliationStore,
+    PluginInstallAuditStore {
   final sq.Database _db;
   bool _closed = false;
 
@@ -47,7 +48,7 @@ final class SqlitePluginInstallJournal implements
 
   void _migrate() {
     var version = _db.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > 3) {
+    if (version > 4) {
       throw UnsupportedError('Database schema version $version is newer than this adapter supports.');
     }
     if (version == 0) {
@@ -153,6 +154,15 @@ final class SqlitePluginInstallJournal implements
         _db.execute('PRAGMA user_version = 3');
       });
     }
+    if (version == 3) {
+      _transaction(() {
+        _db.execute('CREATE INDEX idx_plugin_install_event_plugin_time ON plugin_install_event(plugin_id, occurred_at, event_id)');
+        _db.execute('CREATE INDEX idx_plugin_install_event_status_time ON plugin_install_event(status, occurred_at, event_id)');
+        _db.execute('CREATE INDEX idx_plugin_install_event_operator_time ON plugin_install_event(approved_by, occurred_at, event_id)');
+        _db.execute('CREATE INDEX idx_plugin_install_event_time ON plugin_install_event(occurred_at, event_id)');
+        _db.execute('PRAGMA user_version = 4');
+      });
+    }
   }
 
   T _transaction<T>(T Function() action) {
@@ -168,7 +178,7 @@ final class SqlitePluginInstallJournal implements
     }
   }
 
-  static const int _schemaVersion = 3;
+  static const int _schemaVersion = 4;
   static String _date(DateTime value) => value.toUtc().toIso8601String();
   static DateTime _parseDate(Object? value) => DateTime.parse(value! as String).toUtc();
 
@@ -502,6 +512,82 @@ final class SqlitePluginInstallJournal implements
       evidenceSummary: row['evidence_summary']! as String,
       resolvedAt: _parseDate(row['resolved_at']),
     )));
+  }
+
+
+  /// Returns a bounded, newest-first page of append-only transition events.
+  ///
+  /// The event table is the source of truth. Manual-resolution details are
+  /// joined by the event's approval ID; no second event is emitted for them.
+  @override
+  Future<List<PluginInstallAuditRecord>> queryAudit(
+    PluginInstallAuditQuery query,
+  ) async {
+    _assertOpen();
+    if (query.limit < 1 || query.limit > 500) {
+      throw ArgumentError.value(query.limit, 'limit', 'Must be between 1 and 500.');
+    }
+    if (query.offset < 0) {
+      throw ArgumentError.value(query.offset, 'offset', 'Must not be negative.');
+    }
+    for (final value in [query.operationId, query.pluginId, query.operatorId]) {
+      if (value != null && value.trim().isEmpty) {
+        throw ArgumentError('Audit filters must be null or non-empty.');
+      }
+    }
+    if (query.from != null && query.to != null &&
+        !query.from!.toUtc().isBefore(query.to!.toUtc())) {
+      throw ArgumentError('Audit range must have from earlier than to.');
+    }
+
+    final predicates = <String>[];
+    final parameters = <Object?>[];
+    void add(String predicate, Object? value) {
+      predicates.add(predicate);
+      parameters.add(value);
+    }
+
+    if (query.operationId != null) add('e.operation_id = ?', query.operationId);
+    if (query.pluginId != null) add('e.plugin_id = ?', query.pluginId);
+    if (query.status != null) add('e.status = ?', query.status!.name);
+    if (query.operatorId != null) add('e.approved_by = ?', query.operatorId);
+    if (query.from != null) add('e.occurred_at >= ?', _date(query.from!));
+    if (query.to != null) add('e.occurred_at < ?', _date(query.to!));
+
+    final where = predicates.isEmpty ? '' : 'WHERE ${predicates.join(' AND ')}';
+    final rows = _db.select('''
+      SELECT e.operation_id, e.plugin_id, e.version, e.status,
+             e.occurred_at, e.revision, e.approved_by, e.approval_id,
+             e.failure_code, e.fencing_token,
+             m.resolution AS manual_resolution,
+             m.evidence_summary AS evidence_summary
+      FROM plugin_install_event e
+      LEFT JOIN plugin_install_manual_reconciliation m
+        ON m.resolution_id = e.approval_id
+      $where
+      ORDER BY e.occurred_at DESC, e.event_id DESC
+      LIMIT ? OFFSET ?
+    ''', [...parameters, query.limit, query.offset]);
+
+    return List.unmodifiable(rows.map((row) {
+      final resolutionName = row['manual_resolution'] as String?;
+      return PluginInstallAuditRecord(
+        operationId: row['operation_id']! as String,
+        pluginId: row['plugin_id']! as String,
+        version: row['version']! as String,
+        status: PluginInstallJournalStatus.values.byName(row['status']! as String),
+        occurredAt: _parseDate(row['occurred_at']),
+        revision: row['revision']! as int,
+        operatorId: row['approved_by'] as String?,
+        approvalId: row['approval_id'] as String?,
+        failureCode: row['failure_code'] as String?,
+        fencingToken: row['fencing_token'] as int?,
+        manualResolution: resolutionName == null
+            ? null
+            : PluginInstallManualResolution.values.byName(resolutionName),
+        evidenceSummary: row['evidence_summary'] as String?,
+      );
+    }));
   }
 
   static void _validateAuditText(String value, String field, int maxLength) {
