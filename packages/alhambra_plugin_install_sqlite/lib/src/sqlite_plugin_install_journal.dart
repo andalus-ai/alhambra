@@ -44,8 +44,8 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
   }
 
   void _migrate() {
-    final version = _db.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > 2) {
+    var version = _db.select('PRAGMA user_version').first['user_version'] as int;
+    if (version > 3) {
       throw UnsupportedError('Database schema version $version is newer than this adapter supports.');
     }
     if (version == 0) {
@@ -116,6 +116,7 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
         ''');
         _db.execute('PRAGMA user_version = 2');
       });
+      version = 2;
     }
     if (version == 1) {
       _transaction(() {
@@ -128,6 +129,26 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
           )
         ''');
         _db.execute('PRAGMA user_version = 2');
+      });
+      version = 2;
+    }
+    if (version == 2) {
+      _transaction(() {
+        _db.execute('''
+          CREATE TABLE plugin_install_manual_reconciliation (
+            resolution_id TEXT PRIMARY KEY,
+            operation_id TEXT NOT NULL,
+            plugin_id TEXT NOT NULL,
+            version TEXT NOT NULL,
+            resolution TEXT NOT NULL,
+            operator_id TEXT NOT NULL,
+            evidence_summary TEXT NOT NULL,
+            resolved_at TEXT NOT NULL,
+            FOREIGN KEY(operation_id) REFERENCES plugin_install_operation(operation_id)
+          )
+        ''');
+        _db.execute('CREATE INDEX idx_plugin_install_manual_reconciliation_operation ON plugin_install_manual_reconciliation(operation_id, resolved_at)');
+        _db.execute('PRAGMA user_version = 3');
       });
     }
   }
@@ -145,7 +166,7 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
     }
   }
 
-  static const int _schemaVersion = 2;
+  static const int _schemaVersion = 3;
   static String _date(DateTime value) => value.toUtc().toIso8601String();
   static DateTime _parseDate(Object? value) => DateTime.parse(value! as String).toUtc();
 
@@ -304,7 +325,7 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
   static bool _isTerminal(PluginInstallJournalStatus status) =>
       status == PluginInstallJournalStatus.committed ||
       status == PluginInstallJournalStatus.rolledBack ||
-      status == PluginInstallJournalStatus.failed;
+      status == PluginInstallJournalStatus.failed ||\n      status == PluginInstallJournalStatus.manuallyReconciled;
 
   static void _validateEntry(PluginInstallJournalEntry entry) {
     for (final value in [entry.operationId, entry.pluginId, entry.version]) {
@@ -330,7 +351,7 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
     _assertOpen();
     final rows = _db.select('''
       SELECT * FROM plugin_install_operation
-      WHERE status NOT IN ('committed', 'rolledBack', 'failed')
+      WHERE status NOT IN ('committed', 'rolledBack', 'failed', 'manuallyReconciled')
       ORDER BY updated_at, operation_id
     ''');
     return List.unmodifiable(rows.map((row) => _entry(Map<String, Object?>.from(row))));
@@ -391,4 +412,101 @@ final class SqlitePluginInstallJournal implements FencedPluginInstallRecoveryJou
       return true;
     });
   }
+  /// Atomically records a human-verified resolution and closes an ambiguous
+  /// operation. This method deliberately performs no filesystem or record
+  /// mutation; the host must inspect and repair those systems separately.
+  @override
+  Future<bool> reconcileManually({
+    required String operationId,
+    required DateTime expectedUpdatedAt,
+    required PluginInstallManualResolution resolution,
+    required String resolutionId,
+    required String operatorId,
+    required String evidenceSummary,
+    required DateTime resolvedAt,
+  }) async {
+    _validateAuditText(operationId, 'operationId', 256);
+    _validateAuditText(resolutionId, 'resolutionId', 128);
+    _validateAuditText(operatorId, 'operatorId', 256);
+    _validateAuditText(evidenceSummary, 'evidenceSummary', 4000);
+    if (!resolvedAt.toUtc().isAfter(expectedUpdatedAt.toUtc())) {
+      throw ArgumentError('resolvedAt must advance beyond the expected journal timestamp.');
+    }
+    return _transaction(() {
+      final rows = _db.select(
+        'SELECT * FROM plugin_install_operation WHERE operation_id = ?',
+        [operationId],
+      );
+      if (rows.isEmpty) return false;
+      final current = Map<String, Object?>.from(rows.first);
+      final status = PluginInstallJournalStatus.values.byName(current['status']! as String);
+      if (status != PluginInstallJournalStatus.recoveryStarted &&
+          status != PluginInstallJournalStatus.needsReconciliation) {
+        return false;
+      }
+      if (current['updated_at'] != _date(expectedUpdatedAt)) return false;
+      final token = current['fencing_token'] as int?;
+      _assertAcceptedFence(operationId, token);
+      final entry = PluginInstallJournalEntry(
+        operationId: operationId,
+        pluginId: current['plugin_id']! as String,
+        version: current['version']! as String,
+        status: PluginInstallJournalStatus.manuallyReconciled,
+        updatedAt: resolvedAt.toUtc(),
+        stagingHandle: current['staging_handle'] as String?,
+        promotedPath: current['promoted_path'] as String?,
+        failureCode: 'MANUAL_RECONCILED_${resolution.name.toUpperCase()}',
+        contentHash: current['content_hash'] as String?,
+        approvedBy: operatorId.trim(),
+        approvalId: resolutionId.trim(),
+        fencingToken: token,
+      );
+      _validateEntry(entry);
+      _recordApproval(entry);
+      _update(entry, (current['revision']! as int) + 1);
+      _db.execute('''
+        INSERT INTO plugin_install_manual_reconciliation
+        (resolution_id, operation_id, plugin_id, version, resolution,
+         operator_id, evidence_summary, resolved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ''', [
+        resolutionId.trim(), operationId, entry.pluginId, entry.version,
+        resolution.name, operatorId.trim(), evidenceSummary.trim(),
+        _date(resolvedAt),
+      ]);
+      return true;
+    });
+  }
+
+  /// Returns append-only operator reconciliation records in chronological order.
+  @override
+  Future<List<PluginInstallManualReconciliation>> manualReconciliations(
+    String operationId,
+  ) async {
+    _assertOpen();
+    final rows = _db.select('''
+      SELECT * FROM plugin_install_manual_reconciliation
+      WHERE operation_id = ?
+      ORDER BY resolved_at, resolution_id
+    ''', [operationId]);
+    return List.unmodifiable(rows.map((row) => PluginInstallManualReconciliation(
+      operationId: row['operation_id']! as String,
+      pluginId: row['plugin_id']! as String,
+      version: row['version']! as String,
+      resolution: PluginInstallManualResolution.values.byName(row['resolution']! as String),
+      resolutionId: row['resolution_id']! as String,
+      operatorId: row['operator_id']! as String,
+      evidenceSummary: row['evidence_summary']! as String,
+      resolvedAt: _parseDate(row['resolved_at']),
+    )));
+  }
+
+  static void _validateAuditText(String value, String field, int maxLength) {
+    if (value.trim().isEmpty ||
+        value.length > maxLength ||
+        value.codeUnits.any((unit) => unit < 0x20 || unit == 0x7f)) {
+      throw ArgumentError('$field must be non-empty, bounded and contain no control characters.');
+    }
+  }
+
 }
