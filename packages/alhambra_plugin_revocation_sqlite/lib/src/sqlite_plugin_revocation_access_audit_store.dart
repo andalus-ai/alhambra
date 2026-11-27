@@ -227,6 +227,27 @@ final class SqlitePluginRevocationAccessAuditStore
       expectedSequence++;
     }
 
+    final auditCount = database.select(
+      'SELECT COUNT(*) AS total FROM alhambra_plugin_revocation_access_audit '
+      'WHERE scope_id = ?',
+      [scopeId],
+    ).first['total'] as int;
+    final chainCount = database.select(
+      'SELECT COUNT(*) AS total FROM alhambra_plugin_revocation_access_audit_chain '
+      'WHERE scope_id = ?',
+      [scopeId],
+    ).first['total'] as int;
+    if (auditCount != rows.length || chainCount != rows.length) {
+      return PluginRevocationAccessAuditChainVerification(
+        scopeId: scopeId,
+        valid: false,
+        entriesVerified: rows.length,
+        failedSequence: rows.length + 1,
+        expectedHash: previousHash,
+        headHash: previousHash,
+      );
+    }
+
     final heads = database.select(
       'SELECT sequence_number, head_hash '
       'FROM alhambra_plugin_revocation_access_audit_chain_head '
