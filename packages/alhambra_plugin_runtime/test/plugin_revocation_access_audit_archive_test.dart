@@ -7,6 +7,7 @@ void main() {
     final exporter = PluginRevocationAccessAuditArchiveExporter(
       chainStore: _Chain(),
       source: _Source(entries),
+      checkpointVerifier: const _CheckpointVerifier(),
       clock: () => DateTime.utc(2026, 11, 28),
     );
 
@@ -15,12 +16,7 @@ void main() {
       scopeId: 'workspace-a',
       fromSequence: 1,
       limit: 10,
-      anchor: PluginRevocationAccessAuditCheckpointAnchor(
-        scopeId: 'workspace-a',
-        sequence: 2,
-        headHash: entries.last.entryHash,
-        checkpointDigest: _hash('c'),
-      ),
+      checkpoint: _checkpoint(entries),
     );
 
     expect(archive.fromSequence, 1);
@@ -37,6 +33,7 @@ void main() {
     final exporter = PluginRevocationAccessAuditArchiveExporter(
       chainStore: _Chain(),
       source: _Source(entries),
+      checkpointVerifier: const _CheckpointVerifier(),
     );
     final archive = await exporter.export(
       packageId: 'archive-002',
@@ -98,12 +95,7 @@ void main() {
         scopeId: 'workspace-a',
         fromSequence: 1,
         limit: 1,
-        anchor: PluginRevocationAccessAuditCheckpointAnchor(
-          scopeId: 'workspace-a',
-          sequence: 2,
-          headHash: entries.last.entryHash,
-          checkpointDigest: _hash('c'),
-        ),
+        checkpoint: _checkpoint(entries),
       ),
       throwsA(isA<ArgumentError>()),
     );
@@ -182,4 +174,30 @@ final class _Source implements PluginRevocationAccessAuditArchiveSource {
           .where((entry) => entry.sequence >= fromSequence)
           .take(limit)
           .toList(growable: false);
+}
+
+PluginRevocationAccessAuditCheckpoint _checkpoint(
+  List<PluginRevocationAccessAuditArchiveEntry> entries, {
+  int sequence = 2,
+}) =>
+    PluginRevocationAccessAuditCheckpoint(
+      scopeId: 'workspace-a',
+      sequence: sequence,
+      headHash: entries[sequence - 1].entryHash,
+      createdAt: DateTime.utc(2026, 11, 28),
+      signingKeyId: 'archive-test-key',
+      signature: 'trusted-test-signature',
+    );
+
+final class _CheckpointVerifier
+    implements PluginRevocationAccessAuditCheckpointVerifier {
+  const _CheckpointVerifier();
+
+  @override
+  Future<bool> verify({
+    required String keyId,
+    required String canonicalPayload,
+    required String signature,
+  }) async =>
+      keyId == 'archive-test-key' && signature == 'trusted-test-signature';
 }
