@@ -327,7 +327,8 @@ final class SqlitePluginInstallJournal implements
   static bool _isTerminal(PluginInstallJournalStatus status) =>
       status == PluginInstallJournalStatus.committed ||
       status == PluginInstallJournalStatus.rolledBack ||
-      status == PluginInstallJournalStatus.failed ||\n      status == PluginInstallJournalStatus.manuallyReconciled;
+      status == PluginInstallJournalStatus.failed ||
+      status == PluginInstallJournalStatus.manuallyReconciled;
 
   static void _validateEntry(PluginInstallJournalEntry entry) {
     for (final value in [entry.operationId, entry.pluginId, entry.version]) {
