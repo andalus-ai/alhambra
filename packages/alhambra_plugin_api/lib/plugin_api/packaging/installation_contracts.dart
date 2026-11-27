@@ -118,6 +118,7 @@ enum PluginInstallJournalStatus {
   failed,
   needsReconciliation,
   recoveryStarted,
+  manuallyReconciled,
 }
 
 /// [unresolved] returns exactly the latest non-terminal entry per operation ID.
@@ -291,3 +292,59 @@ abstract interface class FencedTransactionalInstalledPluginStore
 /// and compare-and-set claims.
 abstract interface class FencedPluginInstallRecoveryJournal
     implements PluginInstallRecoveryJournal, FencedPluginInstallJournal {}
+
+
+/// Operator's verified conclusion after inspecting an ambiguous installation.
+///
+/// These values describe observed state; recording one never performs a
+/// filesystem or installed-record mutation.
+enum PluginInstallManualResolution {
+  installedAndVerified,
+  absentAndClean,
+  residualStateAccepted,
+}
+
+/// Append-only evidence for a host-controlled manual reconciliation.
+final class PluginInstallManualReconciliation {
+  final String operationId;
+  final String pluginId;
+  final String version;
+  final PluginInstallManualResolution resolution;
+  final String resolutionId;
+  final String operatorId;
+  final String evidenceSummary;
+  final DateTime resolvedAt;
+
+  const PluginInstallManualReconciliation({
+    required this.operationId,
+    required this.pluginId,
+    required this.version,
+    required this.resolution,
+    required this.resolutionId,
+    required this.operatorId,
+    required this.evidenceSummary,
+    required this.resolvedAt,
+  });
+}
+
+/// Durable, compare-and-set manual closure for ambiguous recovery operations.
+///
+/// Implementations must atomically append the audit record and advance the
+/// journal projection to [PluginInstallJournalStatus.manuallyReconciled].
+/// This operation records an operator conclusion only; it must not mutate
+/// filesystem contents or installed-plugin records.
+abstract interface class PluginInstallManualReconciliationStore {
+  Future<bool> reconcileManually({
+    required String operationId,
+    required DateTime expectedUpdatedAt,
+    required PluginInstallManualResolution resolution,
+    required String resolutionId,
+    required String operatorId,
+    required String evidenceSummary,
+    required DateTime resolvedAt,
+  });
+
+  Future<List<PluginInstallManualReconciliation>> manualReconciliations(
+    String operationId,
+  );
+}
