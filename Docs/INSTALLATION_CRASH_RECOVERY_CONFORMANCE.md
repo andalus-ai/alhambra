@@ -55,7 +55,31 @@ The focused integration tests live in
 Adapter-specific persistence and concurrency tests remain in their respective
 package test directories.
 
-## Operator-controlled manual reconciliation\n\nAn operation left in `recoveryStarted` or `needsReconciliation` is not eligible\nfor automated recovery. A host operator must first inspect the journal history,\nfilesystem ownership snapshot, destination/staging state, and installed-plugin\nrecord. The host should preserve the inspection evidence in its incident or\nchange-management system.\n\n`PluginInstallManualReconciliationStore.reconcileManually` provides a durable,\ncompare-and-set closure for this case. The operator supplies a unique resolution\nID, identity, a bounded evidence summary, timestamp, and one of three explicit\nconclusions: `installedAndVerified`, `absentAndClean`, or\n`residualStateAccepted`. The SQLite implementation atomically appends the audit\nrecord, adds a journal history event, and transitions the operation to\n`manuallyReconciled`. A stale timestamp, an operation outside the ambiguous\nrecovery states, a reused resolution ID, or a stale fencing token is rejected.\n\nThis API records the operator's conclusion only. It does not delete files,\nrestore backups, create/remove installed records, or prove that the supplied\nevidence is true. Any repair must be a separate host-controlled action with\nits own authorization and audit. The evidence summary should reference a\nprotected incident record rather than include secrets or package contents.\n`manuallyReconciled` is terminal and excluded from unresolved recovery scans.\n\n## Operational requirements
+## Operator-controlled manual reconciliation
+
+An operation left in `recoveryStarted` or `needsReconciliation` is not eligible
+for automated recovery. A host operator must first inspect the journal history,
+filesystem ownership snapshot, destination/staging state, and installed-plugin
+record. The host should preserve the inspection evidence in its incident or
+change-management system.
+
+`PluginInstallManualReconciliationStore.reconcileManually` provides a durable,
+compare-and-set closure for this case. The operator supplies a unique resolution
+ID, identity, a bounded evidence summary, timestamp, and one of three explicit
+conclusions: `installedAndVerified`, `absentAndClean`, or
+`residualStateAccepted`. The SQLite implementation atomically appends the audit
+record, adds a journal history event, and transitions the operation to
+`manuallyReconciled`. A stale timestamp, an operation outside the ambiguous
+recovery states, a reused resolution ID, or a stale fencing token is rejected.
+
+This API records the operator's conclusion only. It does not delete files,
+restore backups, create/remove installed records, or prove that the supplied
+evidence is true. Any repair must be a separate host-controlled action with
+its own authorization and audit. The evidence summary should reference a
+protected incident record rather than include secrets or package contents.
+`manuallyReconciled` is terminal and excluded from unresolved recovery scans.
+
+## Operational requirements
 
 - A host must use a stable, non-reused operation ID for each installation.
 - A host must coordinate leases using a durable store and an authoritative
