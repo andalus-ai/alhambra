@@ -72,7 +72,7 @@ Example:
 
 ```dart
 final health = persistence.inspect();
-if (!health.integrityCheckPassed) {
+if (!health.quickCheckPassed) {
   // Alert and follow the host's incident/restore runbook.
 }
 
