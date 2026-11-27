@@ -528,12 +528,14 @@ final class SqlitePluginInstallJournal implements
     if (query.limit < 1 || query.limit > 500) {
       throw ArgumentError.value(query.limit, 'limit', 'Must be between 1 and 500.');
     }
-    if (query.offset < 0) {
-      throw ArgumentError.value(query.offset, 'offset', 'Must not be negative.');
+    if (query.offset < 0 || query.offset > 100000) {
+      throw ArgumentError.value(query.offset, 'offset', 'Must be between 0 and 100000.');
     }
     for (final value in [query.operationId, query.pluginId, query.operatorId]) {
-      if (value != null && value.trim().isEmpty) {
-        throw ArgumentError('Audit filters must be null or non-empty.');
+      if (value != null &&
+          (value.trim().isEmpty || value.length > 256 ||
+              value.codeUnits.any((unit) => unit < 0x20 || unit == 0x7f))) {
+        throw ArgumentError('Audit filters must be non-empty, bounded and contain no control characters.');
       }
     }
     if (query.from != null && query.to != null &&
