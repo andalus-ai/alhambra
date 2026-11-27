@@ -40,12 +40,7 @@ void main() {
       scopeId: 'workspace-a',
       fromSequence: 1,
       limit: 10,
-      anchor: PluginRevocationAccessAuditCheckpointAnchor(
-        scopeId: 'workspace-a',
-        sequence: 2,
-        headHash: entries.last.entryHash,
-        checkpointDigest: _hash('c'),
-      ),
+      checkpoint: _checkpoint(entries),
     );
     final alteredAudit = PluginRevocationOperationsAccessAudit(
       actorId: 'operator-1',
@@ -87,6 +82,7 @@ void main() {
     final exporter = PluginRevocationAccessAuditArchiveExporter(
       chainStore: _Chain(),
       source: _Source(entries),
+      checkpointVerifier: const _CheckpointVerifier(),
     );
 
     await expectLater(
