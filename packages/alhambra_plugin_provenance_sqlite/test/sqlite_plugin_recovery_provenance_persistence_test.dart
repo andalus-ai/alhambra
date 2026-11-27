@@ -55,18 +55,29 @@ void main() {
   group('SQLite provenance persistence', () {
     late Directory directory;
     late String path;
+    late List<SqlitePluginRecoveryProvenancePersistence> stores;
 
     setUp(() async {
       directory = await Directory.systemTemp.createTemp('alhambra-provenance-');
       path = '${directory.path}/provenance.sqlite';
+      stores = [];
     });
 
     tearDown(() async {
+      for (final store in stores) {
+        store.close();
+      }
       await directory.delete(recursive: true);
     });
 
+    SqlitePluginRecoveryProvenancePersistence openStore() {
+      final store = SqlitePluginRecoveryProvenancePersistence(path);
+      stores.add(store);
+      return store;
+    }
+
     test('persists all three histories across close and reopen', () async {
-      final first = SqlitePluginRecoveryProvenancePersistence(path);
+      final first = openStore();
       expect(await first.provenanceStore.appendIfHeadMatches(
         expectedSequence: 0,
         expectedHeadDigest: null,
@@ -137,7 +148,36 @@ void main() {
       ), isFalse);
     });
 
-    test('isolates anchor sequence per chain', () async {
+
+    test('rejects duplicate provenance IDs and non-monotonic anchors', () async {
+      final store = openStore();
+      expect(await store.provenanceStore.appendIfHeadMatches(
+        expectedSequence: 0,
+        expectedHeadDigest: null,
+        event: provenanceEvent(sequence: 1, id: 'event-1'),
+      ), isTrue);
+      expect(await store.provenanceStore.appendIfHeadMatches(
+        expectedSequence: 1,
+        expectedHeadDigest: 'digest-1',
+        event: provenanceEvent(
+          sequence: 2,
+          id: 'event-1',
+          previous: 'digest-1',
+        ),
+      ), isFalse);
+      expect(await store.anchorStore.appendIfSequenceMatches(
+        chainId: 'chain-a',
+        expectedAnchorSequence: 0,
+        anchor: anchor(sequence: 1, provenanceSequence: 2),
+      ), isTrue);
+      expect(await store.anchorStore.appendIfSequenceMatches(
+        chainId: 'chain-a',
+        expectedAnchorSequence: 1,
+        anchor: anchor(sequence: 2, provenanceSequence: 1),
+      ), isFalse);
+      expect((await store.anchorStore.readAll('chain-a')).length, 1);
+    });
+\n    test('isolates anchor sequence per chain', () async {
       final store = SqlitePluginRecoveryProvenancePersistence(path);
       addTearDown(store.close);
       final chainB = PluginRecoveryProvenanceAnchor(
