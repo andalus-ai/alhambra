@@ -166,6 +166,38 @@ void main() {
       expect(second.entriesVerified, 1);
     });
 
+    test('rolls back the audit row when chain persistence fails', () async {
+      database.execute('''
+        CREATE TRIGGER reject_chain_insert
+        BEFORE INSERT ON alhambra_plugin_revocation_access_audit_chain
+        BEGIN
+          SELECT RAISE(ABORT, 'chain unavailable');
+        END
+      ''');
+
+      await expectLater(
+        store.append(_audit(
+          actor: 'operator-a',
+          scope: 'scope-a',
+          at: DateTime.utc(2026, 11, 17, 8),
+        )),
+        throwsA(isA<sq.SqliteException>()),
+      );
+
+      final auditRows = database.select(
+        'SELECT COUNT(*) AS total '
+        'FROM alhambra_plugin_revocation_access_audit WHERE scope_id = ?',
+        ['scope-a'],
+      ).first['total'];
+      final chainRows = database.select(
+        'SELECT COUNT(*) AS total '
+        'FROM alhambra_plugin_revocation_access_audit_chain WHERE scope_id = ?',
+        ['scope-a'],
+      ).first['total'];
+      expect(auditRows, 0);
+      expect(chainRows, 0);
+    });
+
     test('detects audit-row edits and a rewritten chain head', () async {
       await store.append(_audit(
         actor: 'operator-a',
