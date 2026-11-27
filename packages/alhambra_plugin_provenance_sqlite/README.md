@@ -78,7 +78,7 @@ The fields are gathered by separate statements and can reflect concurrent
 writes, so counts are advisory rather than a consistent transactional
 snapshot.
 
-Use `checkpointWal()` for explicit WAL maintenance. It defaults to
+Use `backupTo(destinationPath)` to create a consistent standalone snapshot; the destination must not already exist. Use `checkpointWal()` for explicit WAL maintenance. It defaults to
 `passive`; `full`, `restart`, and `truncate` are available for host-managed
 maintenance windows. In particular, `truncate` may wait for readers. No
 checkpoint runs automatically, and a WAL checkpoint is not a backup.
