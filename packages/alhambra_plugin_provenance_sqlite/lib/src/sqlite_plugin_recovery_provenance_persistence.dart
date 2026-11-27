@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 import 'package:sqlite3/sqlite3.dart' as sq;
 
-
 /// The SQLite journal mode used when explicitly requesting a WAL checkpoint.
 enum SqlitePluginRecoveryWalCheckpointMode {
   passive,
@@ -93,19 +92,22 @@ final class SqlitePluginRecoveryProvenancePersistence {
     if (path != ':memory:') _database.execute('PRAGMA journal_mode = WAL');
   }
 
-
-  /// Returns a point-in-time snapshot of SQLite configuration and table health.
+  /// Returns read-only diagnostics for SQLite configuration and table health.
   ///
-  /// [quick_check] is read-only but scans database structures; hosts should
-  /// schedule it as an operational diagnostic rather than on every append.
+  /// [quickCheckResult] is read-only but scans database structures; hosts
+  /// should schedule it as an operational diagnostic rather than on every append.
   SqlitePluginRecoveryProvenanceDiagnostics inspect() {
     _assertOpen();
     final quickCheck = _database.select('PRAGMA quick_check').first;
     return SqlitePluginRecoveryProvenanceDiagnostics(
-      schemaVersion: _database.select('PRAGMA user_version').first['user_version']! as int,
-      journalMode: _database.select('PRAGMA journal_mode').first['journal_mode']! as String,
-      synchronousMode: _database.select('PRAGMA synchronous').first['synchronous']! as int,
-      busyTimeoutMilliseconds: _database.select('PRAGMA busy_timeout').first['timeout']! as int,
+      schemaVersion:
+          _database.select('PRAGMA user_version').first['user_version']! as int,
+      journalMode:
+          _database.select('PRAGMA journal_mode').first['journal_mode']! as String,
+      synchronousMode:
+          _database.select('PRAGMA synchronous').first['synchronous']! as int,
+      busyTimeoutMilliseconds:
+          _database.select('PRAGMA busy_timeout').first['timeout']! as int,
       provenanceEventCount: _tableCount('alhambra_recovery_provenance_event'),
       anchorCount: _tableCount('alhambra_recovery_provenance_anchor'),
       signingKeyEventCount: _tableCount('alhambra_recovery_signing_key_event'),
@@ -113,9 +115,9 @@ final class SqlitePluginRecoveryProvenancePersistence {
     );
   }
 
-  int _tableCount(String table) =>
-      _database.select('SELECT COUNT(*) AS row_count FROM $table')
-          .first['row_count']! as int;
+  int _tableCount(String table) => _database
+      .select('SELECT COUNT(*) AS row_count FROM $table')
+      .first['row_count']! as int;
 
   /// Performs an explicit WAL checkpoint. This is available only for
   /// file-backed databases configured in WAL mode.
@@ -127,12 +129,16 @@ final class SqlitePluginRecoveryProvenancePersistence {
         SqlitePluginRecoveryWalCheckpointMode.passive,
   }) {
     _assertOpen();
-    final journalMode = _database.select('PRAGMA journal_mode')
-        .first['journal_mode']! as String;
+    final journalMode =
+        _database.select('PRAGMA journal_mode').first['journal_mode']! as String;
     if (journalMode.toLowerCase() != 'wal') {
-      throw StateError('WAL checkpoint requires a file-backed database in WAL mode.');
+      throw StateError(
+        'WAL checkpoint requires a file-backed database in WAL mode.',
+      );
     }
-    final result = _database.select('PRAGMA wal_checkpoint(${mode.name.toUpperCase()})').first;
+    final result = _database
+        .select('PRAGMA wal_checkpoint(${mode.name.toUpperCase()})')
+        .first;
     return SqlitePluginRecoveryWalCheckpointResult(
       busy: result['busy']! as int,
       logFrames: result['log']! as int,
