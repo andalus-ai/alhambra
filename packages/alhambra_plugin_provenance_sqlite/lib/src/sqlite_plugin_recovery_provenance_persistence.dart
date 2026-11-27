@@ -132,7 +132,12 @@ final class SqlitePluginRecoveryProvenancePersistence {
     final actualDigest = row.isEmpty ? null : row.first['event_digest'] as String?;
     if (actualSequence != expectedSequence ||
         actualDigest != expectedHeadDigest ||
-        event.sequence != expectedSequence + 1) {
+        event.sequence != expectedSequence + 1 ||
+        event.previousEventDigest != expectedHeadDigest ||
+        _database.select(
+          'SELECT 1 FROM alhambra_recovery_provenance_event WHERE event_id = ?',
+          [event.eventId],
+        ).isNotEmpty) {
       return false;
     }
     _database.execute('''
@@ -168,9 +173,16 @@ final class SqlitePluginRecoveryProvenancePersistence {
     ''', [chainId]);
     final actualSequence =
         row.isEmpty ? 0 : row.first['anchor_sequence']! as int;
+    final previousProvenanceSequence = row.isEmpty
+        ? 0
+        : (_database.select(
+            'SELECT provenance_sequence FROM alhambra_recovery_provenance_anchor WHERE chain_id = ? ORDER BY anchor_sequence DESC LIMIT 1',
+            [chainId],
+          ).first['provenance_sequence']! as int);
     if (anchor.chainId != chainId ||
         actualSequence != expectedAnchorSequence ||
-        anchor.anchorSequence != expectedAnchorSequence + 1) {
+        anchor.anchorSequence != expectedAnchorSequence + 1 ||
+        anchor.provenanceSequence <= previousProvenanceSequence) {
       return false;
     }
     _database.execute('''
@@ -205,7 +217,11 @@ final class SqlitePluginRecoveryProvenancePersistence {
     ''');
     final actualSequence = row.isEmpty ? 0 : row.first['sequence']! as int;
     if (actualSequence != expectedSequence ||
-        event.sequence != expectedSequence + 1) {
+        event.sequence != expectedSequence + 1 ||
+        _database.select(
+          'SELECT 1 FROM alhambra_recovery_signing_key_event WHERE event_id = ?',
+          [event.eventId],
+        ).isNotEmpty) {
       return false;
     }
     _database.execute('''
