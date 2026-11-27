@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:sqlite3/sqlite3.dart' as sq;
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_install_sqlite/alhambra_plugin_install_sqlite.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
@@ -7,6 +8,26 @@ import 'package:test/test.dart';
 
 void main() {
   group('SQLite manual recovery reconciliation', () {
+    test('adds the reconciliation audit table to an existing schema-v2 DB',
+        () async {
+      final directory =
+          await Directory.systemTemp.createTemp('alhambra-manual-reconcile-v2-');
+      final path = '${directory.path}/install.sqlite';
+      final legacy = sq.sqlite3.open(path);
+      legacy.execute(
+        'CREATE TABLE plugin_install_operation (operation_id TEXT PRIMARY KEY)',
+      );
+      legacy.execute('PRAGMA user_version = 2');
+      legacy.dispose();
+
+      final journal = SqlitePluginInstallJournal(path);
+      addTearDown(() async {
+        journal.close();
+        await directory.delete(recursive: true);
+      });
+      expect(await journal.manualReconciliations('legacy-operation'), isEmpty);
+    });
+
     test('records an atomic, durable operator resolution and closes operation',
         () async {
       final directory =
