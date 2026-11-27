@@ -83,9 +83,17 @@ Use `checkpointWal()` for explicit WAL maintenance. It defaults to
 maintenance windows. In particular, `truncate` may wait for readers. No
 checkpoint runs automatically, and a WAL checkpoint is not a backup.
 
+The adapter exposes `backupTo(destinationPath)`, implemented with SQLite's
+`VACUUM INTO` so SQLite creates a consistent standalone snapshot while
+respecting its own locking and WAL state. The destination must not already
+exist. The adapter does not encrypt, upload, rotate, or retain backup files;
+hosts must protect the destination and manage backup lifecycle. After restore,
+run the provenance and anchor verifiers against independently retained signed
+anchors.
+
 The adapter does not expose retention deletion or automatic repair. Hosts
-must own backup/restore, immutable retention, integrity incident response,
-and verification against independently retained anchors.
+must own immutable retention, integrity incident response, and verification
+against independently retained anchors.
 
 ## Integrity and security boundaries
 
