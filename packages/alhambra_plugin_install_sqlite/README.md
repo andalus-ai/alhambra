@@ -2,7 +2,7 @@
 
 This package provides durable SQLite adapters for plugin installation:
 - `SqliteInstalledPluginStore` implements `FencedTransactionalInstalledPluginStore`.
-- `SqlitePluginInstallJournal` implements `FencedPluginInstallRecoveryJournal`.
+- `SqlitePluginInstallJournal` implements `FencedPluginInstallRecoveryJournal` and `PluginInstallManualReconciliationStore`.
 - `SqlitePluginInstallOperationLeaseStore` implements
   `PluginInstallOperationLeaseStore`.
 
