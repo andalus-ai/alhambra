@@ -23,7 +23,7 @@ PluginRevocationOperationsAccessAudit _audit({
       resource: resource,
       pageSize: resource == null ? null : 25,
       continuationRequested: continuation,
-      queryFingerprint: resource == null ? null : 'a' * 64,
+      queryFingerprint: resource == null ? null : List<String>.filled(64, 'a').join(),
     );
 
 void main() {
@@ -68,7 +68,7 @@ void main() {
       expect(records.first.resource, 'outbox');
       expect(records.first.continuationRequested, isTrue);
       expect(records.last.actorId, 'operator-a');
-      expect(records.last.queryFingerprint, 'a' * 64);
+      expect(records.last.queryFingerprint, List<String>.filled(64, 'a').join());
       expect(records.every((record) => record.scopeId == 'scope-a'), isTrue);
     });
 
