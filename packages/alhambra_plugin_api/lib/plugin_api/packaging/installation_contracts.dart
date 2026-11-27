@@ -348,3 +348,72 @@ abstract interface class PluginInstallManualReconciliationStore {
     String operationId,
   );
 }
+
+/// Bounded filters for installation audit history.
+///
+/// [from] is inclusive and [to] is exclusive. The default page is 100 rows;
+/// adapters must reject limits outside 1..500 and negative offsets.
+final class PluginInstallAuditQuery {
+  final String? operationId;
+  final String? pluginId;
+  final PluginInstallJournalStatus? status;
+  final String? operatorId;
+  final DateTime? from;
+  final DateTime? to;
+  final int limit;
+  final int offset;
+
+  const PluginInstallAuditQuery({
+    this.operationId,
+    this.pluginId,
+    this.status,
+    this.operatorId,
+    this.from,
+    this.to,
+    this.limit = 100,
+    this.offset = 0,
+  });
+}
+
+/// Safe-to-display summary of one durable installation transition.
+///
+/// Filesystem paths, staging handles, content hashes and package contents are
+/// intentionally excluded. Manual evidence summaries are optional and should
+/// reference protected incident records rather than contain secrets.
+final class PluginInstallAuditRecord {
+  final String operationId;
+  final String pluginId;
+  final String version;
+  final PluginInstallJournalStatus status;
+  final DateTime occurredAt;
+  final int revision;
+  final String? operatorId;
+  final String? approvalId;
+  final String? failureCode;
+  final int? fencingToken;
+  final PluginInstallManualResolution? manualResolution;
+  final String? evidenceSummary;
+
+  const PluginInstallAuditRecord({
+    required this.operationId,
+    required this.pluginId,
+    required this.version,
+    required this.status,
+    required this.occurredAt,
+    required this.revision,
+    this.operatorId,
+    this.approvalId,
+    this.failureCode,
+    this.fencingToken,
+    this.manualResolution,
+    this.evidenceSummary,
+  });
+}
+
+/// Read-only, bounded access to the append-only installation transition log.
+abstract interface class PluginInstallAuditStore {
+  Future<List<PluginInstallAuditRecord>> queryAudit(
+    PluginInstallAuditQuery query,
+  );
+}
+
