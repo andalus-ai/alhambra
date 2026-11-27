@@ -173,3 +173,21 @@ renews it at operation boundaries and during archive streaming.
 implementation only. Production hosts must supply a durable, atomic lease
 store and adapters that serialize their token checks with every mutation.
 See [Plugin installation worker leases and fencing](../../Docs/PLUGIN_INSTALL_WORKER_LEASES_AND_FENCING.md).
+
+
+## Authorized revocation access-audit inspection
+
+`PluginRevocationAccessAuditInspectionService` exposes bounded,
+scope-filtered reads of the durable plugin-revocation access log. It requires a
+dedicated `PluginRevocationAccessAuditAuthorizer`, separate from the
+ordinary operations-inspection permission. Each allowed or denied attempt is
+appended as an `accessAudit` resource before any read; an audit write
+failure or missing read adapter fails closed. The host must derive the
+principal from its authenticated session and must not trust caller-supplied
+actor or scope identifiers.
+
+The inspection query supports a 1..200 record limit and a half-open time
+range. Storage adapters enforce scope/time filtering and ordering. See
+[Authorized Plugin Revocation Access-Audit Inspection](../../Docs/AUTHORIZED_REVOCATION_ACCESS_AUDIT_INSPECTION.md)
+for the request sequence, host wiring, database permissions, retention, and
+integrity limitations.
