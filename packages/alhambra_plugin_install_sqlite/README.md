@@ -2,7 +2,7 @@
 
 This package provides durable SQLite adapters for plugin installation:
 - `SqliteInstalledPluginStore` implements `FencedTransactionalInstalledPluginStore`.
-- `SqlitePluginInstallJournal` implements `FencedPluginInstallRecoveryJournal` and `PluginInstallManualReconciliationStore`.
+- `SqlitePluginInstallJournal` implements `FencedPluginInstallRecoveryJournal`, `PluginInstallManualReconciliationStore` and `PluginInstallAuditStore`.
 - `SqlitePluginInstallOperationLeaseStore` implements
   `PluginInstallOperationLeaseStore`.
 
@@ -125,3 +125,34 @@ final recorded = await journal.reconcileManually(
 ```
 
 A successful call appends an immutable reconciliation record and a journal history event in the same SQLite transaction, then moves the operation to terminal `manuallyReconciled`. It does not modify filesystem contents or installed-plugin records. The caller must provide an authenticated operator identity and evidence summary; do not treat this API as proof that the operator's conclusion is correct. Retrieve the audit trail with `manualReconciliations(operationId)`.
+
+## Installation audit queries
+
+The journal exposes a bounded read-only audit projection through
+`PluginInstallAuditStore`. The default page size is 100 and the maximum is
+500; offsets must be non-negative. Time filters use UTC instants, with
+`from` inclusive and `to` exclusive.
+
+```dart
+final events = await journal.queryAudit(PluginInstallAuditQuery(
+  pluginId: 'com.example.editor',
+  status: PluginInstallJournalStatus.manuallyReconciled,
+  from: incidentStartedAt,
+  to: incidentEndedAt,
+  limit: 100,
+));
+
+for (final event in events) {
+  // Use operationId, pluginId, status, occurredAt, operatorId and approvalId
+  // to populate a host-owned audit timeline.
+}
+```
+
+Results are ordered newest-first, with event ID as a deterministic tie-breaker.
+Use operation ID filtering for a complete operation-specific timeline. The
+projection deliberately omits filesystem paths, staging handles, content
+hashes and package contents. Manual-resolution records are joined to their
+corresponding journal transition so they appear exactly once; evidence summaries
+should contain only a protected incident reference or similarly non-secret
+description. Hosts remain responsible for authentication, authorization,
+retention, export policy and redaction appropriate to their deployment.
