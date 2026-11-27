@@ -1,0 +1,132 @@
+import 'dart:io';
+
+import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
+import 'package:alhambra_plugin_install_sqlite/alhambra_plugin_install_sqlite.dart';
+import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
+import 'package:test/test.dart';
+
+void main() {
+  group('SQLite manual recovery reconciliation', () {
+    test('records an atomic, durable operator resolution and closes operation',
+        () async {
+      final directory =
+          await Directory.systemTemp.createTemp('alhambra-manual-reconcile-');
+      final path = '${directory.path}/install.sqlite';
+      var journal = SqlitePluginInstallJournal(path);
+      addTearDown(() async {
+        journal.close();
+        await directory.delete(recursive: true);
+      });
+
+      const operationId = 'install-manual-reconcile';
+      final claimedAt = DateTime.utc(2026, 11, 27, 10);
+      final resolvedAt = claimedAt.add(const Duration(minutes: 5));
+      expect(await journal.advanceFence(
+        operationId: operationId,
+        fencingToken: 4,
+      ), isTrue);
+      await journal.write(PluginInstallJournalEntry(
+        operationId: operationId,
+        pluginId: 'example.manual',
+        version: '1.2.3',
+        status: PluginInstallJournalStatus.recoveryStarted,
+        updatedAt: claimedAt,
+        failureCode: 'RECOVERY_APPROVED',
+        approvedBy: 'recovery-worker',
+        approvalId: 'initial-recovery-approval',
+        contentHash:
+            'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        fencingToken: 4,
+      ));
+
+      expect(await journal.reconcileManually(
+        operationId: operationId,
+        expectedUpdatedAt: claimedAt,
+        resolution: PluginInstallManualResolution.absentAndClean,
+        resolutionId: 'manual-resolution-001',
+        operatorId: 'host-operator',
+        evidenceSummary:
+            'Verified destination absent, staging absent, and installed record absent.',
+        resolvedAt: resolvedAt,
+      ), isTrue);
+
+      final reconciled = await journal.read(operationId);
+      expect(reconciled?.status,
+          PluginInstallJournalStatus.manuallyReconciled);
+      expect(reconciled?.approvedBy, 'host-operator');
+      expect(reconciled?.approvalId, 'manual-resolution-001');
+      expect(reconciled?.failureCode,
+          'MANUAL_RECONCILED_ABSENTANDCLEAN');
+      expect(await journal.unresolved(), isEmpty);
+      expect((await journal.history(operationId)).last.status,
+          PluginInstallJournalStatus.manuallyReconciled);
+
+      final audit = await journal.manualReconciliations(operationId);
+      expect(audit, hasLength(1));
+      expect(audit.single.resolution,
+          PluginInstallManualResolution.absentAndClean);
+      expect(audit.single.operatorId, 'host-operator');
+      expect(audit.single.evidenceSummary,
+          contains('destination absent'));
+
+      // The resolution is a one-way, compare-and-set closure. It cannot be
+      // submitted again against the old recovery claim.
+      expect(await journal.reconcileManually(
+        operationId: operationId,
+        expectedUpdatedAt: claimedAt,
+        resolution: PluginInstallManualResolution.absentAndClean,
+        resolutionId: 'manual-resolution-duplicate',
+        operatorId: 'second-operator',
+        evidenceSummary: 'duplicate',
+        resolvedAt: resolvedAt.add(const Duration(minutes: 1)),
+      ), isFalse);
+
+      journal.close();
+      journal = SqlitePluginInstallJournal(path);
+      expect((await journal.read(operationId))?.status,
+          PluginInstallJournalStatus.manuallyReconciled);
+      expect(await journal.manualReconciliations(operationId), hasLength(1));
+      expect(await journal.unresolved(), isEmpty);
+    });
+
+    test('rejects stale timestamps and invalid evidence without mutation',
+        () async {
+      final journal = SqlitePluginInstallJournal.memory();
+      addTearDown(journal.close);
+      const operationId = 'install-manual-reconcile-cas';
+      final claimedAt = DateTime.utc(2026, 11, 27, 11);
+      await journal.write(PluginInstallJournalEntry(
+        operationId: operationId,
+        pluginId: 'example.manual.cas',
+        version: '1.0.0',
+        status: PluginInstallJournalStatus.needsReconciliation,
+        updatedAt: claimedAt,
+      ));
+
+      expect(await journal.reconcileManually(
+        operationId: operationId,
+        expectedUpdatedAt: claimedAt.subtract(const Duration(seconds: 1)),
+        resolution: PluginInstallManualResolution.residualStateAccepted,
+        resolutionId: 'manual-resolution-stale',
+        operatorId: 'host-operator',
+        evidenceSummary: 'Reviewed residual state.',
+        resolvedAt: claimedAt.add(const Duration(minutes: 1)),
+      ), isFalse);
+      await expectLater(
+        journal.reconcileManually(
+          operationId: operationId,
+          expectedUpdatedAt: claimedAt,
+          resolution: PluginInstallManualResolution.residualStateAccepted,
+          resolutionId: 'manual-resolution-invalid',
+          operatorId: 'host-operator',
+          evidenceSummary: 'contains\ncontrol character',
+          resolvedAt: claimedAt.add(const Duration(minutes: 1)),
+        ),
+        throwsArgumentError,
+      );
+      expect((await journal.read(operationId))?.status,
+          PluginInstallJournalStatus.needsReconciliation);
+      expect(await journal.manualReconciliations(operationId), isEmpty);
+    });
+  });
+}
