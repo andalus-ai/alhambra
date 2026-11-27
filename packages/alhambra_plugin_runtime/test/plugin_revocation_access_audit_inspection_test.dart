@@ -1,14 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 
-final class _Authorizer implements PluginRevocationOperationsAuthorizer {
+final class _Authorizer implements PluginRevocationAccessAuditAuthorizer {
   final List<String> events;
   final bool allowed;
 
   _Authorizer(this.events, {this.allowed = true});
 
   @override
-  Future<bool> canInspect({
+  Future<bool> canInspectAccessAudit({
     required PluginRevocationOperationsPrincipal principal,
     required String scopeId,
   }) async {
