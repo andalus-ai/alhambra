@@ -17,6 +17,10 @@ final class SqlitePluginRevocationAccessAuditStore
 
   /// Creates the append-only audit table and its scope/time index.
   void migrate() {
+    final chainTableExisted = database.select(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+      "AND name = 'alhambra_plugin_revocation_access_audit_chain'",
+    ).isNotEmpty;
     database.execute('''
       CREATE TABLE IF NOT EXISTS alhambra_plugin_revocation_access_audit (
         audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +57,68 @@ final class SqlitePluginRevocationAccessAuditStore
       CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_access_audit_scope_time
       ON alhambra_plugin_revocation_access_audit(scope_id, occurred_at DESC, audit_id DESC)
     ''');
+    if (!chainTableExisted) {
+      _backfillExistingAuditRows();
+    }
+  }
+
+  /// Establishes the initial chain from pre-existing audit rows exactly once.
+  /// Subsequent migrations never silently repair or rewrite an existing chain.
+  void _backfillExistingAuditRows() {
+    database.execute('BEGIN IMMEDIATE');
+    try {
+      final rows = database.select('''
+        SELECT audit_id, actor_id, scope_id, decision, denial_code, occurred_at,
+               resource, page_size, continuation_requested, query_fingerprint
+        FROM alhambra_plugin_revocation_access_audit
+        ORDER BY scope_id ASC, audit_id ASC
+      ''');
+      for (final row in rows) {
+        final audit = _auditFromRow(row);
+        final heads = database.select(
+          'SELECT sequence_number, head_hash '
+          'FROM alhambra_plugin_revocation_access_audit_chain_head '
+          'WHERE scope_id = ?',
+          [audit.scopeId],
+        );
+        final sequence = heads.isEmpty
+            ? 1
+            : (heads.first['sequence_number'] as int) + 1;
+        final previousHash = heads.isEmpty
+            ? PluginRevocationAccessAuditChainCodec.genesisHash
+            : heads.first['head_hash'] as String;
+        final payload = PluginRevocationAccessAuditChainCodec.canonicalPayload(audit);
+        final entryHash = PluginRevocationAccessAuditChainCodec.hash(
+          previousHash: previousHash,
+          canonicalPayload: payload,
+        );
+        database.execute('''
+          INSERT INTO alhambra_plugin_revocation_access_audit_chain (
+            scope_id, sequence_number, audit_id, previous_hash,
+            canonical_payload, entry_hash
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        ''', [
+          audit.scopeId,
+          sequence,
+          row['audit_id'],
+          previousHash,
+          payload,
+          entryHash,
+        ]);
+        database.execute('''
+          INSERT INTO alhambra_plugin_revocation_access_audit_chain_head (
+            scope_id, sequence_number, head_hash
+          ) VALUES (?, ?, ?)
+          ON CONFLICT(scope_id) DO UPDATE SET
+            sequence_number = excluded.sequence_number,
+            head_hash = excluded.head_hash
+        ''', [audit.scopeId, sequence, entryHash]);
+      }
+      database.execute('COMMIT');
+    } catch (_) {
+      database.execute('ROLLBACK');
+      rethrow;
+    }
   }
 
   @override
