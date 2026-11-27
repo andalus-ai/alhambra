@@ -145,7 +145,6 @@ void main() {
       ), isFalse);
     });
 
-
     test('rejects duplicate provenance IDs and non-monotonic anchors', () async {
       final store = openStore();
       expect(await store.provenanceStore.appendIfHeadMatches(
@@ -174,7 +173,6 @@ void main() {
       ), isFalse);
       expect((await store.anchorStore.readAll('chain-a')).length, 1);
     });
-
 
     test('passes the shared recovery provenance adapter conformance suite', () async {
       final store = openStore();
@@ -245,7 +243,10 @@ void main() {
 
       final checkpoint = store.checkpointWal();
       expect(checkpoint.busy, 0);
-      expect(checkpoint.checkpointedFrames, lessThanOrEqualTo(checkpoint.logFrames));
+      expect(
+        checkpoint.checkpointedFrames,
+        lessThanOrEqualTo(checkpoint.logFrames),
+      );
     });
 
     test('rejects WAL checkpoint for in-memory databases', () {
