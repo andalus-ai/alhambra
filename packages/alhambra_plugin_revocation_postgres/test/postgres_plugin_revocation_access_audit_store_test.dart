@@ -28,7 +28,7 @@ void main() {
       resource: 'journal',
       pageSize: 25,
       continuationRequested: false,
-      queryFingerprint: 'b' * 64,
+      queryFingerprint: List<String>.filled(64, 'b').join(),
     ));
     await store.append(PluginRevocationOperationsAccessAudit(
       actorId: 'operator-b',
@@ -39,7 +39,7 @@ void main() {
       resource: 'outbox',
       pageSize: 10,
       continuationRequested: true,
-      queryFingerprint: 'c' * 64,
+      queryFingerprint: List<String>.filled(64, 'c').join(),
     ));
     await store.append(PluginRevocationOperationsAccessAudit(
       actorId: 'foreign-operator',
@@ -55,7 +55,7 @@ void main() {
         PluginRevocationOperationsAccessDecision.denied);
     expect(records.first.continuationRequested, isTrue);
     expect(records.last.actorId, 'operator-a');
-    expect(records.last.queryFingerprint, 'b' * 64);
+    expect(records.last.queryFingerprint, List<String>.filled(64, 'b').join());
 
     final bounded = await store.readAccessAudits(
       scopeId: scope,
@@ -69,5 +69,24 @@ void main() {
       store.readAccessAudits(scopeId: scope, limit: 501),
       throwsArgumentError,
     );
+
+    final verified = await store.verifyAccessAuditChain(scopeId: scope);
+    expect(verified.valid, isTrue);
+    expect(verified.entriesVerified, 2);
+    final foreignChain = await store.verifyAccessAuditChain(
+      scopeId: 'other-$scope',
+    );
+    expect(foreignChain.valid, isTrue);
+    expect(foreignChain.entriesVerified, 1);
+
+    await pool.execute(
+      'UPDATE alhambra_plugin_revocation_access_audit '
+      'SET actor_id = $1 WHERE scope_id = $2 AND actor_id = $3',
+      parameters: ['tampered-operator', scope, 'operator-a'],
+    );
+    final tampered = await store.verifyAccessAuditChain(scopeId: scope);
+    expect(tampered.valid, isFalse);
+    expect(tampered.failedSequence, 1);
+
   }, skip: skipReason);
 }

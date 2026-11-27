@@ -191,3 +191,20 @@ range. Storage adapters enforce scope/time filtering and ordering. See
 [Authorized Plugin Revocation Access-Audit Inspection](../../Docs/AUTHORIZED_REVOCATION_ACCESS_AUDIT_INSPECTION.md)
 for the request sequence, host wiring, database permissions, retention, and
 integrity limitations.
+
+
+## Tamper-evident revocation access-audit integrity
+
+SQLite and PostgreSQL revocation audit adapters optionally implement
+`PluginRevocationAccessAuditChainStore`. Their append path atomically commits
+the audit row, its per-scope SHA-256 chain entry, and the chain head. The
+verification result identifies whether the chain is internally consistent
+with the audit rows and stored head. Hosts should authorize verification
+requests through the dedicated audit-trail permission boundary.
+
+The initial chain-table migration backfills historical rows once; subsequent
+migrations do not silently repair existing chain state. A local hash chain
+detects edits and unchained inserts but is not immutable against a privileged
+database operator who can rewrite all local state. Signed external checkpoints
+or immutable archival are required for stronger protection. See
+[Revocation Access-Audit Hash Chain](../../Docs/REVOCATION_ACCESS_AUDIT_HASH_CHAIN.md).
