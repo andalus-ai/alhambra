@@ -16,7 +16,7 @@ This package provides durable SQLite adapters for plugin installation:
 - Persists lease ownership and monotonically increasing fencing tokens across
   release, expiry, close and reopen.
 - Serializes independent SQLite connections competing for the same operation.
-- Retains approval-ID uniqueness and ordered operation history.
+- Retains approval-ID uniqueness and ordered operation history.\n- Persists append-only operator manual-reconciliation evidence and atomically\n  closes ambiguous recovery operations using compare-and-set.
 - Supports existing schema-v1 journal databases through an additive v2
   migration.
 
@@ -105,3 +105,21 @@ overwrite or delete transaction-owned records.
 
 See [the installed-store design and guarantees](../../Docs/SQLITE_INSTALLED_PLUGIN_STORE.md).
 
+
+## Manual recovery reconciliation
+
+For an operation left in `recoveryStarted` or `needsReconciliation`, inspect the actual filesystem and installed-plugin record before asking an authorized operator to record a conclusion. The journal implements `PluginInstallManualReconciliationStore`:
+
+```dart
+final recorded = await journal.reconcileManually(
+  operationId: operationId,
+  expectedUpdatedAt: unresolvedEntry.updatedAt,
+  resolution: PluginInstallManualResolution.absentAndClean,
+  resolutionId: uniqueResolutionId,
+  operatorId: authenticatedOperatorId,
+  evidenceSummary: 'Verified destination, staging and installed record are absent; see incident INC-123.',
+  resolvedAt: clock.now(),
+);
+```
+
+A successful call appends an immutable reconciliation record and a journal history event in the same SQLite transaction, then moves the operation to terminal `manuallyReconciled`. It does not modify filesystem contents or installed-plugin records. The caller must provide an authenticated operator identity and evidence summary; do not treat this API as proof that the operator's conclusion is correct. Retrieve the audit trail with `manualReconciliations(operationId)`.
