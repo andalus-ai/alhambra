@@ -11,7 +11,9 @@ import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 /// Use a local filesystem with reliable SQLite locking. This adapter does not
 /// provide filesystem promotion atomicity. Worker leases are provided by the
 /// companion [SqlitePluginInstallOperationLeaseStore].
-final class SqlitePluginInstallJournal implements\n    FencedPluginInstallRecoveryJournal,\n    PluginInstallManualReconciliationStore {
+final class SqlitePluginInstallJournal implements
+    FencedPluginInstallRecoveryJournal,
+    PluginInstallManualReconciliationStore {
   final sq.Database _db;
   bool _closed = false;
 
