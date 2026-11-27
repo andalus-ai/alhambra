@@ -223,5 +223,28 @@ void main() {
       PluginInstallJournalStatus.recoveryStarted,
     );
     expect(await journal.history(operationId), hasLength(2));
+
+    // An operator can close the ambiguity only after independently inspecting
+    // the state. This records the conclusion but performs no repair itself.
+    final currentClaim = (await journal.read(operationId))!;
+    expect(await journal.reconcileManually(
+      operationId: operationId,
+      expectedUpdatedAt: currentClaim.updatedAt,
+      resolution: PluginInstallManualResolution.absentAndClean,
+      resolutionId: 'manual-reconciliation-after-recovery-crash',
+      operatorId: 'incident-operator',
+      evidenceSummary:
+          'Verified destination and staging absent; installed record absent after restart.',
+      resolvedAt: advancingClock(),
+    ), isTrue);
+    expect(
+      (await journal.read(operationId))?.status,
+      PluginInstallJournalStatus.manuallyReconciled,
+    );
+    expect(await journal.unresolved(), isEmpty);
+    expect(await journal.manualReconciliations(operationId), hasLength(1));
+    expect(await Directory(destination).exists(), isFalse);
+    expect(await installedStore.find(pluginId), isNull);
+    expect(await journal.history(operationId), hasLength(3));
   });
 }
