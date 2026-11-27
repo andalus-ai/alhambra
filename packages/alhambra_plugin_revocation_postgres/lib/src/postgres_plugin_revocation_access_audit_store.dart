@@ -15,6 +15,11 @@ final class PostgresPluginRevocationAccessAuditStore
   /// Creates the append-only audit table and scope/time index.
   Future<void> migrate() async {
     await pool.runTx((tx) async {
+      final existingChain = await tx.execute(
+        "SELECT to_regclass('alhambra_plugin_revocation_access_audit_chain') AS chain_table",
+      );
+      final chainTableExisted =
+          existingChain.first.toColumnMap()['chain_table'] != null;
       await tx.execute('''
         CREATE TABLE IF NOT EXISTS alhambra_plugin_revocation_access_audit (
           audit_id BIGSERIAL PRIMARY KEY,
@@ -51,6 +56,59 @@ final class PostgresPluginRevocationAccessAuditStore
         CREATE INDEX IF NOT EXISTS idx_alhambra_revocation_access_audit_scope_time
         ON alhambra_plugin_revocation_access_audit(scope_id, occurred_at DESC, audit_id DESC)
       ''');
+      if (!chainTableExisted) {
+        // Initial activation backfills historical rows once. Later migrations
+        // never silently repair or rewrite a chain that already exists.
+        final oldRows = await tx.execute('''
+          SELECT audit_id, actor_id, scope_id, decision, denial_code,
+                 occurred_at, resource, page_size, continuation_requested,
+                 query_fingerprint
+          FROM alhambra_plugin_revocation_access_audit
+          ORDER BY scope_id ASC, audit_id ASC
+        ''');
+        for (final row in oldRows) {
+          final value = row.toColumnMap();
+          final audit = _auditFromRow(value);
+          final heads = await tx.execute(
+            'SELECT sequence_number, head_hash '
+            'FROM alhambra_plugin_revocation_access_audit_chain_head '
+            'WHERE scope_id = $1',
+            parameters: [audit.scopeId],
+          );
+          final sequence = heads.isEmpty
+              ? 1
+              : (heads.first.toColumnMap()['sequence_number'] as int) + 1;
+          final previousHash = heads.isEmpty
+              ? PluginRevocationAccessAuditChainCodec.genesisHash
+              : heads.first.toColumnMap()['head_hash'] as String;
+          final payload = PluginRevocationAccessAuditChainCodec.canonicalPayload(audit);
+          final entryHash = PluginRevocationAccessAuditChainCodec.hash(
+            previousHash: previousHash,
+            canonicalPayload: payload,
+          );
+          await tx.execute(r'''
+            INSERT INTO alhambra_plugin_revocation_access_audit_chain (
+              scope_id, sequence_number, audit_id, previous_hash,
+              canonical_payload, entry_hash
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+          ''', parameters: [
+            audit.scopeId,
+            sequence,
+            value['audit_id'],
+            previousHash,
+            payload,
+            entryHash,
+          ]);
+          await tx.execute(r'''
+            INSERT INTO alhambra_plugin_revocation_access_audit_chain_head (
+              scope_id, sequence_number, head_hash
+            ) VALUES ($1, $2, $3)
+            ON CONFLICT (scope_id) DO UPDATE SET
+              sequence_number = EXCLUDED.sequence_number,
+              head_hash = EXCLUDED.head_hash
+          ''', parameters: [audit.scopeId, sequence, entryHash]);
+        }
+      }
     });
   }
 
