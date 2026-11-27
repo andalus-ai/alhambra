@@ -94,8 +94,7 @@ void main() {
       ), isTrue);
       first.close();
 
-      final reopened = SqlitePluginRecoveryProvenancePersistence(path);
-      addTearDown(reopened.close);
+      final reopened = openStore();
       expect((await reopened.provenanceStore.readAll()).single.eventDigest,
           'digest-1');
       expect((await reopened.anchorStore.readAll('chain-a')).single.signature,
@@ -104,10 +103,8 @@ void main() {
     });
 
     test('serializes competing appenders across independent connections', () async {
-      final first = SqlitePluginRecoveryProvenancePersistence(path);
-      final second = SqlitePluginRecoveryProvenancePersistence(path);
-      addTearDown(first.close);
-      addTearDown(second.close);
+      final first = openStore();
+      final second = openStore();
 
       final results = await Future.wait([
         first.provenanceStore.appendIfHeadMatches(
@@ -126,8 +123,7 @@ void main() {
     });
 
     test('rejects stale heads and duplicate key-history sequence', () async {
-      final store = SqlitePluginRecoveryProvenancePersistence(path);
-      addTearDown(store.close);
+      final store = openStore();
       expect(await store.provenanceStore.appendIfHeadMatches(
         expectedSequence: 0,
         expectedHeadDigest: null,
