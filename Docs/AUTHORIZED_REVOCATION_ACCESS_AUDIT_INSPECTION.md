@@ -119,3 +119,13 @@ records may appear between requests. For compliance exports requiring a
 stable point-in-time view, create an explicit export job using a database
 snapshot or materialized export boundary rather than repeatedly querying this
 operational inspection endpoint.
+
+
+## Tamper-evident integrity
+
+The SQLite and PostgreSQL audit adapters also expose an optional
+`PluginRevocationAccessAuditChainStore` capability for per-scope hash-chain
+verification. Hosts should expose verification only behind the dedicated
+audit-trail authorization boundary. See
+[Revocation Access-Audit Hash Chain](REVOCATION_ACCESS_AUDIT_HASH_CHAIN.md)
+for atomic append, migration, verification, and external checkpoint guidance.
