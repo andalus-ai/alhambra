@@ -7,7 +7,8 @@ final class PostgresPluginRevocationAccessAuditStore
     implements
         PluginRevocationOperationsAccessAuditStore,
         PluginRevocationOperationsAccessAuditInspectionStore,
-        PluginRevocationAccessAuditChainStore,\n        PluginRevocationAccessAuditCheckpointChainVerifier {
+        PluginRevocationAccessAuditChainStore,
+        PluginRevocationAccessAuditCheckpointChainVerifier {
   final Pool<dynamic> pool;
 
   PostgresPluginRevocationAccessAuditStore(this.pool);
