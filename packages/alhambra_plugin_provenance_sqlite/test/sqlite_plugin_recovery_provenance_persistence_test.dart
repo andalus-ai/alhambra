@@ -173,7 +173,8 @@ void main() {
       ), isFalse);
       expect((await store.anchorStore.readAll('chain-a')).length, 1);
     });
-\n    test('isolates anchor sequence per chain', () async {
+
+    test('isolates anchor sequence per chain', () async {
       final store = openStore();
       final chainB = PluginRecoveryProvenanceAnchor(
         chainId: 'chain-b',
