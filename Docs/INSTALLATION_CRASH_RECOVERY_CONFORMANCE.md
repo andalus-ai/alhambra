@@ -120,3 +120,28 @@ They do **not** establish:
 If recovery itself is interrupted after its durable `recoveryStarted` claim,
 the operation is deliberately surfaced for manual reconciliation rather than
 blindly replaying a potentially completed side effect.
+
+## Installation audit inspection
+
+Hosts can expose a read-only installation timeline by adapting
+`PluginInstallAuditStore.queryAudit`. The SQLite implementation supports
+bounded pages (1–500 records; default 100), ordered newest-first with a stable
+event-ID tie-breaker. Filters include operation ID, plugin ID, transition
+status, operator ID, and a UTC time range (`from` inclusive, `to` exclusive).
+The database maintains indexes for plugin/time, status/time, operator/time,
+and general time-order scans.
+
+The audit projection includes operation/plugin/version identity, transition,
+revision, timestamp, operator/approval references, failure code and fencing
+token. It intentionally excludes filesystem paths, staging handles, package
+hashes and package contents. Manual reconciliation metadata is joined to its
+single corresponding journal transition; it is not emitted as a duplicate
+event. Evidence summaries should point to protected incident records and must
+not contain credentials, package data or other secrets.
+
+This is a persistence/query contract, not an administrative API or dashboard.
+The host must authenticate and authorize callers, apply tenant or workspace
+scope before invoking the store, decide retention and export policy, and
+protect audit data at rest and in transit. Offset pagination is intended for
+bounded operational inspection; hosts needing long-running exports should
+capture a stable time window and apply their own export/retention controls.
