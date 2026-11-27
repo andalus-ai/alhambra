@@ -4,7 +4,7 @@ import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_install_filesystem/alhambra_plugin_install_filesystem.dart';
 import 'package:alhambra_plugin_install_sqlite/alhambra_plugin_install_sqlite.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:test/test.dart';
 
 /// Fault-injection boundary: the recovery claim can be persisted, but the
 /// terminal outcome and reconciliation marker cannot be committed.
