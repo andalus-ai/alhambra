@@ -12,7 +12,7 @@ import 'plugin_revocation_admin_operations.dart';
 /// with a fixed field order; do not change its order or normalization without
 /// introducing a versioned codec.
 abstract final class PluginRevocationAccessAuditChainCodec {
-  static const String genesisHash = '0' * 64;
+  static final String genesisHash = List<String>.filled(64, '0').join();
   static const int formatVersion = 1;
 
   static String canonicalPayload(
