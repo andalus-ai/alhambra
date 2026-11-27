@@ -27,7 +27,8 @@ metadata.
 | Installed record saved; destination exists and record matches journal | `finalizePromotion` | Retain the destination and installed record; terminal journal state is `committed`. |
 | Stale installer resumes after a recovery worker takes over | No stale mutation is accepted | Old-token journal writes, filesystem mutations and installed-record creation are rejected. |
 | Normal transactional installation completes | No unresolved finding remains | Installed record and promoted destination exist; journal is terminal `committed`. |
-| Evidence is contradictory, incomplete or owned by another operation | `manualReview` | No destructive automatic action is permitted. |\n| Recovery claim persisted; side effect completed; terminal journal update unavailable | `manualReview` after restart | Preserve the durable `recoveryStarted` claim; do not replay the side effect. |
+| Evidence is contradictory, incomplete or owned by another operation | `manualReview` | No destructive automatic action is permitted. |
+| Recovery claim persisted; side effect completed; terminal journal update unavailable | `manualReview` after restart | Preserve the durable `recoveryStarted` claim; do not replay the side effect. |
 
 The recovery planner is read-only. The executor requires explicit operator
 identity and approval ID, re-inspects the current evidence, claims the journal
