@@ -84,7 +84,7 @@ void main() {
     );
   });
 
-  test('rejects an archive request not ending at the supplied checkpoint',
+  test('rejects an archive range that cannot reach its checkpoint',
       () async {
     final entries = _entries();
     final exporter = PluginRevocationAccessAuditArchiveExporter(
@@ -100,12 +100,12 @@ void main() {
         limit: 1,
         anchor: PluginRevocationAccessAuditCheckpointAnchor(
           scopeId: 'workspace-a',
-          sequence: 1,
-          headHash: entries.first.entryHash,
+          sequence: 2,
+          headHash: entries.last.entryHash,
           checkpointDigest: _hash('c'),
         ),
       ),
-      throwsA(isA<PluginRevocationAccessAuditArchiveExportException>()),
+      throwsA(isA<ArgumentError>()),
     );
   });
 }
