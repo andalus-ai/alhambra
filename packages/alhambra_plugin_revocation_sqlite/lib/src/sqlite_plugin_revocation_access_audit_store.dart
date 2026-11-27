@@ -10,7 +10,7 @@ final class SqlitePluginRevocationAccessAuditStore
     implements
         PluginRevocationOperationsAccessAuditStore,
         PluginRevocationOperationsAccessAuditInspectionStore,
-        PluginRevocationAccessAuditChainStore {
+        PluginRevocationAccessAuditChainStore,\n        PluginRevocationAccessAuditCheckpointChainVerifier {
   final sq.Database database;
 
   SqlitePluginRevocationAccessAuditStore(this.database);
@@ -275,6 +275,20 @@ final class SqlitePluginRevocationAccessAuditStore
       entriesVerified: rows.length,
       headHash: previousHash,
     );
+  }
+
+  @override
+  Future<bool> containsVerifiedHead({
+    required String scopeId,
+    required int sequence,
+    required String headHash,
+  }) async {
+    final rows = database.select(
+      'SELECT entry_hash FROM alhambra_plugin_revocation_access_audit_chain '
+      'WHERE scope_id = ? AND sequence_number = ?',
+      [scopeId, sequence],
+    );
+    return rows.isNotEmpty && rows.first['entry_hash'] == headHash;
   }
 
   PluginRevocationOperationsAccessAudit _auditFromRow(Map<String, Object?> row) {
