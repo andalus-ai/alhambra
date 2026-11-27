@@ -197,11 +197,13 @@ final class PluginRevocationAccessAuditArchiveExportException
 final class PluginRevocationAccessAuditArchiveExporter {
   final PluginRevocationAccessAuditChainStore chainStore;
   final PluginRevocationAccessAuditArchiveSource source;
+  final PluginRevocationAccessAuditCheckpointVerifier checkpointVerifier;
   final DateTime Function() clock;
 
   PluginRevocationAccessAuditArchiveExporter({
     required this.chainStore,
     required this.source,
+    required this.checkpointVerifier,
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
 
@@ -210,7 +212,7 @@ final class PluginRevocationAccessAuditArchiveExporter {
     required String scopeId,
     required int fromSequence,
     required int limit,
-    required PluginRevocationAccessAuditCheckpointAnchor anchor,
+    required PluginRevocationAccessAuditCheckpoint checkpoint,
   }) async {
     if (packageId.trim().isEmpty ||
         scopeId.trim().isEmpty ||
@@ -219,14 +221,34 @@ final class PluginRevocationAccessAuditArchiveExporter {
         limit > 1000) {
       throw ArgumentError('Invalid audit archive export request.');
     }
-    if (anchor.scopeId != scopeId ||
-        anchor.sequence < fromSequence ||
-        anchor.sequence > fromSequence + limit - 1) {
+    if (checkpoint.scopeId != scopeId ||
+        checkpoint.sequence < fromSequence ||
+        checkpoint.sequence > fromSequence + limit - 1) {
       throw ArgumentError('Checkpoint anchor does not cover the requested segment.');
     }
+    final checkpointPayload =
+        PluginRevocationAccessAuditCheckpointCodec.canonicalPayload(
+      scopeId: checkpoint.scopeId,
+      sequence: checkpoint.sequence,
+      headHash: checkpoint.headHash,
+      createdAt: checkpoint.createdAt,
+      signingKeyId: checkpoint.signingKeyId,
+      previousCheckpointDigest: checkpoint.previousCheckpointDigest,
+    );
+    if (!await checkpointVerifier.verify(
+      keyId: checkpoint.signingKeyId,
+      canonicalPayload: checkpointPayload,
+      signature: checkpoint.signature,
+    )) {
+      throw const PluginRevocationAccessAuditArchiveExportException(
+        'The supplied checkpoint signature is invalid.',
+      );
+    }
+    final checkpointDigest =
+        PluginRevocationAccessAuditCheckpointCodec.digest(checkpoint);
     final before = await chainStore.verifyAccessAuditChain(scopeId: scopeId);
     if (!before.valid || before.scopeId != scopeId ||
-        before.entriesVerified < anchor.sequence) {
+        before.entriesVerified < checkpoint.sequence) {
       throw const PluginRevocationAccessAuditArchiveExportException(
         'Cannot export from an invalid or incomplete audit chain.',
       );
@@ -250,7 +272,7 @@ final class PluginRevocationAccessAuditArchiveExporter {
       );
     }
     final last = entries.last;
-    if (last.sequence != anchor.sequence || last.entryHash != anchor.headHash) {
+    if (last.sequence != checkpoint.sequence || last.entryHash != checkpoint.headHash) {
       throw const PluginRevocationAccessAuditArchiveExportException(
         'The exported segment does not terminate at the supplied checkpoint.',
       );
@@ -263,7 +285,7 @@ final class PluginRevocationAccessAuditArchiveExporter {
       previousHash: entries.first.previousHash,
       headHash: last.entryHash,
       createdAt: clock(),
-      checkpointDigest: anchor.checkpointDigest,
+      checkpointDigest: checkpointDigest,
       entries: entries,
       digest: List<String>.filled(64, '0').join(),
     );
@@ -289,27 +311,3 @@ final class PluginRevocationAccessAuditArchiveExporter {
   }
 }
 
-/// Minimal trusted checkpoint reference; signature verification remains owned
-/// by PluginRevocationAccessAuditCheckpointService.
-final class PluginRevocationAccessAuditCheckpointAnchor {
-  final String scopeId;
-  final int sequence;
-  final String headHash;
-  final String checkpointDigest;
-
-  PluginRevocationAccessAuditCheckpointAnchor({
-    required this.scopeId,
-    required this.sequence,
-    required this.headHash,
-    required this.checkpointDigest,
-  }) {
-    if (scopeId.trim().isEmpty ||
-        sequence < 1 ||
-        !_isHash(headHash) ||
-        !_isHash(checkpointDigest)) {
-      throw ArgumentError('Invalid audit checkpoint anchor.');
-    }
-  }
-}
-
-bool _isHash(String value) => RegExp(r'^[0-9a-f]{64}$').hasMatch(value);
