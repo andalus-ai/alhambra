@@ -51,7 +51,7 @@ final class SqlitePluginRecoveryProvenanceDiagnostics {
     required this.quickCheckResult,
   });
 
-  bool get integrityCheckPassed => quickCheckResult == 'ok';
+  bool get quickCheckPassed => quickCheckResult == 'ok';
 }
 
 /// Owns one SQLite database and exposes durable adapters for the three
