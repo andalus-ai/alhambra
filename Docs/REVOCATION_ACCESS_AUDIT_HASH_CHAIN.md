@@ -107,3 +107,45 @@ that use adapters without `PluginRevocationAccessAuditChainStore` continue to
 support ordinary append and inspection but do not have chain verification.
 Hosts should authorize verification requests using the same dedicated
 audit-trail authorization boundary as audit inspection.
+
+
+## Signed external checkpoints
+
+The runtime now defines `PluginRevocationAccessAuditCheckpointService` and
+host-owned ports for signing, signature verification, authorization, and
+independent checkpoint storage. SQLite and PostgreSQL audit adapters expose
+the additional `PluginRevocationAccessAuditCheckpointChainVerifier` capability
+to prove that a previously anchored sequence/hash pair still exists in the
+verified local chain.
+
+A checkpoint signs a versioned canonical payload containing scope, sequence,
+head hash, UTC creation time, signing key ID, and the digest of the preceding
+checkpoint. The external store's append operation receives the expected
+previous digest and must enforce that compare-and-append atomically. This
+prevents concurrent checkpoint writers from silently forking history.
+
+Before creating a new checkpoint, the service verifies the complete local
+chain, verifies the previous checkpoint signature, rejects a local rollback,
+and confirms that the previous anchor remains in the chain. Verification of
+the latest checkpoint repeats signature validation and checks that its exact
+head is still present in the valid local chain. A merely larger local sequence
+is not sufficient.
+
+### Host responsibilities
+
+- Implement signer and verifier using a managed key service or HSM; never put
+  private signing keys in Alhambra runtime configuration.
+- Implement checkpoint storage in a separately administered account or
+  immutable/WORM service. Do not store the only checkpoint copy beside the
+  audit chain it protects.
+- Enforce atomic compare-and-append using `expectedPreviousDigest`.
+- Preserve historical verification keys or a trusted key-rotation policy so
+  old signatures remain verifiable.
+- Authorize checkpoint creation and verification independently of ordinary
+  operational inspection.
+- Schedule checkpoint creation and verification, alert on failures, and retain
+  exported checkpoint evidence outside the application database.
+
+The runtime deliberately does not select a signature algorithm, KMS, cloud
+provider, scheduler, or external storage vendor. It also does not recursively
+append checkpoint events to the audit chain being checkpointed.
