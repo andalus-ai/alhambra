@@ -120,19 +120,6 @@ void main() {
       );
     });
 
-    test('migrates schema-v3 databases to indexed schema-v4', () async {
-      final db = sq.sqlite3.openInMemory();
-      db.execute('PRAGMA user_version = 3');
-      db.dispose();
-
-      // A v3 database has all v1-v3 tables. This migration path is also
-      // exercised by the v2 migration test in the reconciliation suite.
-      final journal = SqlitePluginInstallJournal.memory();
-      addTearDown(journal.close);
-      final version = sq.sqlite3.openInMemory();
-      version.dispose();
-      // Opening a fresh database applies all migrations through v4.
-      expect(await journal.queryAudit(const PluginInstallAuditQuery()), isEmpty);
-    });
+;
   });
 }
