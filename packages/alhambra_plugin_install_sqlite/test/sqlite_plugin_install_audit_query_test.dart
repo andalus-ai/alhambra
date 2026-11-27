@@ -1,4 +1,3 @@
-import 'package:sqlite3/sqlite3.dart' as sq;
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_install_sqlite/alhambra_plugin_install_sqlite.dart';
 import 'package:test/test.dart';
@@ -119,7 +118,5 @@ void main() {
         throwsArgumentError,
       );
     });
-
-;
   });
 }
