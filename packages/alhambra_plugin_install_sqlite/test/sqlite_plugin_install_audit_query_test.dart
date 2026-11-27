@@ -111,6 +111,10 @@ void main() {
         throwsArgumentError,
       );
       await expectLater(
+        journal.queryAudit(const PluginInstallAuditQuery(offset: 100001)),
+        throwsArgumentError,
+      );
+      await expectLater(
         journal.queryAudit(PluginInstallAuditQuery(
           from: DateTime.utc(2026, 11, 28, 12),
           to: DateTime.utc(2026, 11, 28, 11),
