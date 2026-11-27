@@ -10,7 +10,8 @@ final class SqlitePluginRevocationAccessAuditStore
     implements
         PluginRevocationOperationsAccessAuditStore,
         PluginRevocationOperationsAccessAuditInspectionStore,
-        PluginRevocationAccessAuditChainStore,\n        PluginRevocationAccessAuditCheckpointChainVerifier {
+        PluginRevocationAccessAuditChainStore,
+        PluginRevocationAccessAuditCheckpointChainVerifier {
   final sq.Database database;
 
   SqlitePluginRevocationAccessAuditStore(this.database);
