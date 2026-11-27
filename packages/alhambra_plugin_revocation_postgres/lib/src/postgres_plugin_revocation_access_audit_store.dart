@@ -219,6 +219,31 @@ final class PostgresPluginRevocationAccessAuditStore
       previousHash = actualHash;
       expectedSequence++;
     }
+    final auditCountRows = await pool.execute(
+      'SELECT COUNT(*) AS total FROM alhambra_plugin_revocation_access_audit '
+      'WHERE scope_id = $1',
+      parameters: [scopeId],
+    );
+    final chainCountRows = await pool.execute(
+      'SELECT COUNT(*) AS total FROM alhambra_plugin_revocation_access_audit_chain '
+      'WHERE scope_id = $1',
+      parameters: [scopeId],
+    );
+    final auditCount =
+        (auditCountRows.first.toColumnMap()['total'] as int);
+    final chainCount =
+        (chainCountRows.first.toColumnMap()['total'] as int);
+    if (auditCount != rows.length || chainCount != rows.length) {
+      return PluginRevocationAccessAuditChainVerification(
+        scopeId: scopeId,
+        valid: false,
+        entriesVerified: rows.length,
+        failedSequence: rows.length + 1,
+        expectedHash: previousHash,
+        headHash: previousHash,
+      );
+    }
+
     final heads = await pool.execute(
       'SELECT sequence_number, head_hash '
       'FROM alhambra_plugin_revocation_access_audit_chain_head '
