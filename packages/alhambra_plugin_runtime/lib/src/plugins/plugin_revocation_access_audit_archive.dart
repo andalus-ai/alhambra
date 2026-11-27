@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import 'plugin_revocation_access_audit_chain.dart';
+import 'plugin_revocation_access_audit_checkpoint.dart';
 import 'plugin_revocation_admin_operations.dart';
 
 /// One immutable audit-chain entry as exported for offline verification.
