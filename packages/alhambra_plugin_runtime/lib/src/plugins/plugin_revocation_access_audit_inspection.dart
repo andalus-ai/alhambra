@@ -42,6 +42,18 @@ final class PluginRevocationAccessAuditResult {
   }) : records = List.unmodifiable(records);
 }
 
+/// Host authorization port dedicated to access-audit log inspection.
+///
+/// This is intentionally separate from ordinary revocation operations
+/// inspection: hosts can grant access to operational state without granting
+/// access to the security audit trail.
+abstract interface class PluginRevocationAccessAuditAuthorizer {
+  Future<bool> canInspectAccessAudit({
+    required PluginRevocationOperationsPrincipal principal,
+    required String scopeId,
+  });
+}
+
 /// Authorized read boundary for the durable revocation operations access log.
 ///
 /// The host supplies an authenticated principal, scope authorization policy,
@@ -55,7 +67,7 @@ final class PluginRevocationAccessAuditResult {
 final class PluginRevocationAccessAuditInspectionService {
   static const String auditResource = 'accessAudit';
 
-  final PluginRevocationOperationsAuthorizer authorizer;
+  final PluginRevocationAccessAuditAuthorizer authorizer;
   final PluginRevocationOperationsAccessAuditStore accessAuditStore;
   final PluginRevocationOperationsAccessAuditInspectionStore? inspectionStore;
   final DateTime Function() clock;
@@ -71,7 +83,7 @@ final class PluginRevocationAccessAuditInspectionService {
     required PluginRevocationOperationsPrincipal principal,
     required PluginRevocationAccessAuditQuery query,
   }) async {
-    final allowed = await authorizer.canInspect(
+    final allowed = await authorizer.canInspectAccessAudit(
       principal: principal,
       scopeId: query.scopeId,
     );
