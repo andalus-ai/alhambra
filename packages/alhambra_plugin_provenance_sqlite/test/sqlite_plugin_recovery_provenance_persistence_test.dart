@@ -230,7 +230,7 @@ void main() {
       expect(health.anchorCount, 0);
       expect(health.signingKeyEventCount, 0);
       expect(health.quickCheckResult, 'ok');
-      expect(health.integrityCheckPassed, isTrue);
+      expect(health.quickCheckPassed, isTrue);
     });
 
     test('supports explicit WAL checkpoint and reports its result', () async {
