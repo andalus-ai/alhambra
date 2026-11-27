@@ -7,7 +7,7 @@ final class PostgresPluginRevocationAccessAuditStore
     implements
         PluginRevocationOperationsAccessAuditStore,
         PluginRevocationOperationsAccessAuditInspectionStore,
-        PluginRevocationAccessAuditChainStore {
+        PluginRevocationAccessAuditChainStore,\n        PluginRevocationAccessAuditCheckpointChainVerifier {
   final Pool<dynamic> pool;
 
   PostgresPluginRevocationAccessAuditStore(this.pool);
@@ -272,6 +272,21 @@ final class PostgresPluginRevocationAccessAuditStore
       entriesVerified: rows.length,
       headHash: previousHash,
     );
+  }
+
+  @override
+  Future<bool> containsVerifiedHead({
+    required String scopeId,
+    required int sequence,
+    required String headHash,
+  }) async {
+    final rows = await pool.execute(
+      'SELECT entry_hash FROM alhambra_plugin_revocation_access_audit_chain '
+      'WHERE scope_id = $1 AND sequence_number = $2',
+      parameters: [scopeId, sequence],
+    );
+    return rows.isNotEmpty &&
+        rows.first.toColumnMap()['entry_hash'] == headHash;
   }
 
   PluginRevocationOperationsAccessAudit _auditFromRow(
