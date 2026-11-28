@@ -94,6 +94,7 @@ void main() {
       authorizer: _RetentionAuthorizer(false),
       checkpointEvidenceVerifier: _CheckpointEvidence(true),
       durabilityVerifier: _ArchiveDurability(true),
+      recordMetadataVerifier: _RecordMetadata(DateTime.utc(2026, 1, 1)),
       clock: () => DateTime.utc(2026, 11, 28),
     );
     final principal = PluginRevocationOperationsPrincipal(actorId: 'operator');
@@ -128,7 +129,6 @@ void main() {
     );
     final base = PluginRevocationAccessAuditRetentionRequest(
       scopeId: 'scope-a', fromSequence: 1, throughSequence: 2,
-      oldestRecordAt: DateTime.utc(2026, 1, 1),
       archiveSet: PluginRevocationAccessAuditArchiveSet(
         manifestId: 'manifest-a', scopeId: 'scope-a', packages: packages,
       ),
