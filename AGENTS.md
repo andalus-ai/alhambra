@@ -28,6 +28,7 @@ routes, screens, domain aggregates, services, or default plugin bundles to neutr
 | packages/alhambra_ui | Design system, widgets, responsive layouts and shells |
 | packages/alhambra_plugin_api | Stable plugin and extension contracts |
 | packages/alhambra_plugin_runtime | Registration, lifecycle, composition and recovery |
+| packages/alhambra_plugin_host | Optional application-host lifecycle composition and resource disposal |
 | packages/alhambra_sdk | Extension-author API |
 | packages/alhambra_identity | Optional identity integration |
 | packages/alhambra_workspace | Optional generic workspace services |
@@ -53,7 +54,7 @@ neighboring implementation and tests. Do not assume a directory name proves curr
 - Keep package dependencies acyclic.
 
 ### Host composition
-- The deployable application is the composition root.
+- The deployable application is the composition root. Optional host lifecycle composition may delegate to runtime coordinators, but must not duplicate plugin lifecycle semantics.
 - Register only compiled plugin/layout contributions the host intends to ship.
 - Keep product plugin bundles out of generic Alhambra loaders.
 - Runtime plugin registration selects compiled implementations; it is NOT a mechanism

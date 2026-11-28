@@ -29,6 +29,7 @@ Start here:
 ## Plugin contracts and lifecycle
 - [Plugin developer guide](PLUGIN_DEVELOPER_GUIDE.md) — implement, compose, test and operate a plugin.
 - [Plugin test utilities](../packages/alhambra_plugin_test/README.md) — in-process test host and metadata, packaging, discovery and lifecycle conformance checks.
+- [Plugin host lifecycle](../packages/alhambra_plugin_host/README.md) — dependency-aware startup/shutdown composition and reverse-order host resource disposal.
 - [Plugin packaging and discovery conformance](PLUGIN_PACKAGING_AND_DISCOVERY_CONFORMANCE.md) — manifest, lockfile, package header and compiled discovery boundaries.
 - [Plugin package integrity and trust](PLUGIN_PACKAGE_INTEGRITY_AND_TRUST.md) — payload digest, signature verification adapters, publisher trust and key lifecycle.
 - [Plugin capability negotiation](PLUGIN_CAPABILITY_NEGOTIATION.md) — version compatibility and required/optional resolution.
@@ -74,4 +75,5 @@ Update this index whenever an architecture or developer document is added.
 - [Recovery provenance and key governance](RECOVERY_PROVENANCE_AND_KEY_GOVERNANCE.md) — append-only archive operation history, chain verification, and signing-key lifecycle metadata.
 - [Recovery provenance production readiness](RECOVERY_PROVENANCE_PRODUCTION_READINESS.md) — adapter conformance, externally signed checkpoints, and production deployment guidance.
 - [Recovery provenance operational observability](RECOVERY_PROVENANCE_OPERATIONAL_OBSERVABILITY.md) — read-only timeline queries, chain/anchor/key health summaries, incident classification, and JSON audit exports.
+- [Recovery provenance host operations](RECOVERY_PROVENANCE_HOST_OPERATIONS.md) — startup/readiness, graceful shutdown, backup scheduling, restore verification, alerting, and deployment profiles.
 - [SQLite recovery provenance persistence](SQLITE_RECOVERY_PROVENANCE_PERSISTENCE.md) — durable SQLite adapters, atomic append semantics, schema migration, diagnostics, WAL maintenance, and host deployment boundaries.
