@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_host/alhambra_plugin_host.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
-import 'package:test/test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 final class _Plugin implements AlhambraPlugin {
   _Plugin(this.id, this.events, {this.failStop = false});
