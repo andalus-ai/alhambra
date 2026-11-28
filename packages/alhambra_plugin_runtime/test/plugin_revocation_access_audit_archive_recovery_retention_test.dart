@@ -116,9 +116,21 @@ void main() {
       policyVersion: 'v1', minimumAge: Duration(days: 5000),
       minimumRetainedSequence: 10,
     ));
+
+    await expectLater(
+      service.plan(
+        principal: principal,
+        policy: const PluginRevocationAccessAuditRetentionPolicy(
+          policyVersion: 'v1', minimumAge: Duration(days: 30),
+          minimumRetainedSequence: 10,
+        ),
+        request: request,
+      ),
+      throwsA(isA<PluginRevocationAccessAuditRetentionDeniedException>()),
+    );
   });
 
-  test('refuses unavailable archive durability and invalid checkpoint evidence', () async {
+  test('refuses unavailable archive durability', () async {
     final packages = _packages();
     final service = PluginRevocationAccessAuditRetentionService(
       authorizer: _RetentionAuthorizer(true),
