@@ -58,6 +58,7 @@ void main() {
       authorizer: authorizer,
       checkpointEvidenceVerifier: _CheckpointEvidence(true),
       durabilityVerifier: _ArchiveDurability(true),
+      recordMetadataVerifier: _RecordMetadata(DateTime.utc(2026, 1, 1)),
       clock: () => DateTime.utc(2026, 11, 28),
     );
     final plan = await service.plan(
@@ -71,7 +72,6 @@ void main() {
         scopeId: 'scope-a',
         fromSequence: 1,
         throughSequence: 2,
-        oldestRecordAt: DateTime.utc(2026, 1, 1),
         archiveSet: PluginRevocationAccessAuditArchiveSet(
           manifestId: 'manifest-a', scopeId: 'scope-a', packages: packages,
         ),
@@ -86,7 +86,6 @@ void main() {
     final packages = _packages();
     final request = PluginRevocationAccessAuditRetentionRequest(
       scopeId: 'scope-a', fromSequence: 1, throughSequence: 2,
-      oldestRecordAt: DateTime.utc(2026, 1, 1),
       archiveSet: PluginRevocationAccessAuditArchiveSet(
         manifestId: 'manifest-a', scopeId: 'scope-a', packages: packages,
       ),
@@ -124,6 +123,7 @@ void main() {
       authorizer: _RetentionAuthorizer(true),
       checkpointEvidenceVerifier: _CheckpointEvidence(false),
       durabilityVerifier: _ArchiveDurability(false),
+      recordMetadataVerifier: _RecordMetadata(DateTime.utc(2026, 1, 1)),
       clock: () => DateTime.utc(2026, 11, 28),
     );
     final base = PluginRevocationAccessAuditRetentionRequest(
@@ -233,4 +233,16 @@ final class _ArchiveDurability
   _ArchiveDurability(this.durable);
   @override
   Future<bool> isDurablyRetained({required String manifestId}) async => durable;
+}
+
+final class _RecordMetadata
+    implements PluginRevocationAccessAuditRetentionRecordMetadataVerifier {
+  final DateTime? oldest;
+  _RecordMetadata(this.oldest);
+  @override
+  Future<DateTime?> oldestRecordAt({
+    required String scopeId,
+    required int fromSequence,
+    required int throughSequence,
+  }) async => oldest;
 }
