@@ -123,7 +123,6 @@ final class PluginRevocationAccessAuditRetentionRequest {
   final int throughSequence;
   final DateTime oldestRecordAt;
   final PluginRevocationAccessAuditArchiveSet archiveSet;
-  final bool immutableStorageConfirmed;
 
   PluginRevocationAccessAuditRetentionRequest({
     required this.scopeId, required this.fromSequence,
@@ -139,6 +138,10 @@ final class PluginRevocationAccessAuditRetentionRequest {
 }
 
 /// Host trust boundary for signed checkpoints referenced by archive packages.
+abstract interface class PluginRevocationAccessAuditArchiveDurabilityVerifier {
+  Future<bool> isDurablyRetained({required String manifestId});
+}
+
 abstract interface class PluginRevocationAccessAuditArchiveCheckpointEvidenceVerifier {
   Future<bool> isTrustedCheckpoint({
     required String scopeId,
@@ -190,11 +193,13 @@ final class PluginRevocationAccessAuditRetentionDeniedException
 final class PluginRevocationAccessAuditRetentionService {
   final PluginRevocationAccessAuditRetentionAuthorizer authorizer;
   final PluginRevocationAccessAuditArchiveCheckpointEvidenceVerifier checkpointEvidenceVerifier;
+  final PluginRevocationAccessAuditArchiveDurabilityVerifier durabilityVerifier;
   final DateTime Function() clock;
 
   PluginRevocationAccessAuditRetentionService({
     required this.authorizer,
     required this.checkpointEvidenceVerifier,
+    required this.durabilityVerifier,
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
 
@@ -210,7 +215,9 @@ final class PluginRevocationAccessAuditRetentionService {
     if (request.archiveSet.scopeId != request.scopeId) {
       throw const PluginRevocationAccessAuditRetentionDeniedException('archive_scope_mismatch');
     }
-    if (!request.immutableStorageConfirmed) {
+    if (!await durabilityVerifier.isDurablyRetained(
+      manifestId: request.archiveSet.manifestId,
+    )) {
       throw const PluginRevocationAccessAuditRetentionDeniedException('immutable_archive_not_confirmed');
     }
     final trustedCheckpointDigests = <String>{};
