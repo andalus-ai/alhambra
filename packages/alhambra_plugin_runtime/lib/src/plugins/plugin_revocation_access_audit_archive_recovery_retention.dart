@@ -153,6 +153,8 @@ abstract interface class PluginRevocationAccessAuditArchiveCheckpointEvidenceVer
   Future<bool> isTrustedCheckpoint({
     required String scopeId,
     required String checkpointDigest,
+    required int sequence,
+    required String headHash,
   });
 }
 
@@ -234,6 +236,8 @@ final class PluginRevocationAccessAuditRetentionService {
       if (!await checkpointEvidenceVerifier.isTrustedCheckpoint(
         scopeId: request.scopeId,
         checkpointDigest: package.checkpointDigest,
+        sequence: package.toSequence,
+        headHash: package.headHash,
       )) {
         throw const PluginRevocationAccessAuditRetentionDeniedException(
           'checkpoint_not_verified',
