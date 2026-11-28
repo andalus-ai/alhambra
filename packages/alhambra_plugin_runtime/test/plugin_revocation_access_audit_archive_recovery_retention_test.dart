@@ -264,6 +264,7 @@ final class _CheckpointEvidence
   @override
   Future<bool> isTrustedCheckpoint({
     required String scopeId, required String checkpointDigest,
+    required int sequence, required String headHash,
   }) async => trusted;
 }
 
