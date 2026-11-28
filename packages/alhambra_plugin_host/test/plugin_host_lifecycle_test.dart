@@ -43,29 +43,6 @@ DiscoveredPlugin _discovered(String id, {List<String> dependencies = const []}) 
   );
 }
 
-PluginHostLifecycle _host({
-  required List<String> events,
-  required List<PluginHostResource> resources,
-  bool failActivation = false,
-  bool failStop = false,
-  List<DiscoveredPlugin>? discovered,
-}) {
-  final manager = PluginManager();
-  final plugin = _Plugin('app.plugin', events, failStop: failStop);
-  final startup = PluginStartupCoordinator(manager: manager);
-  final shutdown = PluginShutdownCoordinator(manager: manager);
-  final plugins = discovered ?? [_discovered('app.plugin')];
-  return PluginHostLifecycle(
-    startupCoordinator: startup,
-    shutdownCoordinator: shutdown,
-    discoveredPlugins: plugins,
-    compiledPlugins: {
-      'app.plugin': _Plugin('app.plugin', events),
-    }..removeWhere((key, value) => false),
-    resources: resources,
-  );
-}
-
 void main() {
   group('PluginHostLifecycle', () {
     test('starts plugins and disposes resources after reverse-order shutdown',
