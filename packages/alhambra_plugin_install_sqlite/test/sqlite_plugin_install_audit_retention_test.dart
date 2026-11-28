@@ -63,6 +63,13 @@ void main() {
         status: PluginInstallJournalStatus.needsReconciliation,
         updatedAt: terminalAt,
       ));
+      await journal.write(PluginInstallJournalEntry(
+        operationId: 'active-op',
+        pluginId: 'example.active',
+        version: '3.0.0',
+        status: PluginInstallJournalStatus.extracting,
+        updatedAt: terminalAt,
+      ));
 
       final preview = await journal.previewPrunableAudit(before: before);
       expect(preview, hasLength(2));
@@ -87,8 +94,10 @@ void main() {
       expect(await journal.history('terminal-op'), isEmpty);
       expect((await journal.read('terminal-op'))?.status,
           PluginInstallJournalStatus.committed);
-      expect(await journal.unresolved(), hasLength(1));
-      expect((await journal.unresolved()).single.operationId, 'unresolved-op');
+      final unresolved = await journal.unresolved();
+      expect(unresolved, hasLength(2));
+      expect(unresolved.map((entry) => entry.operationId).toSet(),
+          {'unresolved-op', 'active-op'});
       expect(await journal.previewPrunableAudit(before: before), isEmpty);
     });
 
