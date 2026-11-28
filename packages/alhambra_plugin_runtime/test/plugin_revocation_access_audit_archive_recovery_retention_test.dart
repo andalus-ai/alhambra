@@ -12,9 +12,9 @@ void main() {
       verifiedCheckpointDigests: packages.map((p) => p.checkpointDigest).toSet(),
     );
     expect(result.valid, isTrue);
-    expect(result.verifiedPackages, 2);
-    expect(result.verifiedEntries, 2);
-    expect(result.toSequence, 2);
+    expect(result.verifiedPackages, 3);
+    expect(result.verifiedEntries, 3);
+    expect(result.toSequence, 3);
   });
 
   test('detects missing, reordered, duplicate, and untrusted segments', () {
@@ -141,9 +141,11 @@ void main() {
 List<PluginRevocationAccessAuditArchivePackage> _packages() {
   final first = _entry(1, PluginRevocationAccessAuditChainCodec.genesisHash);
   final second = _entry(2, first.entryHash);
+  final third = _entry(3, second.entryHash);
   return [
-    _package('segment-1', first, first.previousHash, _hash('checkpoint-one')),
-    _package('segment-2', second, first.entryHash, _hash('checkpoint-two')),
+    _package('segment-1', first, first.previousHash, _hash('1')),
+    _package('segment-2', second, first.entryHash, _hash('2')),
+    _package('segment-3', third, second.entryHash, _hash('3')),
   ];
 }
 
