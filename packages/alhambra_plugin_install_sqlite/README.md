@@ -187,6 +187,7 @@ if (retentionCutoff != null) {
     // representation before it returns a receipt.
     final receipt = await archiveStore.archiveAndVerify(batch);
     await journal.pruneArchivedAudit(
+      batch: batch,
       receipt: receipt,
       archiveStore: archiveStore,
     );
@@ -194,7 +195,7 @@ if (retentionCutoff != null) {
 }
 ```
 
-Pruning verifies the archive receipt before opening a SQLite transaction. The
+Pruning requires the original previewed batch alongside its receipt. It checks that batch ID, cutoff, record count and exact event-ID set match before verifying the archive and opening a SQLite transaction. The
 transaction then verifies every referenced event still exists, belongs to a
 terminal operation, and is older than the receipt cutoff. It records the
 archive manifest and exact event IDs before deleting those local event rows.
