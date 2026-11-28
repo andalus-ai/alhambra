@@ -116,6 +116,7 @@ void main() {
       );
       final receipt = await archive.archiveAndVerify(batch);
       final removed = await journal.pruneArchivedAudit(
+        batch: batch,
         receipt: receipt,
         archiveStore: archive,
       );
@@ -159,13 +160,15 @@ void main() {
       final candidates = await journal.previewPrunableAudit(before: cutoff);
       expect(candidates, hasLength(2));
       expect(candidates.last.evidenceSummary, 'Evidence in incident INC-9.');
-      final receipt = await archive.archiveAndVerify(PluginInstallAuditArchiveBatch(
+      final batch = PluginInstallAuditArchiveBatch(
         batchId: 'manual-batch',
         createdAt: DateTime.utc(2026, 11, 28),
         cutoff: cutoff,
         records: candidates,
-      ));
+      );
+      final receipt = await archive.archiveAndVerify(batch);
       expect(await journal.pruneArchivedAudit(
+        batch: batch,
         receipt: receipt,
         archiveStore: archive,
       ), 2);
@@ -189,15 +192,20 @@ void main() {
       final records = await journal.previewPrunableAudit(
         before: DateTime.utc(2026, 11, 1),
       );
-      final receipt = await archive.archiveAndVerify(PluginInstallAuditArchiveBatch(
+      final batch = PluginInstallAuditArchiveBatch(
         batchId: 'batch-fail',
         createdAt: DateTime.utc(2026, 11, 28),
         cutoff: DateTime.utc(2026, 11, 1),
         records: records,
-      ));
+      );
+      final receipt = await archive.archiveAndVerify(batch);
 
       await expectLater(
-        journal.pruneArchivedAudit(receipt: receipt, archiveStore: archive),
+        journal.pruneArchivedAudit(
+          batch: batch,
+          receipt: receipt,
+          archiveStore: archive,
+        ),
         throwsStateError,
       );
       expect(await journal.queryAudit(const PluginInstallAuditQuery()),
@@ -219,6 +227,12 @@ void main() {
       final record = (await journal.queryAudit(
         const PluginInstallAuditQuery(),
       )).single;
+      final batch = PluginInstallAuditArchiveBatch(
+        batchId: 'batch-pending',
+        createdAt: DateTime.utc(2026, 11, 28),
+        cutoff: DateTime.utc(2026, 11, 1),
+        records: [record],
+      );
       final receipt = PluginInstallAuditArchiveReceipt(
         archiveId: 'archive-pending',
         batchId: 'batch-pending',
@@ -230,7 +244,11 @@ void main() {
       );
 
       await expectLater(
-        journal.pruneArchivedAudit(receipt: receipt, archiveStore: archive),
+        journal.pruneArchivedAudit(
+          batch: batch,
+          receipt: receipt,
+          archiveStore: archive,
+        ),
         throwsStateError,
       );
       expect(await journal.queryAudit(const PluginInstallAuditQuery()),
@@ -258,19 +276,28 @@ void main() {
       ));
       final cutoff = DateTime.utc(2026, 11, 1);
       final candidates = await journal.previewPrunableAudit(before: cutoff);
-      final receipt = await archive.archiveAndVerify(PluginInstallAuditArchiveBatch(
+      final batch = PluginInstallAuditArchiveBatch(
         batchId: 'durable-batch',
         createdAt: DateTime.utc(2026, 11, 28),
         cutoff: cutoff,
         records: candidates,
-      ));
-      await journal.pruneArchivedAudit(receipt: receipt, archiveStore: archive);
+      );
+      final receipt = await archive.archiveAndVerify(batch);
+      await journal.pruneArchivedAudit(
+        batch: batch,
+        receipt: receipt,
+        archiveStore: archive,
+      );
       journal.close();
 
       journal = SqlitePluginInstallJournal(path);
       expect(await journal.queryAudit(const PluginInstallAuditQuery()), isEmpty);
       await expectLater(
-        journal.pruneArchivedAudit(receipt: receipt, archiveStore: archive),
+        journal.pruneArchivedAudit(
+          batch: batch,
+          receipt: receipt,
+          archiveStore: archive,
+        ),
         throwsStateError,
       );
       expect((await journal.read('durable-archive-op'))?.status,
@@ -292,16 +319,25 @@ void main() {
       final records = await journal.previewPrunableAudit(
         before: DateTime.utc(2026, 11, 1),
       );
-      final receipt = await archive.archiveAndVerify(PluginInstallAuditArchiveBatch(
+      final batch = PluginInstallAuditArchiveBatch(
         batchId: 'batch-replay',
         createdAt: DateTime.utc(2026, 11, 28),
         cutoff: DateTime.utc(2026, 11, 1),
         records: records,
-      ));
-      await journal.pruneArchivedAudit(receipt: receipt, archiveStore: archive);
+      );
+      final receipt = await archive.archiveAndVerify(batch);
+      await journal.pruneArchivedAudit(
+        batch: batch,
+        receipt: receipt,
+        archiveStore: archive,
+      );
 
       await expectLater(
-        journal.pruneArchivedAudit(receipt: receipt, archiveStore: archive),
+        journal.pruneArchivedAudit(
+          batch: batch,
+          receipt: receipt,
+          archiveStore: archive,
+        ),
         throwsStateError,
       );
     });
