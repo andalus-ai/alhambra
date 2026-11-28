@@ -215,7 +215,10 @@ final class PluginHostLifecycle {
           discoveredPlugins: discoveredPlugins,
         );
       } catch (error, stackTrace) {
-        _state = PluginHostState.failed;
+        // The coordinator did not return a report, so the host cannot prove
+        // that active plugins have stopped. Keep dependencies alive and allow
+        // the caller to retry shutdown after investigating the failure.
+        _state = PluginHostState.running;
         return _shutdownReport = PluginHostShutdownReport(
           succeeded: false,
           resourcesDisposed: false,
@@ -227,7 +230,9 @@ final class PluginHostLifecycle {
       // A preflight error prevents safe deactivation. Keep plugin dependencies
       // alive rather than disposing resources under potentially active plugins.
       if (pluginReport.error != null) {
-        _state = PluginHostState.failed;
+        // A preflight failure means no deactivation callback was attempted.
+        // Preserve the running state so a corrected input can be retried.
+        _state = PluginHostState.running;
         return _shutdownReport = PluginHostShutdownReport(
           succeeded: false,
           pluginReport: pluginReport,
