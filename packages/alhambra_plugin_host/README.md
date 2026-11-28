@@ -59,13 +59,14 @@ drain in-flight requests before calling `shutdown()`.
   new host lifecycle instance for a fresh startup attempt.
 - Shutdown is idempotent after successful resource disposal.
 - If plugin shutdown preflight fails, no plugin callback is attempted and
-  resources remain open. Correct the discovery/dependency input and call
-  `shutdown()` again.
+  resources remain open. Supply corrected discovery input to a later
+  `shutdown(discoveredPlugins: ...)` call.
 - If a plugin shutdown hook fails after deactivation is attempted, the runtime
   still performs its documented manager cleanup; remaining plugins are
   attempted and host resources are then disposed. The report remains failed.
 - A resource disposer that throws is reported; disposal continues. Successfully
-  disposed resources are not disposed a second time on a later shutdown call.
+  disposed resources are not disposed a second time, while failed disposers can
+  be retried by calling `shutdown()` again. Plugin shutdown is not repeated.
 - This package does not own discovery, plugin trust, infrastructure creation,
   process signals, request draining, readiness endpoints, timeouts, backup
   scheduling, or automatic recovery.
