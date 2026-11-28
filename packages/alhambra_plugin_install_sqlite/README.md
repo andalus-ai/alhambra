@@ -19,8 +19,7 @@ This package provides durable SQLite adapters for plugin installation:
 - Retains approval-ID uniqueness and ordered operation history.
 - Persists append-only operator manual-reconciliation evidence and atomically
   closes ambiguous recovery operations using compare-and-set.
-- Supports schema-v1 and schema-v2 journal databases through additive v2/v3
-  migrations.
+- Supports schema-v1 through schema-v4 journal databases through additive migrations to schema v5.
 
 ## Usage
 
@@ -156,3 +155,52 @@ corresponding journal transition so they appear exactly once; evidence summaries
 should contain only a protected incident reference or similarly non-secret
 description. Hosts remain responsible for authentication, authorization,
 retention, export policy and redaction appropriate to their deployment.
+
+## Audit archival and retention
+
+Retention is deliberately a two-step, host-orchestrated operation. The SQLite
+journal previews only events older than the requested cutoff whose current
+operation projection is terminal (`committed`, `rolledBack`, `failed` or
+`manuallyReconciled`). Ambiguous and active operations are never eligible.
+
+```dart
+final candidates = await journal.previewPrunableAudit(
+  before: retentionCutoff,
+  limit: 500,
+);
+if (candidates.isNotEmpty) {
+  final batch = PluginInstallAuditArchiveBatch(
+    batchId: uniqueBatchId,
+    createdAt: clock.now(),
+    cutoff: retentionCutoff,
+    records: candidates,
+  );
+
+  // The archive adapter persists the full batch and verifies its durable
+  // representation before it returns a receipt.
+  final receipt = await archiveStore.archiveAndVerify(batch);
+  await journal.pruneArchivedAudit(
+    receipt: receipt,
+    archiveStore: archiveStore,
+  );
+}
+```
+
+Pruning verifies the archive receipt before opening a SQLite transaction. The
+transaction then verifies every referenced event still exists, belongs to a
+terminal operation, and is older than the receipt cutoff. It records the
+archive manifest and exact event IDs before deleting those local event rows.
+Manual-reconciliation evidence joined to an archived event is pruned in the
+same transaction. A receipt cannot be applied twice. If verification or any
+eligibility check fails, no local event is deleted.
+
+The archive adapter owns durable storage, digest/signature generation, key
+management, access controls and restore procedures. Alhambra does not claim a
+particular cryptographic algorithm or cloud archive implementation. Treat
+archive receipts and archive contents as security-sensitive records.
+
+This retention operation removes local transition history only. It deliberately
+retains the current operation projection, approval identity records, fencing
+state and installed-plugin records; those have separate lifecycle and
+retention requirements. Hosts should keep archive storage independently
+available and tested for restore before enabling aggressive local retention.
