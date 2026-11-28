@@ -240,3 +240,5 @@ transaction boundaries, foreign-key handling, chain-head behavior, backups,
 restore drills, audit evidence for the maintenance action, and concurrency with
 ongoing appends. A deletion executor must revalidate the approved plan and
 policy immediately before mutation; a stale plan must not be replayable.
+
+The minimum-age check is based on the authoritative oldest timestamp returned by the host's source-range metadata verifier; the caller cannot supply or override that timestamp. If the source metadata is unavailable, planning fails closed.
