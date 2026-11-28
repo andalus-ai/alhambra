@@ -187,3 +187,56 @@ externally anchored checkpoint. This allows a restored archive segment to be
 verified from its prior hash and independently anchored final head. It does
 not claim that a package can be used to reconstruct the entire history unless
 all preceding segments and their linking checkpoints are also retained.
+
+## Archive-set recovery verification
+
+`PluginRevocationAccessAuditArchiveSetCodec` verifies an ordered set of
+archive packages without mutating a database. Every package is independently
+checked by the archive codec, then the set verifier enforces:
+
+- one scope across the manifest;
+- unique package IDs;
+- a trusted checkpoint digest for every package (the host must verify the
+  signed checkpoint, key trust, scope, and checkpoint history);
+- contiguous sequence ranges with no gaps or overlaps;
+- exact hash continuity: the next package's `previousHash` must equal the
+  preceding package's `headHash`.
+
+The verifier does not sort packages or repair a manifest. Missing, reordered,
+duplicated, cross-scope, untrusted, or tampered segments fail verification.
+The first package may begin after sequence 1 when the caller is verifying a
+deliberately bounded archive range; its initial `previousHash` remains the
+external boundary that must be reconciled with the preceding retained segment
+or another trusted recovery record.
+
+A recovery host should preserve the original packages and manifest as
+evidence, verify checkpoint signatures using its trusted key policy, verify
+the complete archive set, and only then pass records to a separate restore
+adapter. Restore should target a new or isolated destination by default. This
+runtime layer intentionally does not rewrite the live audit chain or implement
+database restore semantics.
+
+## Retention policy and guarded planning
+
+`PluginRevocationAccessAuditRetentionService` creates a plan only. The
+host supplies:
+
+- a versioned policy with minimum record age, minimum retained sequence, and
+  legal-hold state;
+- a checkpoint-evidence verifier that validates each package's referenced
+  signed checkpoint against host trust;
+- an archive-durability verifier that confirms the manifest and package set
+  are retained under the host's immutable-storage policy;
+- an authorizer that approves the requested scope and sequence range.
+
+The service fails closed for legal hold, untrusted checkpoints, missing archive
+durability, incomplete archive coverage, age violations, attempts to cross the
+minimum-retained-sequence boundary, and denied authorization. The returned
+plan always has `deletionAuthorized == false` and explicitly requires separate
+approval. No SQLite/PostgreSQL deletion adapter is included.
+
+Before implementing physical deletion, a host must separately define and test
+transaction boundaries, foreign-key handling, chain-head behavior, backups,
+restore drills, audit evidence for the maintenance action, and concurrency with
+ongoing appends. A deletion executor must revalidate the approved plan and
+policy immediately before mutation; a stale plan must not be replayable.
