@@ -159,6 +159,34 @@ void main() {
   });
 }
 
+
+  test('rejects checkpoint evidence even when archive durability is confirmed', () async {
+    final packages = _packages();
+    final service = PluginRevocationAccessAuditRetentionService(
+      authorizer: _RetentionAuthorizer(true),
+      checkpointEvidenceVerifier: _CheckpointEvidence(false),
+      durabilityVerifier: _ArchiveDurability(true),
+      recordMetadataVerifier: _RecordMetadata(DateTime.utc(2026, 1, 1)),
+      clock: () => DateTime.utc(2026, 11, 28),
+    );
+    await expectLater(
+      service.plan(
+        principal: PluginRevocationOperationsPrincipal(actorId: 'operator'),
+        policy: const PluginRevocationAccessAuditRetentionPolicy(
+          policyVersion: 'v1', minimumAge: Duration(days: 30),
+          minimumRetainedSequence: 10,
+        ),
+        request: PluginRevocationAccessAuditRetentionRequest(
+          scopeId: 'scope-a', fromSequence: 1, throughSequence: 2,
+          archiveSet: PluginRevocationAccessAuditArchiveSet(
+            manifestId: 'manifest-a', scopeId: 'scope-a', packages: packages,
+          ),
+        ),
+      ),
+      throwsA(isA<PluginRevocationAccessAuditRetentionDeniedException>()),
+    );
+  });
+
 List<PluginRevocationAccessAuditArchivePackage> _packages() {
   final first = _entry(1, PluginRevocationAccessAuditChainCodec.genesisHash);
   final second = _entry(2, first.entryHash);
