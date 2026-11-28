@@ -15,7 +15,8 @@ final class SqlitePluginInstallJournal implements
     FencedPluginInstallRecoveryJournal,
     PluginInstallManualReconciliationStore,
     PluginInstallAuditStore,
-    PluginInstallAuditRetentionStore {
+    PluginInstallAuditRetentionStore,
+    PluginInstallAuditArchiveCatalogStore {
   final sq.Database _db;
   bool _closed = false;
 
@@ -717,6 +718,69 @@ final class SqlitePluginInstallJournal implements
       return receipt.recordCount;
     });
   }
+
+
+  @override
+  Future<List<PluginInstallAuditArchiveManifest>> listAuditArchives({
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    _assertOpen();
+    if (limit < 1 || limit > 500) {
+      throw ArgumentError.value(limit, 'limit', 'Must be between 1 and 500.');
+    }
+    if (offset < 0 || offset > 100000) {
+      throw ArgumentError.value(offset, 'offset', 'Must be between 0 and 100000.');
+    }
+    final rows = _db.select('''
+      SELECT archive_id, batch_id, digest, record_count, cutoff, archived_at
+      FROM plugin_install_audit_archive
+      ORDER BY archived_at DESC, archive_id DESC
+      LIMIT ? OFFSET ?
+    ''', [limit, offset]);
+    return List.unmodifiable(rows.map(_archiveManifest));
+  }
+
+  @override
+  Future<PluginInstallAuditArchiveManifest?> findAuditArchive(
+    String archiveId,
+  ) async {
+    _assertOpen();
+    _validateAuditText(archiveId, 'archiveId', 256);
+    final rows = _db.select('''
+      SELECT archive_id, batch_id, digest, record_count, cutoff, archived_at
+      FROM plugin_install_audit_archive WHERE archive_id = ?
+    ''', [archiveId]);
+    return rows.isEmpty ? null : _archiveManifest(rows.first);
+  }
+
+  @override
+  Future<List<int>> archivedEventIds(
+    String archiveId, {
+    int limit = 500,
+  }) async {
+    _assertOpen();
+    _validateAuditText(archiveId, 'archiveId', 256);
+    if (limit < 1 || limit > 500) {
+      throw ArgumentError.value(limit, 'limit', 'Must be between 1 and 500.');
+    }
+    final rows = _db.select('''
+      SELECT event_id FROM plugin_install_audit_archive_event
+      WHERE archive_id = ? ORDER BY event_id ASC LIMIT ?
+    ''', [archiveId, limit]);
+    return List.unmodifiable(rows.map((row) => row['event_id']! as int));
+  }
+
+  static PluginInstallAuditArchiveManifest _archiveManifest(
+    Map<String, Object?> row,
+  ) => PluginInstallAuditArchiveManifest(
+    archiveId: row['archive_id']! as String,
+    batchId: row['batch_id']! as String,
+    digest: row['digest']! as String,
+    recordCount: row['record_count']! as int,
+    cutoff: _parseDate(row['cutoff']),
+    archivedAt: _parseDate(row['archived_at']),
+  );
 
   static PluginInstallAuditRecord _auditRecord(Map<String, Object?> row) {
     final resolutionName = row['manual_resolution'] as String?;
