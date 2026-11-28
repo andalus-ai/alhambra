@@ -72,4 +72,5 @@ Update this index whenever an architecture or developer document is added.
 - [Recovery provenance and key governance](RECOVERY_PROVENANCE_AND_KEY_GOVERNANCE.md) — append-only archive operation history, chain verification, and signing-key lifecycle metadata.
 - [Recovery provenance production readiness](RECOVERY_PROVENANCE_PRODUCTION_READINESS.md) — adapter conformance, externally signed checkpoints, and production deployment guidance.
 - [Recovery provenance operational observability](RECOVERY_PROVENANCE_OPERATIONAL_OBSERVABILITY.md) — read-only timeline queries, chain/anchor/key health summaries, incident classification, and JSON audit exports.
+- [Recovery provenance host operations](RECOVERY_PROVENANCE_HOST_OPERATIONS.md) — startup/readiness, graceful shutdown, backup scheduling, restore verification, alerting, and deployment profiles.
 - [SQLite recovery provenance persistence](SQLITE_RECOVERY_PROVENANCE_PERSISTENCE.md) — durable SQLite adapters, atomic append semantics, schema migration, diagnostics, WAL maintenance, and host deployment boundaries.
