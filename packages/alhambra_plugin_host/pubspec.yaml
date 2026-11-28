@@ -5,12 +5,16 @@ publish_to: none
 
 environment:
   sdk: ^3.13.2
+  flutter: ">=1.17.0"
 
 dependencies:
+  flutter:
+    sdk: flutter
   alhambra_plugin_api:
     path: ../alhambra_plugin_api
   alhambra_plugin_runtime:
     path: ../alhambra_plugin_runtime
 
 dev_dependencies:
-  test: ^1.25.8
+  flutter_test:
+    sdk: flutter
