@@ -518,3 +518,35 @@ abstract interface class PluginInstallAuditRetentionStore {
     required PluginInstallAuditArchiveStore archiveStore,
   });
 }
+
+
+/// Durable local index for an externally stored audit archive.
+final class PluginInstallAuditArchiveManifest {
+  final String archiveId;
+  final String batchId;
+  final String digest;
+  final int recordCount;
+  final DateTime cutoff;
+  final DateTime archivedAt;
+
+  const PluginInstallAuditArchiveManifest({
+    required this.archiveId,
+    required this.batchId,
+    required this.digest,
+    required this.recordCount,
+    required this.cutoff,
+    required this.archivedAt,
+  });
+}
+
+/// Read-only archive inventory. Implementations must enforce bounded paging.
+abstract interface class PluginInstallAuditArchiveCatalogStore {
+  Future<List<PluginInstallAuditArchiveManifest>> listAuditArchives({
+    int limit = 100,
+    int offset = 0,
+  });
+
+  Future<PluginInstallAuditArchiveManifest?> findAuditArchive(String archiveId);
+
+  Future<List<int>> archivedEventIds(String archiveId, {int limit = 500});
+}
