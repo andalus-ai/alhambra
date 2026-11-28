@@ -121,12 +121,11 @@ final class PluginRevocationAccessAuditRetentionRequest {
   final String scopeId;
   final int fromSequence;
   final int throughSequence;
-  final DateTime oldestRecordAt;
   final PluginRevocationAccessAuditArchiveSet archiveSet;
 
   PluginRevocationAccessAuditRetentionRequest({
     required this.scopeId, required this.fromSequence,
-    required this.throughSequence, required this.oldestRecordAt,
+    required this.throughSequence,
     required this.archiveSet,
   }) {
     if (scopeId.trim().isEmpty || fromSequence < 1 ||
@@ -137,6 +136,15 @@ final class PluginRevocationAccessAuditRetentionRequest {
 }
 
 /// Host trust boundary for signed checkpoints referenced by archive packages.
+abstract interface class PluginRevocationAccessAuditRetentionRecordMetadataVerifier {
+  /// Reads the authoritative oldest timestamp for the requested source range.
+  Future<DateTime?> oldestRecordAt({
+    required String scopeId,
+    required int fromSequence,
+    required int throughSequence,
+  });
+}
+
 abstract interface class PluginRevocationAccessAuditArchiveDurabilityVerifier {
   Future<bool> isDurablyRetained({required String manifestId});
 }
@@ -193,12 +201,14 @@ final class PluginRevocationAccessAuditRetentionService {
   final PluginRevocationAccessAuditRetentionAuthorizer authorizer;
   final PluginRevocationAccessAuditArchiveCheckpointEvidenceVerifier checkpointEvidenceVerifier;
   final PluginRevocationAccessAuditArchiveDurabilityVerifier durabilityVerifier;
+  final PluginRevocationAccessAuditRetentionRecordMetadataVerifier recordMetadataVerifier;
   final DateTime Function() clock;
 
   PluginRevocationAccessAuditRetentionService({
     required this.authorizer,
     required this.checkpointEvidenceVerifier,
     required this.durabilityVerifier,
+    required this.recordMetadataVerifier,
     DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
 
@@ -247,7 +257,17 @@ final class PluginRevocationAccessAuditRetentionService {
     if (request.throughSequence >= policy.minimumRetainedSequence) {
       throw const PluginRevocationAccessAuditRetentionDeniedException('minimum_retained_sequence');
     }
-    final oldest = request.oldestRecordAt.toUtc();
+    final oldestRecordAt = await recordMetadataVerifier.oldestRecordAt(
+      scopeId: request.scopeId,
+      fromSequence: request.fromSequence,
+      throughSequence: request.throughSequence,
+    );
+    if (oldestRecordAt == null) {
+      throw const PluginRevocationAccessAuditRetentionDeniedException(
+        'source_range_metadata_unavailable',
+      );
+    }
+    final oldest = oldestRecordAt.toUtc();
     if (oldest.isAfter(now) || now.difference(oldest) < policy.minimumAge) {
       throw const PluginRevocationAccessAuditRetentionDeniedException('minimum_age_not_met');
     }
