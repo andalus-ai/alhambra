@@ -348,3 +348,205 @@ abstract interface class PluginInstallManualReconciliationStore {
     String operationId,
   );
 }
+
+/// Bounded filters for installation audit history.
+///
+/// [from] is inclusive and [to] is exclusive. The default page is 100 rows;
+/// adapters must reject limits outside 1..500 and offsets outside 0..100000.
+final class PluginInstallAuditQuery {
+  final String? operationId;
+  final String? pluginId;
+  final PluginInstallJournalStatus? status;
+  final String? operatorId;
+  final DateTime? from;
+  final DateTime? to;
+  final int limit;
+  final int offset;
+
+  const PluginInstallAuditQuery({
+    this.operationId,
+    this.pluginId,
+    this.status,
+    this.operatorId,
+    this.from,
+    this.to,
+    this.limit = 100,
+    this.offset = 0,
+  });
+}
+
+/// Safe-to-display summary of one durable installation transition.
+///
+/// Filesystem paths, staging handles, content hashes and package contents are
+/// intentionally excluded. Manual evidence summaries are optional and should
+/// reference protected incident records rather than contain secrets.
+final class PluginInstallAuditRecord {
+  final int eventId;
+  final String operationId;
+  final String pluginId;
+  final String version;
+  final PluginInstallJournalStatus status;
+  final DateTime occurredAt;
+  final int revision;
+  final String? operatorId;
+  final String? approvalId;
+  final String? failureCode;
+  final int? fencingToken;
+  final PluginInstallManualResolution? manualResolution;
+  final String? evidenceSummary;
+
+  const PluginInstallAuditRecord({
+    required this.eventId,
+    required this.operationId,
+    required this.pluginId,
+    required this.version,
+    required this.status,
+    required this.occurredAt,
+    required this.revision,
+    this.operatorId,
+    this.approvalId,
+    this.failureCode,
+    this.fencingToken,
+    this.manualResolution,
+    this.evidenceSummary,
+  });
+}
+
+/// Read-only, bounded access to the append-only installation transition log.
+abstract interface class PluginInstallAuditStore {
+  Future<List<PluginInstallAuditRecord>> queryAudit(
+    PluginInstallAuditQuery query,
+  );
+}
+
+
+
+/// Host-configurable local audit retention policy.
+///
+/// Retention is opt-in. Hosts choose the duration and schedule; the adapter
+/// only previews and prunes records after a verified archive receipt exists.
+final class PluginInstallAuditRetentionPolicy {
+  final Duration retentionPeriod;
+  final int batchSize;
+  final bool enabled;
+
+  PluginInstallAuditRetentionPolicy({
+    required this.retentionPeriod,
+    this.batchSize = 500,
+    this.enabled = false,
+  }) {
+    if (retentionPeriod.inMicroseconds <= 0) {
+      throw ArgumentError.value(
+        retentionPeriod,
+        'retentionPeriod',
+        'Must be greater than zero.',
+      );
+    }
+    if (batchSize < 1 || batchSize > 500) {
+      throw ArgumentError.value(
+        batchSize,
+        'batchSize',
+        'Must be between 1 and 500.',
+      );
+    }
+  }
+
+  /// Returns a UTC cutoff, or null while retention is disabled.
+  DateTime? cutoffAt(DateTime now) =>
+      enabled ? now.toUtc().subtract(retentionPeriod) : null;
+}
+
+/// A bounded set of terminal-operation audit records offered for archival.
+final class PluginInstallAuditArchiveBatch {
+  final String batchId;
+  final DateTime createdAt;
+  final DateTime cutoff;
+  final List<PluginInstallAuditRecord> records;
+
+  PluginInstallAuditArchiveBatch({
+    required this.batchId,
+    required this.createdAt,
+    required this.cutoff,
+    required List<PluginInstallAuditRecord> records,
+  }) : records = List.unmodifiable(records);
+}
+
+/// Proof returned only after an archive adapter has durably stored and verified
+/// the complete batch. [eventIds] identifies the exact local rows eligible for
+/// deletion; [digest] is the archive adapter's integrity digest/signature.
+final class PluginInstallAuditArchiveReceipt {
+  final String archiveId;
+  final String batchId;
+  final String digest;
+  final int recordCount;
+  final List<int> eventIds;
+  final DateTime cutoff;
+  final DateTime archivedAt;
+
+  PluginInstallAuditArchiveReceipt({
+    required this.archiveId,
+    required this.batchId,
+    required this.digest,
+    required this.recordCount,
+    required List<int> eventIds,
+    required this.cutoff,
+    required this.archivedAt,
+  }) : eventIds = List.unmodifiable(eventIds);
+}
+
+/// Host-owned archive boundary. Implementations must persist the complete
+/// batch before returning and verify its durable bytes before issuing receipt.
+abstract interface class PluginInstallAuditArchiveStore {
+  Future<PluginInstallAuditArchiveReceipt> archiveAndVerify(
+    PluginInstallAuditArchiveBatch batch,
+  );
+
+  Future<bool> verify(PluginInstallAuditArchiveReceipt receipt);
+}
+
+/// Retention operations never select active or ambiguous operations for purge.
+/// The host must archive and verify a previewed batch before pruning it.
+abstract interface class PluginInstallAuditRetentionStore {
+  Future<List<PluginInstallAuditRecord>> previewPrunableAudit({
+    required DateTime before,
+    int limit = 500,
+  });
+
+  Future<int> pruneArchivedAudit({
+    required PluginInstallAuditArchiveBatch batch,
+    required PluginInstallAuditArchiveReceipt receipt,
+    required PluginInstallAuditArchiveStore archiveStore,
+  });
+}
+
+
+/// Durable local index for an externally stored audit archive.
+final class PluginInstallAuditArchiveManifest {
+  final String archiveId;
+  final String batchId;
+  final String digest;
+  final int recordCount;
+  final DateTime cutoff;
+  final DateTime archivedAt;
+
+  const PluginInstallAuditArchiveManifest({
+    required this.archiveId,
+    required this.batchId,
+    required this.digest,
+    required this.recordCount,
+    required this.cutoff,
+    required this.archivedAt,
+  });
+}
+
+/// Read-only archive inventory. Implementations must enforce bounded paging.
+abstract interface class PluginInstallAuditArchiveCatalogStore {
+  Future<List<PluginInstallAuditArchiveManifest>> listAuditArchives({
+    int limit = 100,
+    int offset = 0,
+  });
+
+  Future<PluginInstallAuditArchiveManifest?> findAuditArchive(String archiveId);
+
+  Future<List<int>> archivedEventIds(String archiveId, {int limit = 500});
+}

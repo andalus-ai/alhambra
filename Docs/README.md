@@ -23,6 +23,9 @@ Start here:
 - [Explicit plugin bundle composition](PLUGIN_BUNDLE_COMPOSITION.md) — compiled host-supplied bundles and activation failures.
 - [Layout plugin extensibility](LAYOUT_PLUGIN_EXTENSIBILITY.md) — layout extension contracts and compatibility.
 
+## Installation and recovery
+- [Transactional installation crash-recovery conformance](INSTALLATION_CRASH_RECOVERY_CONFORMANCE.md) — durable worker fencing, interruption handling, operator-controlled reconciliation and bounded audit inspection.
+
 ## Plugin contracts and lifecycle
 - [Plugin developer guide](PLUGIN_DEVELOPER_GUIDE.md) — implement, compose, test and operate a plugin.
 - [Plugin test utilities](../packages/alhambra_plugin_test/README.md) — in-process test host and metadata, packaging, discovery and lifecycle conformance checks.
@@ -64,7 +67,7 @@ Update this index whenever an architecture or developer document is added.
 - [SQLite fenced installed-plugin store](SQLITE_INSTALLED_PLUGIN_STORE.md) — durable installed records, create-only writes, compare-and-remove, stable operation ownership and fencing.
 - [SQLite plugin installation adapter](../packages/alhambra_plugin_install_sqlite/README.md) — package usage and supported guarantees.
 - [Crash-safe local plugin installation filesystem](CRASH_SAFE_PLUGIN_INSTALL_FILESYSTEM.md) — fenced staging, promotion, rollback, ownership evidence and crash-recovery limits.
-- [Transactional installation crash-recovery conformance](INSTALLATION_CRASH_RECOVERY_CONFORMANCE.md) — durable-adapter failure matrix, stale-worker takeover tests, recovery approvals and guarantee boundaries.
+- [Transactional installation crash-recovery conformance](INSTALLATION_CRASH_RECOVERY_CONFORMANCE.md) — durable-adapter failure matrix, stale-worker takeover tests, recovery approvals, audit retention, archive catalog and guarantee boundaries.
 - [Local plugin installation filesystem package](../packages/alhambra_plugin_install_filesystem/README.md) — adapter usage and operational constraints.
 
 - [Recovery archive package authenticity](RECOVERY_ARCHIVE_PACKAGE_AUTHENTICITY.md) — host-owned detached signatures, trust policy, and authenticated import.

@@ -120,3 +120,78 @@ They do **not** establish:
 If recovery itself is interrupted after its durable `recoveryStarted` claim,
 the operation is deliberately surfaced for manual reconciliation rather than
 blindly replaying a potentially completed side effect.
+
+## Installation audit inspection
+
+Hosts can expose a read-only installation timeline by adapting
+`PluginInstallAuditStore.queryAudit`. The SQLite implementation supports
+bounded pages (1–500 records; default 100; offset 0–100,000), ordered newest-first with a stable
+event-ID tie-breaker. Filters include operation ID, plugin ID, transition
+status, operator ID, and a UTC time range (`from` inclusive, `to` exclusive).
+The database maintains indexes for plugin/time, status/time, operator/time,
+and general time-order scans.
+
+The audit projection includes operation/plugin/version identity, transition,
+revision, timestamp, operator/approval references, failure code and fencing
+token. It intentionally excludes filesystem paths, staging handles, package
+hashes and package contents. Manual reconciliation metadata is joined to its
+single corresponding journal transition; it is not emitted as a duplicate
+event. Evidence summaries should point to protected incident records and must
+not contain credentials, package data or other secrets.
+
+This is a persistence/query contract, not an administrative API or dashboard.
+The host must authenticate and authorize callers, apply tenant or workspace
+scope before invoking the store, decide retention and export policy, and
+protect audit data at rest and in transit. Offset pagination is intended for
+bounded operational inspection; hosts needing long-running exports should
+capture a stable time window and apply their own export/retention controls.
+
+## Audit archival and retention guarantees
+
+`PluginInstallAuditRetentionPolicy` is opt-in (disabled by default) and lets the host set a retention duration and batch size. The host computes the UTC cutoff and schedules archival. `PluginInstallAuditRetentionStore.previewPrunableAudit` returns a bounded set
+of transition records older than a supplied UTC cutoff, but only when the
+operation's current projection is terminal. Active operations and operations
+in `recoveryStarted` or `needsReconciliation` are never eligible. This is a
+preview, not a deletion.
+
+The host passes the complete preview to its configured
+`PluginInstallAuditArchiveStore.archiveAndVerify`. That adapter must durably
+persist the complete batch and verify the archived representation before
+issuing a receipt containing the archive identity, digest, cutoff, count and
+exact event IDs. The host then passes both the original batch and receipt to
+`pruneArchivedAudit`. SQLite checks that the receipt matches the batch ID,
+cutoff, record count and exact event-ID set, verifies the receipt through the
+configured archive adapter and, in one transaction, rechecks that every referenced event
+still exists, is older than the cutoff and belongs to a terminal operation.
+Only then are the archive manifest and event IDs recorded and local event rows
+deleted. Manual-reconciliation evidence associated with those events is deleted
+in the same transaction. Replayed receipts are rejected.
+
+The archive adapter is responsible for the integrity algorithm, signing-key
+management, access control, durable storage and restore testing. The SQLite
+adapter does not claim cryptographic immutability by itself. If archive
+verification fails, a referenced event is missing, or an operation is no
+longer terminal, the entire prune transaction fails without deleting any
+local event.
+
+Retention removes local transition history only. It does not remove current
+operation projections, approval identity records, fencing state, or installed
+plugin records. Those are operational state with separate lifecycle rules.
+Hosts must not enable local pruning until the archive restore path has been
+tested and operational ownership for retention is explicit.
+
+
+## Archive catalog and operational inspection
+
+The SQLite adapter retains a compact archive manifest and the exact archived event-ID mapping after local event rows are pruned. The new `PluginInstallAuditArchiveCatalogStore` exposes bounded listing, lookup by archive ID, and bounded event-ID enumeration. The catalog supports operational inventory, reconciliation between the SQLite index and the host-owned archive system, and selection of an archive for restore.
+
+The catalog is not the archive itself and does not prove that external bytes are available or authentic. A host must use its archive adapter to retrieve and verify the stored payload against the receipt digest/signature before presenting or restoring archived history. The catalog intentionally does not expose archive payloads, signing keys or secret-bearing fields. Queries are bounded to 1–500 manifests (offset 0–100,000) and 1–500 event IDs per archive.
+
+Operational maintenance should monitor:
+- catalog manifests whose corresponding external object cannot be found;
+- archive verification failures and digest/signature mismatches;
+- expected versus actual archived record counts and event-ID sets;
+- archive age, storage availability, restore-test age and restore duration;
+- local SQLite WAL growth and checkpoint outcomes.
+
+WAL checkpointing, VACUUM/compaction and restore execution remain host-owned maintenance tasks. Run them during an explicitly coordinated maintenance window; do not copy a live database file without its WAL or use compaction as a substitute for a verified backup. The archive catalog makes restore discovery possible but does not implement a restore operation or promise cross-store atomicity.

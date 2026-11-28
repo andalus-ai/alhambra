@@ -2,7 +2,7 @@
 
 This package provides durable SQLite adapters for plugin installation:
 - `SqliteInstalledPluginStore` implements `FencedTransactionalInstalledPluginStore`.
-- `SqlitePluginInstallJournal` implements `FencedPluginInstallRecoveryJournal` and `PluginInstallManualReconciliationStore`.
+- `SqlitePluginInstallJournal` implements `FencedPluginInstallRecoveryJournal`, `PluginInstallManualReconciliationStore` and `PluginInstallAuditStore`.
 - `SqlitePluginInstallOperationLeaseStore` implements
   `PluginInstallOperationLeaseStore`.
 
@@ -19,8 +19,7 @@ This package provides durable SQLite adapters for plugin installation:
 - Retains approval-ID uniqueness and ordered operation history.
 - Persists append-only operator manual-reconciliation evidence and atomically
   closes ambiguous recovery operations using compare-and-set.
-- Supports schema-v1 and schema-v2 journal databases through additive v2/v3
-  migrations.
+- Supports schema-v1 through schema-v4 journal databases through additive migrations to schema v5.
 
 ## Usage
 
@@ -125,3 +124,110 @@ final recorded = await journal.reconcileManually(
 ```
 
 A successful call appends an immutable reconciliation record and a journal history event in the same SQLite transaction, then moves the operation to terminal `manuallyReconciled`. It does not modify filesystem contents or installed-plugin records. The caller must provide an authenticated operator identity and evidence summary; do not treat this API as proof that the operator's conclusion is correct. Retrieve the audit trail with `manualReconciliations(operationId)`.
+
+## Installation audit queries
+
+The journal exposes a bounded read-only audit projection through
+`PluginInstallAuditStore`. The default page size is 100 and the maximum is
+500; offsets are limited to 0–100,000. Time filters use UTC instants, with
+`from` inclusive and `to` exclusive.
+
+```dart
+final events = await journal.queryAudit(PluginInstallAuditQuery(
+  pluginId: 'com.example.editor',
+  status: PluginInstallJournalStatus.manuallyReconciled,
+  from: incidentStartedAt,
+  to: incidentEndedAt,
+  limit: 100,
+));
+
+for (final event in events) {
+  // Use operationId, pluginId, status, occurredAt, operatorId and approvalId
+  // to populate a host-owned audit timeline.
+}
+```
+
+Results are ordered newest-first, with event ID as a deterministic tie-breaker.
+Use operation ID filtering and advance the offset by the returned row count to retrieve a complete operation-specific timeline across pages. The
+projection deliberately omits filesystem paths, staging handles, content
+hashes and package contents. Manual-resolution records are joined to their
+corresponding journal transition so they appear exactly once; evidence summaries
+should contain only a protected incident reference or similarly non-secret
+description. Hosts remain responsible for authentication, authorization,
+retention, export policy and redaction appropriate to their deployment.
+
+## Audit archival and retention
+
+Retention is opt-in through `PluginInstallAuditRetentionPolicy`; the host chooses the duration and schedules the two-step archival operation. The default policy is disabled. The SQLite
+journal previews only events older than the requested cutoff whose current
+operation projection is terminal (`committed`, `rolledBack`, `failed` or
+`manuallyReconciled`). Ambiguous and active operations are never eligible.
+
+```dart
+final policy = PluginInstallAuditRetentionPolicy(
+  retentionPeriod: const Duration(days: 90),
+  batchSize: 500,
+  enabled: true,
+);
+final retentionCutoff = policy.cutoffAt(clock.now());
+if (retentionCutoff != null) {
+  final candidates = await journal.previewPrunableAudit(
+    before: retentionCutoff,
+    limit: policy.batchSize,
+  );
+  if (candidates.isNotEmpty) {
+    final batch = PluginInstallAuditArchiveBatch(
+      batchId: uniqueBatchId,
+      createdAt: clock.now(),
+      cutoff: retentionCutoff,
+      records: candidates,
+    );
+
+    // The archive adapter persists the full batch and verifies its durable
+    // representation before it returns a receipt.
+    final receipt = await archiveStore.archiveAndVerify(batch);
+    await journal.pruneArchivedAudit(
+      batch: batch,
+      receipt: receipt,
+      archiveStore: archiveStore,
+    );
+  }
+}
+```
+
+Pruning requires the original previewed batch alongside its receipt. It checks that batch ID, cutoff, record count and exact event-ID set match before verifying the archive and opening a SQLite transaction. The
+transaction then verifies every referenced event still exists, belongs to a
+terminal operation, and is older than the receipt cutoff. It records the
+archive manifest and exact event IDs before deleting those local event rows.
+Manual-reconciliation evidence joined to an archived event is pruned in the
+same transaction. A receipt cannot be applied twice. If verification or any
+eligibility check fails, no local event is deleted.
+
+The archive adapter owns durable storage, digest/signature generation, key
+management, access controls and restore procedures. Alhambra does not claim a
+particular cryptographic algorithm or cloud archive implementation. Treat
+archive receipts and archive contents as security-sensitive records.
+
+This retention operation removes local transition history only. It deliberately
+retains the current operation projection, approval identity records, fencing
+state and installed-plugin records; those have separate lifecycle and
+retention requirements. Hosts should keep archive storage independently
+available and tested for restore before enabling aggressive local retention.
+
+
+### Inspecting local archive manifests
+
+The SQLite journal retains a compact archive catalog after local event rows are pruned. Hosts can use it to list archive IDs, batch IDs, integrity digests, cutoffs and record counts, then pass the selected receipt to their external archive adapter for full integrity verification and retrieval.
+
+```dart
+final manifests = await journal.listAuditArchives(limit: 100);
+for (final manifest in manifests) {
+  final eventIds = await journal.archivedEventIds(
+    manifest.archiveId,
+    limit: 500,
+  );
+  // Resolve and verify archive bytes through the host-owned archive adapter.
+}
+```
+
+The catalog is an index, not a copy of archived content and not proof that external archive bytes remain available. Queries are bounded (1–500 rows, offset 0–100,000); event-ID listing is bounded (1–500). Hosts should monitor catalog-to-object-store consistency and test restoration independently.
