@@ -28,7 +28,8 @@ void main() {
           failure_code TEXT,
           content_hash TEXT,
           approved_by TEXT,
-          approval_id TEXT
+          approval_id TEXT,
+          fencing_token INTEGER
         )
       ''');
       legacy.execute('''
@@ -56,6 +57,7 @@ void main() {
           content_hash TEXT,
           approved_by TEXT,
           approval_id TEXT,
+          fencing_token INTEGER,
           UNIQUE(operation_id, revision),
           FOREIGN KEY(operation_id) REFERENCES plugin_install_operation(operation_id)
         )
