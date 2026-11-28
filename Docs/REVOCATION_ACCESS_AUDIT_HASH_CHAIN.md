@@ -242,3 +242,5 @@ ongoing appends. A deletion executor must revalidate the approved plan and
 policy immediately before mutation; a stale plan must not be replayable.
 
 The minimum-age check is based on the authoritative oldest timestamp returned by the host's source-range metadata verifier; the caller cannot supply or override that timestamp. If the source metadata is unavailable, planning fails closed.
+
+The retention checkpoint-evidence port receives each package's scope, checkpoint digest, final sequence, and final head hash. The host must prove that the trusted signed checkpoint binds that exact sequence/head pair; merely recognizing a digest or signing key is insufficient.
