@@ -13,6 +13,8 @@ dependencies:
     path: ../../packages/alhambra_plugin_api
   alhambra_plugin_runtime:
     path: ../../packages/alhambra_plugin_runtime
+  alhambra_plugin_host:
+    path: ../../packages/alhambra_plugin_host
 
 dev_dependencies:
   flutter_test:
