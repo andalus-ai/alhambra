@@ -381,6 +381,7 @@ final class PluginInstallAuditQuery {
 /// intentionally excluded. Manual evidence summaries are optional and should
 /// reference protected incident records rather than contain secrets.
 final class PluginInstallAuditRecord {
+  final int eventId;
   final String operationId;
   final String pluginId;
   final String version;
@@ -395,6 +396,7 @@ final class PluginInstallAuditRecord {
   final String? evidenceSummary;
 
   const PluginInstallAuditRecord({
+    required this.eventId,
     required this.operationId,
     required this.pluginId,
     required this.version,
@@ -417,3 +419,64 @@ abstract interface class PluginInstallAuditStore {
   );
 }
 
+
+
+/// A bounded set of terminal-operation audit records offered for archival.
+final class PluginInstallAuditArchiveBatch {
+  final String batchId;
+  final DateTime createdAt;
+  final DateTime cutoff;
+  final List<PluginInstallAuditRecord> records;
+
+  const PluginInstallAuditArchiveBatch({
+    required this.batchId,
+    required this.createdAt,
+    required this.cutoff,
+    required this.records,
+  });
+}
+
+/// Proof returned only after an archive adapter has durably stored and verified
+/// the complete batch. [eventIds] identifies the exact local rows eligible for
+/// deletion; [digest] is the archive adapter's integrity digest/signature.
+final class PluginInstallAuditArchiveReceipt {
+  final String archiveId;
+  final String batchId;
+  final String digest;
+  final int recordCount;
+  final List<int> eventIds;
+  final DateTime archivedAt;
+
+  const PluginInstallAuditArchiveReceipt({
+    required this.archiveId,
+    required this.batchId,
+    required this.digest,
+    required this.recordCount,
+    required this.eventIds,
+    required this.archivedAt,
+  });
+}
+
+/// Host-owned archive boundary. Implementations must persist the complete
+/// batch before returning and verify its durable bytes before issuing receipt.
+abstract interface class PluginInstallAuditArchiveStore {
+  Future<PluginInstallAuditArchiveReceipt> archiveAndVerify(
+    PluginInstallAuditArchiveBatch batch,
+  );
+
+  Future<bool> verify(PluginInstallAuditArchiveReceipt receipt);
+}
+
+/// Retention operations never select active or ambiguous operations for purge.
+/// The host must archive and verify a previewed batch before pruning it.
+abstract interface class PluginInstallAuditRetentionStore {
+  Future<List<PluginInstallAuditRecord>> previewPrunableAudit({
+    required DateTime before,
+    int limit = 500,
+  });
+
+  Future<int> pruneArchivedAudit({
+    required PluginInstallAuditArchiveReceipt receipt,
+    required PluginInstallAuditArchiveStore archiveStore,
+  });
+}
