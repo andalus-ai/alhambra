@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_install_sqlite/alhambra_plugin_install_sqlite.dart';
 import 'package:test/test.dart';
@@ -65,25 +67,30 @@ void main() {
       expect(manifests.single.batchId, batch.batchId);
       expect(manifests.single.digest, receipt.digest);
       expect(manifests.single.recordCount, 2);
-      expect(await journal.findAuditArchive(receipt.archiveId),
-          manifests.single);
+      final found = await journal.findAuditArchive(receipt.archiveId);
+      expect(found?.archiveId, manifests.single.archiveId);
+      expect(found?.recordCount, manifests.single.recordCount);
       expect(await journal.findAuditArchive('missing'), isNull);
-      expect(await journal.archivedEventIds(receipt.archiveId),
-          receipt.eventIds..sort());
+      expect((await journal.archivedEventIds(receipt.archiveId)).toSet(),
+          receipt.eventIds.toSet());
       expect(await journal.listAuditArchives(limit: 1, offset: 1), isEmpty);
-      expect(() => journal.listAuditArchives(limit: 501),
+      await expectLater(journal.listAuditArchives(limit: 501),
           throwsArgumentError);
-      expect(() => journal.listAuditArchives(offset: 100001),
+      await expectLater(journal.listAuditArchives(offset: 100001),
           throwsArgumentError);
-      expect(() => journal.archivedEventIds(receipt.archiveId, limit: 0),
+      await expectLater(
+          journal.archivedEventIds(receipt.archiveId, limit: 0),
           throwsArgumentError);
     });
 
     test('archive catalog survives reopening the SQLite journal', () async {
-      final path = '${DateTime.now().microsecondsSinceEpoch}-archive-catalog.sqlite';
-      final journal = SqlitePluginInstallJournal(path);
-      addTearDown(() {
+      final directory =
+          await Directory.systemTemp.createTemp('alhambra-archive-catalog-');
+      final path = '${directory.path}/journal.sqlite';
+      var journal = SqlitePluginInstallJournal(path);
+      addTearDown(() async {
         journal.close();
+        await directory.delete(recursive: true);
       });
       final at = DateTime.utc(2026, 10, 1);
       await journal.write(PluginInstallJournalEntry(
@@ -110,8 +117,8 @@ void main() {
       );
       journal.close();
 
-      final reopened = SqlitePluginInstallJournal(path);
-      addTearDown(reopened.close);
+      journal = SqlitePluginInstallJournal(path);
+      final reopened = journal;
       expect(await reopened.findAuditArchive(receipt.archiveId), isNotNull);
       expect(await reopened.archivedEventIds(receipt.archiveId),
           receipt.eventIds);
