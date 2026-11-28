@@ -64,9 +64,10 @@ final class PluginHostStartupReport {
 
 /// Result of host shutdown.
 ///
-/// [resourcesDisposed] is false when plugin shutdown preflight failed. In
-/// that case resources remain open because active plugins may still depend on
-/// them; the caller may correct the preflight problem and call shutdown again.
+/// [resourcesDisposed] is true only when every registered resource was
+/// successfully disposed. It is false when plugin shutdown preflight failed
+/// or one or more resource disposers failed; failed resource disposers can be
+/// retried by calling shutdown again.
 final class PluginHostShutdownReport {
   final bool succeeded;
   final PluginShutdownReport? pluginReport;
@@ -105,6 +106,7 @@ final class PluginHostLifecycle {
   Future<PluginHostShutdownReport>? _stopping;
   PluginHostStartupReport? _startupReport;
   PluginHostShutdownReport? _shutdownReport;
+  PluginShutdownReport? _pluginShutdownReport;
   final Set<String> _disposedResourceIds = <String>{};
 
   PluginHostLifecycle({
@@ -215,12 +217,13 @@ final class PluginHostLifecycle {
     final shouldStopPlugins = _state == PluginHostState.running;
     _state = PluginHostState.stopping;
 
-    PluginShutdownReport? pluginReport;
+    PluginShutdownReport? pluginReport = _pluginShutdownReport;
     if (shouldStopPlugins) {
       try {
         pluginReport = await shutdownCoordinator.shutdown(
           discoveredPlugins: plugins,
         );
+        _pluginShutdownReport = pluginReport;
       } catch (error, stackTrace) {
         // The coordinator did not return a report, so the host cannot prove
         // that active plugins have stopped. Keep dependencies alive and allow
@@ -251,12 +254,14 @@ final class PluginHostLifecycle {
     }
 
     final failures = await _disposeResources();
-    final succeeded = (pluginReport?.succeeded ?? true) && failures.isEmpty;
+    final resourcesDisposed =
+        failures.isEmpty && _disposedResourceIds.length == resources.length;
+    final succeeded = (pluginReport?.succeeded ?? true) && resourcesDisposed;
     _state = succeeded ? PluginHostState.stopped : PluginHostState.failed;
     return _shutdownReport = PluginHostShutdownReport(
       succeeded: succeeded,
       pluginReport: pluginReport,
-      resourcesDisposed: true,
+      resourcesDisposed: resourcesDisposed,
       resourceFailures: failures,
     );
   }
