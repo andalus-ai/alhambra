@@ -56,6 +56,7 @@ export 'src/plugins/plugin_revocation_access_audit_inspection.dart';
 export 'src/plugins/plugin_revocation_access_audit_chain.dart';
 export 'src/plugins/plugin_revocation_access_audit_checkpoint.dart';
 export 'src/plugins/plugin_revocation_access_audit_archive.dart';
+export 'src/plugins/plugin_revocation_access_audit_archive_recovery_retention.dart';
 export 'src/plugins/plugin_revocation_journal.dart';
 export 'src/plugins/plugin_revocation_scoped_queries.dart';
 export 'src/plugins/plugin_revocation_page_cursor.dart';
