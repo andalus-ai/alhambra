@@ -176,16 +176,16 @@ if (retentionCutoff != null) {
     limit: policy.batchSize,
   );
   if (candidates.isNotEmpty) {
-  final batch = PluginInstallAuditArchiveBatch(
-    batchId: uniqueBatchId,
-    createdAt: clock.now(),
-    cutoff: retentionCutoff,
-    records: candidates,
-  );
+    final batch = PluginInstallAuditArchiveBatch(
+      batchId: uniqueBatchId,
+      createdAt: clock.now(),
+      cutoff: retentionCutoff,
+      records: candidates,
+    );
 
-  // The archive adapter persists the full batch and verifies its durable
-  // representation before it returns a receipt.
-  final receipt = await archiveStore.archiveAndVerify(batch);
+    // The archive adapter persists the full batch and verifies its durable
+    // representation before it returns a receipt.
+    final receipt = await archiveStore.archiveAndVerify(batch);
     await journal.pruneArchivedAudit(
       receipt: receipt,
       archiveStore: archiveStore,
