@@ -421,6 +421,41 @@ abstract interface class PluginInstallAuditStore {
 
 
 
+/// Host-configurable local audit retention policy.
+///
+/// Retention is opt-in. Hosts choose the duration and schedule; the adapter
+/// only previews and prunes records after a verified archive receipt exists.
+final class PluginInstallAuditRetentionPolicy {
+  final Duration retentionPeriod;
+  final int batchSize;
+  final bool enabled;
+
+  PluginInstallAuditRetentionPolicy({
+    required this.retentionPeriod,
+    this.batchSize = 500,
+    this.enabled = false,
+  }) {
+    if (retentionPeriod.inMicroseconds <= 0) {
+      throw ArgumentError.value(
+        retentionPeriod,
+        'retentionPeriod',
+        'Must be greater than zero.',
+      );
+    }
+    if (batchSize < 1 || batchSize > 500) {
+      throw ArgumentError.value(
+        batchSize,
+        'batchSize',
+        'Must be between 1 and 500.',
+      );
+    }
+  }
+
+  /// Returns a UTC cutoff, or null while retention is disabled.
+  DateTime? cutoffAt(DateTime now) =>
+      enabled ? now.toUtc().subtract(retentionPeriod) : null;
+}
+
 /// A bounded set of terminal-operation audit records offered for archival.
 final class PluginInstallAuditArchiveBatch {
   final String batchId;
