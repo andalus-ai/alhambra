@@ -445,6 +445,7 @@ final class PluginInstallAuditArchiveReceipt {
   final String digest;
   final int recordCount;
   final List<int> eventIds;
+  final DateTime cutoff;
   final DateTime archivedAt;
 
   const PluginInstallAuditArchiveReceipt({
@@ -453,6 +454,7 @@ final class PluginInstallAuditArchiveReceipt {
     required this.digest,
     required this.recordCount,
     required this.eventIds,
+    required this.cutoff,
     required this.archivedAt,
   });
 }
