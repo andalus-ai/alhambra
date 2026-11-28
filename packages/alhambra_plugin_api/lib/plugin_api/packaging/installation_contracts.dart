@@ -513,6 +513,7 @@ abstract interface class PluginInstallAuditRetentionStore {
   });
 
   Future<int> pruneArchivedAudit({
+    required PluginInstallAuditArchiveBatch batch,
     required PluginInstallAuditArchiveReceipt receipt,
     required PluginInstallAuditArchiveStore archiveStore,
   });
