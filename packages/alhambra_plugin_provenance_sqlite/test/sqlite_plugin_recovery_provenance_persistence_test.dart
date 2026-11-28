@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:alhambra_plugin_provenance_sqlite/alhambra_plugin_provenance_sqlite.dart';
 import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 import 'package:alhambra_plugin_test/alhambra_plugin_test.dart';
+import 'package:sqlite3/sqlite3.dart' as sq;
 import 'package:test/test.dart';
 
 PluginRecoveryProvenanceEvent provenanceEvent({
@@ -256,6 +258,127 @@ void main() {
         () => store.checkpointWal(),
         throwsStateError,
       );
+    });
+
+    test('serializes competing appenders from independent OS processes', () async {
+      final initialized = openStore();
+      initialized.close();
+      final fixture = 'test/fixtures/sqlite_provenance_writer.dart';
+      final processes = await Future.wait([
+        Process.run(
+          Platform.resolvedExecutable,
+          ['run', fixture, path, 'process-event-a'],
+          workingDirectory: Directory.current.path,
+        ),
+        Process.run(
+          Platform.resolvedExecutable,
+          ['run', fixture, path, 'process-event-b'],
+          workingDirectory: Directory.current.path,
+        ),
+      ]);
+
+      for (final process in processes) {
+        expect(
+          process.exitCode,
+          0,
+          reason: 'stdout: ${process.stdout}\\nstderr: ${process.stderr}',
+        );
+      }
+      final results = processes
+          .map(
+            (process) =>
+                jsonDecode(process.stdout.toString().trim()) as Map<String, dynamic>,
+          )
+          .toList(growable: false);
+      expect(
+        results.where((result) => result['appended'] == true).length,
+        1,
+      );
+      expect(
+        results.where((result) => result['appended'] == false).length,
+        1,
+      );
+
+      final store = openStore();
+      expect((await store.provenanceStore.readAll()).length, 1);
+    });
+
+    test('rolls back an uncommitted write after writer process termination', () async {
+      final configured = openStore();
+      configured.close();
+      final initialized = sq.sqlite3.open(path);
+      initialized.execute('''
+        CREATE TABLE alhambra_crash_probe (
+          probe_id TEXT PRIMARY KEY
+        )
+      ''');
+      initialized.dispose();
+
+      final process = await Process.start(
+        Platform.resolvedExecutable,
+        [
+          'run',
+          'test/fixtures/sqlite_interrupted_transaction.dart',
+          path,
+        ],
+        workingDirectory: Directory.current.path,
+      );
+      final ready = process.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .first
+          .timeout(const Duration(seconds: 15));
+      expect(await ready, 'READY');
+
+      process.kill(ProcessSignal.sigkill);
+      await process.exitCode;
+
+      final reopened = sq.sqlite3.open(path);
+      try {
+        final rows = reopened.select(
+          'SELECT probe_id FROM alhambra_crash_probe',
+        );
+        expect(rows, isEmpty);
+        expect(reopened.select('PRAGMA quick_check').first.values.first, 'ok');
+      } finally {
+        reopened.dispose();
+      }
+    });
+
+    test('creates a consistent standalone backup and restores all histories', () async {
+      final store = openStore();
+      expect(await store.provenanceStore.appendIfHeadMatches(
+        expectedSequence: 0,
+        expectedHeadDigest: null,
+        event: provenanceEvent(sequence: 1, id: 'backup-event'),
+      ), isTrue);
+      expect(await store.anchorStore.appendIfSequenceMatches(
+        chainId: 'chain-a',
+        expectedAnchorSequence: 0,
+        anchor: anchor(sequence: 1, provenanceSequence: 1),
+      ), isTrue);
+      expect(await store.keyHistoryStore.appendIfSequenceMatches(
+        expectedSequence: 0,
+        event: keyEvent(sequence: 1, id: 'backup-key-event'),
+      ), isTrue);
+
+      final backupPath = '${directory.path}/provenance-backup.sqlite';
+      store.backupTo(backupPath);
+      final restored = SqlitePluginRecoveryProvenancePersistence(backupPath);
+      addTearDown(restored.close);
+
+      expect((await restored.provenanceStore.readAll()).single.eventId,
+          'backup-event');
+      expect((await restored.anchorStore.readAll('chain-a')).single.signature,
+          'signature-1');
+      expect((await restored.keyHistoryStore.readAll()).single.eventId,
+          'backup-key-event');
+      expect(restored.inspect().quickCheckPassed, isTrue);
+    });
+
+    test('rejects an empty SQLite backup destination', () {
+      final store = openStore();
+      expect(() => store.backupTo('  '), throwsArgumentError);
     });
 
     test('isolates anchor sequence per chain', () async {

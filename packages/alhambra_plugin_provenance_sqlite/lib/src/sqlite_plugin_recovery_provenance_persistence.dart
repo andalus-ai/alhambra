@@ -146,6 +146,26 @@ final class SqlitePluginRecoveryProvenancePersistence {
     );
   }
 
+  /// Creates a consistent standalone database snapshot using SQLite's
+  /// online `VACUUM INTO` operation.
+  ///
+  /// [destinationPath] must name a file that does not already exist. SQLite
+  /// reads the live database through its own locking/WAL machinery; hosts
+  /// should still protect the destination with their backup access controls.
+  /// The backup is not encrypted or independently anchored by this adapter.
+  void backupTo(String destinationPath) {
+    _assertOpen();
+    if (destinationPath.trim().isEmpty) {
+      throw ArgumentError.value(
+        destinationPath,
+        'destinationPath',
+        'Must not be empty.',
+      );
+    }
+    final escapedPath = destinationPath.replaceAll("'", "''");
+    _database.execute("VACUUM INTO '$escapedPath'");
+  }
+
   void close() {
     if (_closed) return;
     _database.dispose();

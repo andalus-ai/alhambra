@@ -82,10 +82,17 @@ if (!checkpoint.fullyCheckpointed) {
 }
 ```
 
+The adapter exposes `backupTo(destinationPath)`, which uses SQLite's
+`VACUUM INTO` to produce a consistent standalone snapshot using SQLite's own
+locking and WAL machinery. The destination must not already exist. The adapter
+does not encrypt, upload, or retain backups; hosts must protect the destination
+and own backup lifecycle, off-host replication, and restore authorization.
+After restore, run the provenance and anchor verifiers against independently
+retained signed anchors.
+
 The adapter does not delete, compact, or expire provenance records. Retention
 must preserve append-only evidence and be implemented as an explicit,
-externally governed archival policy. Before restoring a backup, verify the
-restored chain against independently retained signed anchors.
+externally governed archival policy.
 
 ## Validation strategy
 
@@ -93,8 +100,10 @@ The package tests exercise close/reopen durability, independent-connection
 append races, the shared `PluginRecoveryProvenanceConformanceSuite` against
 all three SQLite store views, stale-head rejection, duplicate key-history
 sequence rejection, per-chain anchor sequence isolation, health diagnostics,
-and explicit WAL checkpoint behavior. These tests are still in-process and
-independent-connection tests; they do not establish cross-process contention,
-power-loss durability, or backup/restore correctness. Hosts should additionally
-run multi-process tests on the production filesystem and validate their
-backup/restore process against independently retained anchors.
+explicit WAL checkpoint behavior, competing writers in separate OS processes,
+rollback after terminating a process with an open transaction, and a
+`VACUUM INTO` backup/restore round trip. These are integration tests on the
+test host's local filesystem; they do not establish power-loss durability,
+filesystem-specific behavior, off-host backup integrity, or recovery from
+hardware/storage failure. Hosts must still validate their production filesystem
+and backup lifecycle against independently retained signed anchors.
