@@ -663,7 +663,7 @@ final class SqlitePluginInstallJournal implements
 
       for (final eventId in receipt.eventIds) {
         final rows = _db.select('''
-          SELECT e.event_id, e.occurred_at, o.status
+          SELECT e.event_id, e.occurred_at, e.approval_id, o.status
           FROM plugin_install_event e
           JOIN plugin_install_operation o ON o.operation_id = e.operation_id
           WHERE e.event_id = ?
@@ -688,10 +688,21 @@ final class SqlitePluginInstallJournal implements
         _date(receipt.archivedAt),
       ]);
       for (final eventId in receipt.eventIds) {
+        final eventRows = _db.select(
+          'SELECT approval_id FROM plugin_install_event WHERE event_id = ?',
+          [eventId],
+        );
+        final approvalId = eventRows.single['approval_id'] as String?;
         _db.execute(
           'INSERT INTO plugin_install_audit_archive_event (event_id, archive_id) VALUES (?, ?)',
           [eventId, receipt.archiveId],
         );
+        if (approvalId != null) {
+          _db.execute(
+            'DELETE FROM plugin_install_manual_reconciliation WHERE resolution_id = ?',
+            [approvalId],
+          );
+        }
         _db.execute('DELETE FROM plugin_install_event WHERE event_id = ?', [eventId]);
       }
       return receipt.recordCount;
