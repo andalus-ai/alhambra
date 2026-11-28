@@ -128,7 +128,6 @@ final class PluginRevocationAccessAuditRetentionRequest {
     required this.scopeId, required this.fromSequence,
     required this.throughSequence, required this.oldestRecordAt,
     required this.archiveSet,
-    required this.immutableStorageConfirmed,
   }) {
     if (scopeId.trim().isEmpty || fromSequence < 1 ||
         throughSequence < fromSequence) {
