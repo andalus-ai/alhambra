@@ -94,6 +94,7 @@ void main() {
     final service = PluginRevocationAccessAuditRetentionService(
       authorizer: _RetentionAuthorizer(false),
       checkpointEvidenceVerifier: _CheckpointEvidence(true),
+      durabilityVerifier: _ArchiveDurability(true),
       clock: () => DateTime.utc(2026, 11, 28),
     );
     final principal = PluginRevocationOperationsPrincipal(actorId: 'operator');
@@ -117,12 +118,12 @@ void main() {
     ));
   });
 
-  test('refuses unconfirmed immutable storage and invalid checkpoint evidence', () async {
+  test('refuses unavailable archive durability and invalid checkpoint evidence', () async {
     final packages = _packages();
     final service = PluginRevocationAccessAuditRetentionService(
       authorizer: _RetentionAuthorizer(true),
       checkpointEvidenceVerifier: _CheckpointEvidence(false),
-      durabilityVerifier: _ArchiveDurability(true),
+      durabilityVerifier: _ArchiveDurability(false),
       clock: () => DateTime.utc(2026, 11, 28),
     );
     final base = PluginRevocationAccessAuditRetentionRequest(
@@ -131,7 +132,6 @@ void main() {
       archiveSet: PluginRevocationAccessAuditArchiveSet(
         manifestId: 'manifest-a', scopeId: 'scope-a', packages: packages,
       ),
-      immutableStorageConfirmed: true,
     );
     final policy = const PluginRevocationAccessAuditRetentionPolicy(
       policyVersion: 'v1', minimumAge: Duration(days: 30),
