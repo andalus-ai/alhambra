@@ -352,7 +352,7 @@ abstract interface class PluginInstallManualReconciliationStore {
 /// Bounded filters for installation audit history.
 ///
 /// [from] is inclusive and [to] is exclusive. The default page is 100 rows;
-/// adapters must reject limits outside 1..500 and negative offsets.
+/// adapters must reject limits outside 1..500 and offsets outside 0..100000.
 final class PluginInstallAuditQuery {
   final String? operationId;
   final String? pluginId;
@@ -428,12 +428,12 @@ final class PluginInstallAuditArchiveBatch {
   final DateTime cutoff;
   final List<PluginInstallAuditRecord> records;
 
-  const PluginInstallAuditArchiveBatch({
+  PluginInstallAuditArchiveBatch({
     required this.batchId,
     required this.createdAt,
     required this.cutoff,
-    required this.records,
-  });
+    required List<PluginInstallAuditRecord> records,
+  }) : records = List.unmodifiable(records);
 }
 
 /// Proof returned only after an archive adapter has durably stored and verified
@@ -448,15 +448,15 @@ final class PluginInstallAuditArchiveReceipt {
   final DateTime cutoff;
   final DateTime archivedAt;
 
-  const PluginInstallAuditArchiveReceipt({
+  PluginInstallAuditArchiveReceipt({
     required this.archiveId,
     required this.batchId,
     required this.digest,
     required this.recordCount,
-    required this.eventIds,
+    required List<int> eventIds,
     required this.cutoff,
     required this.archivedAt,
-  });
+  }) : eventIds = List.unmodifiable(eventIds);
 }
 
 /// Host-owned archive boundary. Implementations must persist the complete
