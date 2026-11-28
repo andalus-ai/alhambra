@@ -157,6 +157,43 @@ void main() {
       expect(events, ['close:second', 'close:first']);
     });
 
+    test('retries failed resource disposal without repeating plugin shutdown',
+        () async {
+      final events = <String>[];
+      final manager = PluginManager();
+      final plugin = _Plugin('app.plugin', events);
+      var disposeAttempts = 0;
+      final host = PluginHostLifecycle(
+        startupCoordinator: PluginStartupCoordinator(manager: manager),
+        shutdownCoordinator: PluginShutdownCoordinator(manager: manager),
+        discoveredPlugins: [_discovered('app.plugin')],
+        compiledPlugins: {'app.plugin': plugin},
+        resources: [
+          PluginHostResource(id: 'store', dispose: () async {
+            disposeAttempts++;
+            events.add('close:store:$disposeAttempts');
+            if (disposeAttempts == 1) throw StateError('temporary close failure');
+          }),
+        ],
+      );
+
+      expect((await host.start()).succeeded, isTrue);
+      final first = await host.shutdown();
+      expect(first.succeeded, isFalse);
+      expect(first.resourcesDisposed, isFalse);
+      expect(first.pluginReport!.attemptedPluginIds, ['app.plugin']);
+
+      final second = await host.shutdown();
+      expect(second.succeeded, isTrue);
+      expect(second.resourcesDisposed, isTrue);
+      expect(events, [
+        'start:app.plugin',
+        'stop:app.plugin',
+        'close:store:1',
+        'close:store:2',
+      ]);
+    });
+
     test('retains dependencies and permits shutdown retry after preflight failure',
         () async {
       final events = <String>[];
