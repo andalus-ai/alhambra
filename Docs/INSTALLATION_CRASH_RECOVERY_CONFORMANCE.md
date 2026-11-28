@@ -179,3 +179,19 @@ operation projections, approval identity records, fencing state, or installed
 plugin records. Those are operational state with separate lifecycle rules.
 Hosts must not enable local pruning until the archive restore path has been
 tested and operational ownership for retention is explicit.
+
+
+## Archive catalog and operational inspection
+
+The SQLite adapter retains a compact archive manifest and the exact archived event-ID mapping after local event rows are pruned. The new `PluginInstallAuditArchiveCatalogStore` exposes bounded listing, lookup by archive ID, and bounded event-ID enumeration. The catalog supports operational inventory, reconciliation between the SQLite index and the host-owned archive system, and selection of an archive for restore.
+
+The catalog is not the archive itself and does not prove that external bytes are available or authentic. A host must use its archive adapter to retrieve and verify the stored payload against the receipt digest/signature before presenting or restoring archived history. The catalog intentionally does not expose archive payloads, signing keys or secret-bearing fields. Queries are bounded to 1–500 manifests (offset 0–100,000) and 1–500 event IDs per archive.
+
+Operational maintenance should monitor:
+- catalog manifests whose corresponding external object cannot be found;
+- archive verification failures and digest/signature mismatches;
+- expected versus actual archived record counts and event-ID sets;
+- archive age, storage availability, restore-test age and restore duration;
+- local SQLite WAL growth and checkpoint outcomes.
+
+WAL checkpointing, VACUUM/compaction and restore execution remain host-owned maintenance tasks. Run them during an explicitly coordinated maintenance window; do not copy a live database file without its WAL or use compaction as a substitute for a verified backup. The archive catalog makes restore discovery possible but does not implement a restore operation or promise cross-store atomicity.
