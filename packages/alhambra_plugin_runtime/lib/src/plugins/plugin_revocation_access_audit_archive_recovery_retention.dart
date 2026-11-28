@@ -123,20 +123,27 @@ final class PluginRevocationAccessAuditRetentionRequest {
   final int throughSequence;
   final DateTime oldestRecordAt;
   final PluginRevocationAccessAuditArchiveSet archiveSet;
-  final Set<String> verifiedCheckpointDigests;
   final bool immutableStorageConfirmed;
 
   PluginRevocationAccessAuditRetentionRequest({
     required this.scopeId, required this.fromSequence,
     required this.throughSequence, required this.oldestRecordAt,
-    required this.archiveSet, required Set<String> verifiedCheckpointDigests,
+    required this.archiveSet,
     required this.immutableStorageConfirmed,
-  }) : verifiedCheckpointDigests = Set.unmodifiable(verifiedCheckpointDigests) {
+  }) {
     if (scopeId.trim().isEmpty || fromSequence < 1 ||
         throughSequence < fromSequence) {
       throw ArgumentError('Invalid audit retention request.');
     }
   }
+}
+
+/// Host trust boundary for signed checkpoints referenced by archive packages.
+abstract interface class PluginRevocationAccessAuditArchiveCheckpointEvidenceVerifier {
+  Future<bool> isTrustedCheckpoint({
+    required String scopeId,
+    required String checkpointDigest,
+  });
 }
 
 abstract interface class PluginRevocationAccessAuditRetentionAuthorizer {
@@ -182,10 +189,13 @@ final class PluginRevocationAccessAuditRetentionDeniedException
 /// maintenance workflow after backup and recovery validation.
 final class PluginRevocationAccessAuditRetentionService {
   final PluginRevocationAccessAuditRetentionAuthorizer authorizer;
+  final PluginRevocationAccessAuditArchiveCheckpointEvidenceVerifier checkpointEvidenceVerifier;
   final DateTime Function() clock;
 
   PluginRevocationAccessAuditRetentionService({
-    required this.authorizer, DateTime Function()? clock,
+    required this.authorizer,
+    required this.checkpointEvidenceVerifier,
+    DateTime Function()? clock,
   }) : clock = clock ?? DateTime.now;
 
   Future<PluginRevocationAccessAuditRetentionPlan> plan({
@@ -203,9 +213,21 @@ final class PluginRevocationAccessAuditRetentionService {
     if (!request.immutableStorageConfirmed) {
       throw const PluginRevocationAccessAuditRetentionDeniedException('immutable_archive_not_confirmed');
     }
+    final trustedCheckpointDigests = <String>{};
+    for (final package in request.archiveSet.packages) {
+      if (!await checkpointEvidenceVerifier.isTrustedCheckpoint(
+        scopeId: request.scopeId,
+        checkpointDigest: package.checkpointDigest,
+      )) {
+        throw const PluginRevocationAccessAuditRetentionDeniedException(
+          'checkpoint_not_verified',
+        );
+      }
+      trustedCheckpointDigests.add(package.checkpointDigest);
+    }
     final archiveVerification = PluginRevocationAccessAuditArchiveSetCodec.verify(
       request.archiveSet,
-      verifiedCheckpointDigests: request.verifiedCheckpointDigests,
+      verifiedCheckpointDigests: trustedCheckpointDigests,
     );
     if (!archiveVerification.valid) {
       throw PluginRevocationAccessAuditRetentionDeniedException(
