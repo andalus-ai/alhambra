@@ -164,6 +164,7 @@ final class SqlitePluginInstallJournal implements
         _db.execute('CREATE INDEX idx_plugin_install_event_time ON plugin_install_event(occurred_at, event_id)');
         _db.execute('PRAGMA user_version = 4');
       });
+      version = 4;
     }
     if (version == 4) {
       _transaction(() {
