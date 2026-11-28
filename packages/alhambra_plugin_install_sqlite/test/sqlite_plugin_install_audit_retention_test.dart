@@ -90,6 +90,48 @@ void main() {
       expect(await journal.previewPrunableAudit(before: before), isEmpty);
     });
 
+    test('archives manual evidence with its terminal journal events', () async {
+      final journal = SqlitePluginInstallJournal.memory();
+      addTearDown(journal.close);
+      final archive = _TestArchiveStore();
+      final startedAt = DateTime.utc(2026, 10, 1);
+      await journal.write(PluginInstallJournalEntry(
+        operationId: 'manual-op',
+        pluginId: 'example.manual',
+        version: '1.0.0',
+        status: PluginInstallJournalStatus.needsReconciliation,
+        updatedAt: startedAt,
+      ));
+      await journal.reconcileManually(
+        operationId: 'manual-op',
+        expectedUpdatedAt: startedAt,
+        resolution: PluginInstallManualResolution.absentAndClean,
+        resolutionId: 'manual-resolution',
+        operatorId: 'operator-1',
+        evidenceSummary: 'Evidence in incident INC-9.',
+        resolvedAt: startedAt.add(const Duration(minutes: 1)),
+      );
+      expect(await journal.manualReconciliations('manual-op'), hasLength(1));
+
+      final cutoff = DateTime.utc(2026, 11, 1);
+      final candidates = await journal.previewPrunableAudit(before: cutoff);
+      expect(candidates, hasLength(2));
+      expect(candidates.last.evidenceSummary, 'Evidence in incident INC-9.');
+      final receipt = await archive.archiveAndVerify(PluginInstallAuditArchiveBatch(
+        batchId: 'manual-batch',
+        createdAt: DateTime.utc(2026, 11, 28),
+        cutoff: cutoff,
+        records: candidates,
+      ));
+      expect(await journal.pruneArchivedAudit(
+        receipt: receipt,
+        archiveStore: archive,
+      ), 2);
+      expect(await journal.manualReconciliations('manual-op'), isEmpty);
+      expect((await journal.read('manual-op'))?.status,
+          PluginInstallJournalStatus.manuallyReconciled);
+    });
+
     test('does not prune when archive verification fails', () async {
       final journal = SqlitePluginInstallJournal.memory();
       addTearDown(journal.close);
