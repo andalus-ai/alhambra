@@ -14,18 +14,59 @@ void main() {
           await Directory.systemTemp.createTemp('alhambra-manual-reconcile-v2-');
       final path = '${directory.path}/install.sqlite';
       final legacy = sq.sqlite3.open(path);
-      legacy.execute(
-        'CREATE TABLE plugin_install_operation (operation_id TEXT PRIMARY KEY)',
-      );
+      legacy.execute('''
+        CREATE TABLE plugin_install_operation (
+          operation_id TEXT PRIMARY KEY,
+          schema_version INTEGER NOT NULL,
+          plugin_id TEXT NOT NULL,
+          version TEXT NOT NULL,
+          status TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision >= 1),
+          updated_at TEXT NOT NULL,
+          staging_handle TEXT,
+          promoted_path TEXT,
+          failure_code TEXT,
+          content_hash TEXT,
+          approved_by TEXT,
+          approval_id TEXT,
+          fencing_token INTEGER
+        )
+      ''');
+      legacy.execute('''
+        CREATE TABLE plugin_install_approval (
+          approval_id TEXT PRIMARY KEY,
+          operation_id TEXT NOT NULL,
+          approved_by TEXT NOT NULL,
+          recorded_at TEXT NOT NULL,
+          FOREIGN KEY(operation_id) REFERENCES plugin_install_operation(operation_id)
+        )
+      ''');
       legacy.execute('''
         CREATE TABLE plugin_install_event (
           event_id INTEGER PRIMARY KEY AUTOINCREMENT,
           operation_id TEXT NOT NULL,
           revision INTEGER NOT NULL,
+          schema_version INTEGER NOT NULL,
           plugin_id TEXT NOT NULL,
+          version TEXT NOT NULL,
           status TEXT NOT NULL,
           occurred_at TEXT NOT NULL,
-          approved_by TEXT
+          staging_handle TEXT,
+          promoted_path TEXT,
+          failure_code TEXT,
+          content_hash TEXT,
+          approved_by TEXT,
+          approval_id TEXT,
+          fencing_token INTEGER,
+          UNIQUE(operation_id, revision),
+          FOREIGN KEY(operation_id) REFERENCES plugin_install_operation(operation_id)
+        )
+      ''');
+      legacy.execute('CREATE INDEX idx_plugin_install_event_history ON plugin_install_event(operation_id, revision)');
+      legacy.execute('''
+        CREATE TABLE plugin_install_fence (
+          operation_id TEXT PRIMARY KEY,
+          highest_token INTEGER NOT NULL CHECK (highest_token >= 0)
         )
       ''');
       legacy.execute('PRAGMA user_version = 2');
@@ -37,6 +78,10 @@ void main() {
         await directory.delete(recursive: true);
       });
       expect(await journal.manualReconciliations('legacy-operation'), isEmpty);
+      expect(await journal.queryAudit(const PluginInstallAuditQuery()), isEmpty);
+      expect(await journal.previewPrunableAudit(
+        before: DateTime.utc(2030),
+      ), isEmpty);
     });
 
     test('records an atomic, durable operator resolution and closes operation',

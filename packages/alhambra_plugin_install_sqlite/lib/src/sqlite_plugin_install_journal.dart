@@ -14,7 +14,9 @@ import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
 final class SqlitePluginInstallJournal implements
     FencedPluginInstallRecoveryJournal,
     PluginInstallManualReconciliationStore,
-    PluginInstallAuditStore {
+    PluginInstallAuditStore,
+    PluginInstallAuditRetentionStore,
+    PluginInstallAuditArchiveCatalogStore {
   final sq.Database _db;
   bool _closed = false;
 
@@ -48,7 +50,7 @@ final class SqlitePluginInstallJournal implements
 
   void _migrate() {
     var version = _db.select('PRAGMA user_version').first['user_version'] as int;
-    if (version > 4) {
+    if (version > 5) {
       throw UnsupportedError('Database schema version $version is newer than this adapter supports.');
     }
     if (version == 0) {
@@ -163,6 +165,30 @@ final class SqlitePluginInstallJournal implements
         _db.execute('CREATE INDEX idx_plugin_install_event_time ON plugin_install_event(occurred_at, event_id)');
         _db.execute('PRAGMA user_version = 4');
       });
+      version = 4;
+    }
+    if (version == 4) {
+      _transaction(() {
+        _db.execute('''
+          CREATE TABLE plugin_install_audit_archive (
+            archive_id TEXT PRIMARY KEY,
+            batch_id TEXT NOT NULL UNIQUE,
+            digest TEXT NOT NULL,
+            record_count INTEGER NOT NULL CHECK (record_count > 0),
+            cutoff TEXT NOT NULL,
+            archived_at TEXT NOT NULL
+          )
+        ''');
+        _db.execute('''
+          CREATE TABLE plugin_install_audit_archive_event (
+            event_id INTEGER PRIMARY KEY,
+            archive_id TEXT NOT NULL,
+            FOREIGN KEY(archive_id) REFERENCES plugin_install_audit_archive(archive_id)
+          )
+        ''');
+        _db.execute('CREATE INDEX idx_plugin_install_audit_archive_event_archive ON plugin_install_audit_archive_event(archive_id, event_id)');
+        _db.execute('PRAGMA user_version = 5');
+      });
     }
   }
 
@@ -179,7 +205,7 @@ final class SqlitePluginInstallJournal implements
     }
   }
 
-  static const int _schemaVersion = 4;
+  static const int _schemaVersion = 5;
   static String _date(DateTime value) => value.toUtc().toIso8601String();
   static DateTime _parseDate(Object? value) => DateTime.parse(value! as String).toUtc();
 
@@ -557,9 +583,10 @@ final class SqlitePluginInstallJournal implements
     if (query.from != null) add('e.occurred_at >= ?', _date(query.from!));
     if (query.to != null) add('e.occurred_at < ?', _date(query.to!));
 
-    final where = predicates.isEmpty ? '' : 'WHERE ${predicates.join(' AND ')}';
+    predicates.add('a.event_id IS NULL');
+    final where = 'WHERE ${predicates.join(' AND ')}';
     final rows = _db.select('''
-      SELECT e.operation_id, e.plugin_id, e.version, e.status,
+      SELECT e.event_id, e.operation_id, e.plugin_id, e.version, e.status,
              e.occurred_at, e.revision, e.approved_by, e.approval_id,
              e.failure_code, e.fencing_token,
              m.resolution AS manual_resolution,
@@ -567,30 +594,213 @@ final class SqlitePluginInstallJournal implements
       FROM plugin_install_event e
       LEFT JOIN plugin_install_manual_reconciliation m
         ON m.resolution_id = e.approval_id
+      LEFT JOIN plugin_install_audit_archive_event a
+        ON a.event_id = e.event_id
       $where
       ORDER BY e.occurred_at DESC, e.event_id DESC
       LIMIT ? OFFSET ?
     ''', [...parameters, query.limit, query.offset]);
 
-    return List.unmodifiable(rows.map((row) {
-      final resolutionName = row['manual_resolution'] as String?;
-      return PluginInstallAuditRecord(
-        operationId: row['operation_id']! as String,
-        pluginId: row['plugin_id']! as String,
-        version: row['version']! as String,
-        status: PluginInstallJournalStatus.values.byName(row['status']! as String),
-        occurredAt: _parseDate(row['occurred_at']),
-        revision: row['revision']! as int,
-        operatorId: row['approved_by'] as String?,
-        approvalId: row['approval_id'] as String?,
-        failureCode: row['failure_code'] as String?,
-        fencingToken: row['fencing_token'] as int?,
-        manualResolution: resolutionName == null
-            ? null
-            : PluginInstallManualResolution.values.byName(resolutionName),
-        evidenceSummary: row['evidence_summary'] as String?,
+    return List.unmodifiable(rows.map(_auditRecord));
+  }
+
+
+  @override
+  Future<List<PluginInstallAuditRecord>> previewPrunableAudit({
+    required DateTime before,
+    int limit = 500,
+  }) async {
+    _assertOpen();
+    if (limit < 1 || limit > 500) {
+      throw ArgumentError.value(limit, 'limit', 'Must be between 1 and 500.');
+    }
+    final rows = _db.select('''
+      SELECT e.event_id, e.operation_id, e.plugin_id, e.version, e.status,
+             e.occurred_at, e.revision, e.approved_by, e.approval_id,
+             e.failure_code, e.fencing_token,
+             m.resolution AS manual_resolution,
+             m.evidence_summary AS evidence_summary
+      FROM plugin_install_event e
+      JOIN plugin_install_operation o ON o.operation_id = e.operation_id
+      LEFT JOIN plugin_install_manual_reconciliation m
+        ON m.resolution_id = e.approval_id
+      LEFT JOIN plugin_install_audit_archive_event a
+        ON a.event_id = e.event_id
+      WHERE e.occurred_at < ?
+        AND o.status IN ('committed', 'rolledBack', 'failed', 'manuallyReconciled')
+        AND a.event_id IS NULL
+      ORDER BY e.occurred_at ASC, e.event_id ASC
+      LIMIT ?
+    ''', [_date(before), limit]);
+    return List.unmodifiable(rows.map(_auditRecord));
+  }
+
+  @override
+  Future<int> pruneArchivedAudit({
+    required PluginInstallAuditArchiveBatch batch,
+    required PluginInstallAuditArchiveReceipt receipt,
+    required PluginInstallAuditArchiveStore archiveStore,
+  }) async {
+    _assertOpen();
+    final batchEventIds = batch.records.map((record) => record.eventId).toSet();
+    if (batch.batchId.trim().isEmpty ||
+        batch.records.isEmpty ||
+        batchEventIds.length != batch.records.length ||
+        receipt.archiveId.trim().isEmpty ||
+        receipt.batchId != batch.batchId ||
+        receipt.digest.trim().isEmpty ||
+        receipt.recordCount != batch.records.length ||
+        receipt.eventIds.isEmpty ||
+        receipt.eventIds.length != receipt.recordCount ||
+        receipt.eventIds.toSet().length != receipt.eventIds.length ||
+        !receipt.eventIds.toSet().containsAll(batchEventIds) ||
+        !batchEventIds.containsAll(receipt.eventIds) ||
+        _date(receipt.cutoff) != _date(batch.cutoff)) {
+      throw ArgumentError('Archive receipt must exactly match the approved batch, cutoff, count and unique event IDs.');
+    }
+    if (!await archiveStore.verify(receipt)) {
+      throw StateError('Audit archive verification failed; no local records were pruned.');
+    }
+
+    return _transaction(() {
+      final archive = _db.select(
+        'SELECT archive_id FROM plugin_install_audit_archive WHERE archive_id = ? OR batch_id = ?',
+        [receipt.archiveId, receipt.batchId],
       );
-    }));
+      if (archive.isNotEmpty) {
+        throw StateError('Audit archive receipt has already been applied or conflicts with an existing archive.');
+      }
+
+      for (final eventId in receipt.eventIds) {
+        final rows = _db.select('''
+          SELECT e.event_id, e.occurred_at, e.approval_id, o.status
+          FROM plugin_install_event e
+          JOIN plugin_install_operation o ON o.operation_id = e.operation_id
+          WHERE e.event_id = ?
+        ''', [eventId]);
+        if (rows.isEmpty ||
+            !_isTerminal(PluginInstallJournalStatus.values.byName(rows.first['status']! as String)) ||
+            !_parseDate(rows.first['occurred_at']).isBefore(receipt.cutoff.toUtc())) {
+          throw StateError('Archive receipt contains a missing, non-terminal or out-of-retention event; no records were pruned.');
+        }
+      }
+
+      _db.execute('''
+        INSERT INTO plugin_install_audit_archive
+        (archive_id, batch_id, digest, record_count, cutoff, archived_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      ''', [
+        receipt.archiveId,
+        receipt.batchId,
+        receipt.digest,
+        receipt.recordCount,
+        _date(receipt.cutoff),
+        _date(receipt.archivedAt),
+      ]);
+      for (final eventId in receipt.eventIds) {
+        final eventRows = _db.select(
+          'SELECT approval_id FROM plugin_install_event WHERE event_id = ?',
+          [eventId],
+        );
+        final approvalId = eventRows.single['approval_id'] as String?;
+        _db.execute(
+          'INSERT INTO plugin_install_audit_archive_event (event_id, archive_id) VALUES (?, ?)',
+          [eventId, receipt.archiveId],
+        );
+        if (approvalId != null) {
+          _db.execute(
+            'DELETE FROM plugin_install_manual_reconciliation WHERE resolution_id = ?',
+            [approvalId],
+          );
+        }
+        _db.execute('DELETE FROM plugin_install_event WHERE event_id = ?', [eventId]);
+      }
+      return receipt.recordCount;
+    });
+  }
+
+
+  @override
+  Future<List<PluginInstallAuditArchiveManifest>> listAuditArchives({
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    _assertOpen();
+    if (limit < 1 || limit > 500) {
+      throw ArgumentError.value(limit, 'limit', 'Must be between 1 and 500.');
+    }
+    if (offset < 0 || offset > 100000) {
+      throw ArgumentError.value(offset, 'offset', 'Must be between 0 and 100000.');
+    }
+    final rows = _db.select('''
+      SELECT archive_id, batch_id, digest, record_count, cutoff, archived_at
+      FROM plugin_install_audit_archive
+      ORDER BY archived_at DESC, archive_id DESC
+      LIMIT ? OFFSET ?
+    ''', [limit, offset]);
+    return List.unmodifiable(rows.map(_archiveManifest));
+  }
+
+  @override
+  Future<PluginInstallAuditArchiveManifest?> findAuditArchive(
+    String archiveId,
+  ) async {
+    _assertOpen();
+    _validateAuditText(archiveId, 'archiveId', 256);
+    final rows = _db.select('''
+      SELECT archive_id, batch_id, digest, record_count, cutoff, archived_at
+      FROM plugin_install_audit_archive WHERE archive_id = ?
+    ''', [archiveId]);
+    return rows.isEmpty ? null : _archiveManifest(rows.first);
+  }
+
+  @override
+  Future<List<int>> archivedEventIds(
+    String archiveId, {
+    int limit = 500,
+  }) async {
+    _assertOpen();
+    _validateAuditText(archiveId, 'archiveId', 256);
+    if (limit < 1 || limit > 500) {
+      throw ArgumentError.value(limit, 'limit', 'Must be between 1 and 500.');
+    }
+    final rows = _db.select('''
+      SELECT event_id FROM plugin_install_audit_archive_event
+      WHERE archive_id = ? ORDER BY event_id ASC LIMIT ?
+    ''', [archiveId, limit]);
+    return List.unmodifiable(rows.map((row) => row['event_id']! as int));
+  }
+
+  static PluginInstallAuditArchiveManifest _archiveManifest(
+    Map<String, Object?> row,
+  ) => PluginInstallAuditArchiveManifest(
+    archiveId: row['archive_id']! as String,
+    batchId: row['batch_id']! as String,
+    digest: row['digest']! as String,
+    recordCount: row['record_count']! as int,
+    cutoff: _parseDate(row['cutoff']),
+    archivedAt: _parseDate(row['archived_at']),
+  );
+
+  static PluginInstallAuditRecord _auditRecord(Map<String, Object?> row) {
+    final resolutionName = row['manual_resolution'] as String?;
+    return PluginInstallAuditRecord(
+      eventId: row['event_id']! as int,
+      operationId: row['operation_id']! as String,
+      pluginId: row['plugin_id']! as String,
+      version: row['version']! as String,
+      status: PluginInstallJournalStatus.values.byName(row['status']! as String),
+      occurredAt: _parseDate(row['occurred_at']),
+      revision: row['revision']! as int,
+      operatorId: row['approved_by'] as String?,
+      approvalId: row['approval_id'] as String?,
+      failureCode: row['failure_code'] as String?,
+      fencingToken: row['fencing_token'] as int?,
+      manualResolution: resolutionName == null
+          ? null
+          : PluginInstallManualResolution.values.byName(resolutionName),
+      evidenceSummary: row['evidence_summary'] as String?,
+    );
   }
 
   static void _validateAuditText(String value, String field, int maxLength) {
