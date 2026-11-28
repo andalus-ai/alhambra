@@ -212,6 +212,49 @@ void main() {
           hasLength(1));
     });
 
+    test('rejects a receipt that widens the approved retention cutoff',
+        () async {
+      final journal = SqlitePluginInstallJournal.memory();
+      addTearDown(journal.close);
+      final archive = _TestArchiveStore();
+      final time = DateTime.utc(2026, 10, 1);
+      await journal.write(PluginInstallJournalEntry(
+        operationId: 'cutoff-op',
+        pluginId: 'example.cutoff',
+        version: '1.0.0',
+        status: PluginInstallJournalStatus.committed,
+        updatedAt: time,
+      ));
+      final cutoff = DateTime.utc(2026, 11, 1);
+      final records = await journal.previewPrunableAudit(before: cutoff);
+      final batch = PluginInstallAuditArchiveBatch(
+        batchId: 'approved-cutoff-batch',
+        createdAt: DateTime.utc(2026, 11, 28),
+        cutoff: cutoff,
+        records: records,
+      );
+      final receipt = PluginInstallAuditArchiveReceipt(
+        archiveId: 'archive-widened-cutoff',
+        batchId: batch.batchId,
+        digest: 'sha256:test-integrity-digest',
+        recordCount: records.length,
+        eventIds: records.map((record) => record.eventId).toList(),
+        cutoff: DateTime.utc(2026, 12, 1),
+        archivedAt: DateTime.utc(2026, 11, 28),
+      );
+
+      await expectLater(
+        journal.pruneArchivedAudit(
+          batch: batch,
+          receipt: receipt,
+          archiveStore: archive,
+        ),
+        throwsArgumentError,
+      );
+      expect(await journal.queryAudit(const PluginInstallAuditQuery()),
+          hasLength(1));
+    });
+
     test('rejects receipt containing an unresolved operation event', () async {
       final journal = SqlitePluginInstallJournal.memory();
       addTearDown(journal.close);
