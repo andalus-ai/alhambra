@@ -148,7 +148,7 @@ capture a stable time window and apply their own export/retention controls.
 
 ## Audit archival and retention guarantees
 
-`PluginInstallAuditRetentionStore.previewPrunableAudit` returns a bounded set
+`PluginInstallAuditRetentionPolicy` is opt-in (disabled by default) and lets the host set a retention duration and batch size. The host computes the UTC cutoff and schedules archival. `PluginInstallAuditRetentionStore.previewPrunableAudit` returns a bounded set
 of transition records older than a supplied UTC cutoff, but only when the
 operation's current projection is terminal. Active operations and operations
 in `recoveryStarted` or `needsReconciliation` are never eligible. This is a
