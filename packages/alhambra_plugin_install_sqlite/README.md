@@ -158,17 +158,24 @@ retention, export policy and redaction appropriate to their deployment.
 
 ## Audit archival and retention
 
-Retention is deliberately a two-step, host-orchestrated operation. The SQLite
+Retention is opt-in through `PluginInstallAuditRetentionPolicy`; the host chooses the duration and schedules the two-step archival operation. The default policy is disabled. The SQLite
 journal previews only events older than the requested cutoff whose current
 operation projection is terminal (`committed`, `rolledBack`, `failed` or
 `manuallyReconciled`). Ambiguous and active operations are never eligible.
 
 ```dart
-final candidates = await journal.previewPrunableAudit(
-  before: retentionCutoff,
-  limit: 500,
+final policy = PluginInstallAuditRetentionPolicy(
+  retentionPeriod: const Duration(days: 90),
+  batchSize: 500,
+  enabled: true,
 );
-if (candidates.isNotEmpty) {
+final retentionCutoff = policy.cutoffAt(clock.now());
+if (retentionCutoff != null) {
+  final candidates = await journal.previewPrunableAudit(
+    before: retentionCutoff,
+    limit: policy.batchSize,
+  );
+  if (candidates.isNotEmpty) {
   final batch = PluginInstallAuditArchiveBatch(
     batchId: uniqueBatchId,
     createdAt: clock.now(),
@@ -179,10 +186,11 @@ if (candidates.isNotEmpty) {
   // The archive adapter persists the full batch and verifies its durable
   // representation before it returns a receipt.
   final receipt = await archiveStore.archiveAndVerify(batch);
-  await journal.pruneArchivedAudit(
-    receipt: receipt,
-    archiveStore: archiveStore,
-  );
+    await journal.pruneArchivedAudit(
+      receipt: receipt,
+      archiveStore: archiveStore,
+    );
+  }
 }
 ```
 
