@@ -145,3 +145,36 @@ scope before invoking the store, decide retention and export policy, and
 protect audit data at rest and in transit. Offset pagination is intended for
 bounded operational inspection; hosts needing long-running exports should
 capture a stable time window and apply their own export/retention controls.
+
+## Audit archival and retention guarantees
+
+`PluginInstallAuditRetentionStore.previewPrunableAudit` returns a bounded set
+of transition records older than a supplied UTC cutoff, but only when the
+operation's current projection is terminal. Active operations and operations
+in `recoveryStarted` or `needsReconciliation` are never eligible. This is a
+preview, not a deletion.
+
+The host passes the complete preview to its configured
+`PluginInstallAuditArchiveStore.archiveAndVerify`. That adapter must durably
+persist the complete batch and verify the archived representation before
+issuing a receipt containing the archive identity, digest, cutoff, count and
+exact event IDs. The host then passes that receipt back to
+`pruneArchivedAudit`. SQLite verifies the receipt through the configured
+archive adapter and, in one transaction, rechecks that every referenced event
+still exists, is older than the cutoff and belongs to a terminal operation.
+Only then are the archive manifest and event IDs recorded and local event rows
+deleted. Manual-reconciliation evidence associated with those events is deleted
+in the same transaction. Replayed receipts are rejected.
+
+The archive adapter is responsible for the integrity algorithm, signing-key
+management, access control, durable storage and restore testing. The SQLite
+adapter does not claim cryptographic immutability by itself. If archive
+verification fails, a referenced event is missing, or an operation is no
+longer terminal, the entire prune transaction fails without deleting any
+local event.
+
+Retention removes local transition history only. It does not remove current
+operation projections, approval identity records, fencing state, or installed
+plugin records. Those are operational state with separate lifecycle rules.
+Hosts must not enable local pruning until the archive restore path has been
+tested and operational ownership for retention is explicit.
