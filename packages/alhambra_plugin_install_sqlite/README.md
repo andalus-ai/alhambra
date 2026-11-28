@@ -213,3 +213,21 @@ retains the current operation projection, approval identity records, fencing
 state and installed-plugin records; those have separate lifecycle and
 retention requirements. Hosts should keep archive storage independently
 available and tested for restore before enabling aggressive local retention.
+
+
+### Inspecting local archive manifests
+
+The SQLite journal retains a compact archive catalog after local event rows are pruned. Hosts can use it to list archive IDs, batch IDs, integrity digests, cutoffs and record counts, then pass the selected receipt to their external archive adapter for full integrity verification and retrieval.
+
+```dart
+final manifests = await journal.listAuditArchives(limit: 100);
+for (final manifest in manifests) {
+  final eventIds = await journal.archivedEventIds(
+    manifest.archiveId,
+    limit: 500,
+  );
+  // Resolve and verify archive bytes through the host-owned archive adapter.
+}
+```
+
+The catalog is an index, not a copy of archived content and not proof that external archive bytes remain available. Queries are bounded (1–500 rows, offset 0–100,000); event-ID listing is bounded (1–500). Hosts should monitor catalog-to-object-store consistency and test restoration independently.
