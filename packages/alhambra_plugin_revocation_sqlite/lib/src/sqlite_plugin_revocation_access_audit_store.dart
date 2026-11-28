@@ -10,7 +10,9 @@ final class SqlitePluginRevocationAccessAuditStore
     implements
         PluginRevocationOperationsAccessAuditStore,
         PluginRevocationOperationsAccessAuditInspectionStore,
-        PluginRevocationAccessAuditChainStore {
+        PluginRevocationAccessAuditChainStore,
+        PluginRevocationAccessAuditCheckpointChainVerifier,
+        PluginRevocationAccessAuditArchiveSource {
   final sq.Database database;
 
   SqlitePluginRevocationAccessAuditStore(this.database);
@@ -275,6 +277,48 @@ final class SqlitePluginRevocationAccessAuditStore
       entriesVerified: rows.length,
       headHash: previousHash,
     );
+  }
+
+  @override
+  Future<List<PluginRevocationAccessAuditArchiveEntry>> readArchiveEntries({
+    required String scopeId,
+    required int fromSequence,
+    required int limit,
+  }) async {
+    if (scopeId.trim().isEmpty || fromSequence < 1 || limit < 1 || limit > 1000) {
+      throw ArgumentError('Invalid audit archive range.');
+    }
+    final rows = database.select('''
+      SELECT c.sequence_number, c.previous_hash, c.entry_hash,
+             a.actor_id, a.scope_id, a.decision, a.denial_code,
+             a.occurred_at, a.resource, a.page_size,
+             a.continuation_requested, a.query_fingerprint
+      FROM alhambra_plugin_revocation_access_audit_chain c
+      JOIN alhambra_plugin_revocation_access_audit a ON a.audit_id = c.audit_id
+      WHERE c.scope_id = ? AND c.sequence_number >= ?
+      ORDER BY c.sequence_number ASC
+      LIMIT ?
+    ''', [scopeId, fromSequence, limit]);
+    return rows.map((row) => PluginRevocationAccessAuditArchiveEntry(
+      sequence: row['sequence_number']! as int,
+      previousHash: row['previous_hash']! as String,
+      entryHash: row['entry_hash']! as String,
+      audit: _auditFromRow(row),
+    )).toList(growable: false);
+  }
+
+  @override
+  Future<bool> containsVerifiedHead({
+    required String scopeId,
+    required int sequence,
+    required String headHash,
+  }) async {
+    final rows = database.select(
+      'SELECT entry_hash FROM alhambra_plugin_revocation_access_audit_chain '
+      'WHERE scope_id = ? AND sequence_number = ?',
+      [scopeId, sequence],
+    );
+    return rows.isNotEmpty && rows.first['entry_hash'] == headHash;
   }
 
   PluginRevocationOperationsAccessAudit _auditFromRow(Map<String, Object?> row) {
