@@ -1,0 +1,200 @@
+import 'dart:io';
+
+import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
+import 'package:alhambra_plugin_host/alhambra_plugin_host.dart';
+import 'package:alhambra_plugin_runtime/alhambra_plugin_runtime.dart';
+import 'package:test/test.dart';
+
+final class _Plugin implements AlhambraPlugin {
+  _Plugin(this.id, this.events, {this.failStop = false});
+
+  final String id;
+  final List<String> events;
+  final bool failStop;
+
+  @override
+  PluginMetadata get metadata => PluginMetadata(
+        id: id,
+        name: id,
+        version: '1.0.0',
+      );
+
+  @override
+  Future<void> activate(PluginContext context) async {
+    events.add('start:$id');
+  }
+
+  @override
+  Future<void> deactivate(PluginContext context) async {
+    events.add('stop:$id');
+    if (failStop) throw StateError('stop failed: $id');
+  }
+}
+
+DiscoveredPlugin _discovered(String id, {List<String> dependencies = const []}) {
+  return DiscoveredPlugin(
+    manifest: ExtensionManifest(
+      id: id,
+      name: id,
+      version: '1.0.0',
+      dependencies: dependencies,
+    ),
+    directory: Directory('/plugins/$id'),
+  );
+}
+
+PluginHostLifecycle _host({
+  required List<String> events,
+  required List<PluginHostResource> resources,
+  bool failActivation = false,
+  bool failStop = false,
+  List<DiscoveredPlugin>? discovered,
+}) {
+  final manager = PluginManager();
+  final plugin = _Plugin('app.plugin', events, failStop: failStop);
+  final startup = PluginStartupCoordinator(manager: manager);
+  final shutdown = PluginShutdownCoordinator(manager: manager);
+  final plugins = discovered ?? [_discovered('app.plugin')];
+  return PluginHostLifecycle(
+    startupCoordinator: startup,
+    shutdownCoordinator: shutdown,
+    discoveredPlugins: plugins,
+    compiledPlugins: {
+      'app.plugin': _Plugin('app.plugin', events),
+    }..removeWhere((key, value) => false),
+    resources: resources,
+  );
+}
+
+void main() {
+  group('PluginHostLifecycle', () {
+    test('starts plugins and disposes resources after reverse-order shutdown',
+        () async {
+      final events = <String>[];
+      final manager = PluginManager();
+      final plugin = _Plugin('app.plugin', events);
+      final host = PluginHostLifecycle(
+        startupCoordinator: PluginStartupCoordinator(manager: manager),
+        shutdownCoordinator: PluginShutdownCoordinator(manager: manager),
+        discoveredPlugins: [_discovered('app.plugin')],
+        compiledPlugins: {'app.plugin': plugin},
+        resources: [
+          PluginHostResource(id: 'database', dispose: () async {
+            events.add('close:database');
+          }),
+          PluginHostResource(id: 'http', dispose: () async {
+            events.add('close:http');
+          }),
+        ],
+      );
+
+      final started = await host.start();
+      expect(started.succeeded, isTrue);
+      expect(host.state, PluginHostState.running);
+
+      final stopped = await host.shutdown();
+      expect(stopped.succeeded, isTrue);
+      expect(stopped.resourcesDisposed, isTrue);
+      expect(host.state, PluginHostState.stopped);
+      expect(events, [
+        'start:app.plugin',
+        'stop:app.plugin',
+        'close:http',
+        'close:database',
+      ]);
+      expect((await host.shutdown()).succeeded, isTrue);
+    });
+
+    test('closes resources after plugin shutdown hook failure', () async {
+      final events = <String>[];
+      final manager = PluginManager();
+      final plugin = _Plugin('app.plugin', events, failStop: true);
+      final host = PluginHostLifecycle(
+        startupCoordinator: PluginStartupCoordinator(manager: manager),
+        shutdownCoordinator: PluginShutdownCoordinator(manager: manager),
+        discoveredPlugins: [_discovered('app.plugin')],
+        compiledPlugins: {'app.plugin': plugin},
+        resources: [
+          PluginHostResource(id: 'store', dispose: () async {
+            events.add('close:store');
+          }),
+        ],
+      );
+
+      expect((await host.start()).succeeded, isTrue);
+      final report = await host.shutdown();
+
+      expect(report.succeeded, isFalse);
+      expect(report.pluginReport!.failures.single.pluginId, 'app.plugin');
+      expect(report.resourcesDisposed, isTrue);
+      expect(events, ['start:app.plugin', 'stop:app.plugin', 'close:store']);
+    });
+
+    test('disposes resources in reverse order after startup failure', () async {
+      final events = <String>[];
+      final manager = PluginManager();
+      final host = PluginHostLifecycle(
+        startupCoordinator: PluginStartupCoordinator(manager: manager),
+        shutdownCoordinator: PluginShutdownCoordinator(manager: manager),
+        discoveredPlugins: [_discovered('missing')],
+        compiledPlugins: {},
+        resources: [
+          PluginHostResource(id: 'first', dispose: () async {
+            events.add('close:first');
+          }),
+          PluginHostResource(id: 'second', dispose: () async {
+            events.add('close:second');
+          }),
+        ],
+      );
+
+      final report = await host.start();
+      expect(report.succeeded, isFalse);
+      expect(host.state, PluginHostState.failed);
+      expect(events, ['close:second', 'close:first']);
+    });
+
+    test('continues resource disposal when one resource fails', () async {
+      final events = <String>[];
+      final manager = PluginManager();
+      final host = PluginHostLifecycle(
+        startupCoordinator: PluginStartupCoordinator(manager: manager),
+        shutdownCoordinator: PluginShutdownCoordinator(manager: manager),
+        discoveredPlugins: [],
+        compiledPlugins: {},
+        resources: [
+          PluginHostResource(id: 'first', dispose: () async {
+            events.add('close:first');
+            throw StateError('close failed');
+          }),
+          PluginHostResource(id: 'second', dispose: () async {
+            events.add('close:second');
+          }),
+        ],
+      );
+
+      final report = await host.shutdown();
+      expect(report.succeeded, isFalse);
+      expect(report.resourcesDisposed, isTrue);
+      expect(report.resourceFailures.single.resourceId, 'first');
+      expect(events, ['close:second', 'close:first']);
+    });
+
+    test('rejects duplicate resource IDs', () {
+      final manager = PluginManager();
+      expect(
+        () => PluginHostLifecycle(
+          startupCoordinator: PluginStartupCoordinator(manager: manager),
+          shutdownCoordinator: PluginShutdownCoordinator(manager: manager),
+          discoveredPlugins: [],
+          compiledPlugins: {},
+          resources: [
+            PluginHostResource(id: 'duplicate', dispose: () async {}),
+            PluginHostResource(id: 'duplicate', dispose: () async {}),
+          ],
+        ),
+        throwsArgumentError,
+      );
+    });
+  });
+}
