@@ -158,9 +158,10 @@ The host passes the complete preview to its configured
 `PluginInstallAuditArchiveStore.archiveAndVerify`. That adapter must durably
 persist the complete batch and verify the archived representation before
 issuing a receipt containing the archive identity, digest, cutoff, count and
-exact event IDs. The host then passes that receipt back to
-`pruneArchivedAudit`. SQLite verifies the receipt through the configured
-archive adapter and, in one transaction, rechecks that every referenced event
+exact event IDs. The host then passes both the original batch and receipt to
+`pruneArchivedAudit`. SQLite checks that the receipt matches the batch ID,
+cutoff, record count and exact event-ID set, verifies the receipt through the
+configured archive adapter and, in one transaction, rechecks that every referenced event
 still exists, is older than the cutoff and belongs to a terminal operation.
 Only then are the archive manifest and event IDs recorded and local event rows
 deleted. Manual-reconciliation evidence associated with those events is deleted
