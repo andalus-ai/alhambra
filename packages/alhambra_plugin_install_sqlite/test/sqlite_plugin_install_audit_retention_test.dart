@@ -34,6 +34,37 @@ final class _TestArchiveStore implements PluginInstallAuditArchiveStore {
 
 void main() {
   group('SQLite plugin installation audit retention', () {
+    test('retention policy is opt-in and validates duration and batch size',
+        () {
+      final disabled = PluginInstallAuditRetentionPolicy(
+        retentionPeriod: const Duration(days: 90),
+      );
+      expect(disabled.cutoffAt(DateTime.utc(2026, 11, 28)), isNull);
+
+      final enabled = PluginInstallAuditRetentionPolicy(
+        retentionPeriod: const Duration(days: 90),
+        batchSize: 250,
+        enabled: true,
+      );
+      expect(
+        enabled.cutoffAt(DateTime.utc(2026, 11, 28)),
+        DateTime.utc(2026, 8, 30),
+      );
+      expect(
+        () => PluginInstallAuditRetentionPolicy(
+          retentionPeriod: Duration.zero,
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => PluginInstallAuditRetentionPolicy(
+          retentionPeriod: const Duration(days: 30),
+          batchSize: 501,
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test('archives and prunes only verified events from terminal operations',
         () async {
       final journal = SqlitePluginInstallJournal.memory();
