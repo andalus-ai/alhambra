@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:alhambra_plugin_api/alhambra_plugin_api.dart';
 import 'package:alhambra_plugin_install_sqlite/alhambra_plugin_install_sqlite.dart';
 import 'package:test/test.dart';
@@ -193,6 +195,46 @@ void main() {
       );
       expect(await journal.queryAudit(const PluginInstallAuditQuery()),
           hasLength(1));
+    });
+
+    test('persists archive manifest and replay protection across restart',
+        () async {
+      final directory =
+          await Directory.systemTemp.createTemp('alhambra-audit-retention-');
+      final path = '${directory.path}/install.sqlite';
+      var journal = SqlitePluginInstallJournal(path);
+      addTearDown(() async {
+        journal.close();
+        await directory.delete(recursive: true);
+      });
+      final archive = _TestArchiveStore();
+      final eventAt = DateTime.utc(2026, 10, 1);
+      await journal.write(PluginInstallJournalEntry(
+        operationId: 'durable-archive-op',
+        pluginId: 'example.durable',
+        version: '1.0.0',
+        status: PluginInstallJournalStatus.committed,
+        updatedAt: eventAt,
+      ));
+      final cutoff = DateTime.utc(2026, 11, 1);
+      final candidates = await journal.previewPrunableAudit(before: cutoff);
+      final receipt = await archive.archiveAndVerify(PluginInstallAuditArchiveBatch(
+        batchId: 'durable-batch',
+        createdAt: DateTime.utc(2026, 11, 28),
+        cutoff: cutoff,
+        records: candidates,
+      ));
+      await journal.pruneArchivedAudit(receipt: receipt, archiveStore: archive);
+      journal.close();
+
+      journal = SqlitePluginInstallJournal(path);
+      expect(await journal.queryAudit(const PluginInstallAuditQuery()), isEmpty);
+      await expectLater(
+        journal.pruneArchivedAudit(receipt: receipt, archiveStore: archive),
+        throwsStateError,
+      );
+      expect((await journal.read('durable-archive-op'))?.status,
+          PluginInstallJournalStatus.committed);
     });
 
     test('rejects replay of an already applied archive receipt', () async {
