@@ -65,8 +65,10 @@ drain in-flight requests before calling `shutdown()`.
   still performs its documented manager cleanup; remaining plugins are
   attempted and host resources are then disposed. The report remains failed.
 - A resource disposer that throws is reported; disposal continues. Successfully
-  disposed resources are not disposed a second time, while failed disposers can
-  be retried by calling `shutdown()` again. Plugin shutdown is not repeated.
+  disposed resources are not disposed a second time. A later explicit
+  `shutdown()` call retries only failed disposers; because a thrown disposer may
+  have partially completed, retry only when its effect has been inspected or
+  the callback is designed to be idempotent. Plugin shutdown is not repeated.
 - This package does not own discovery, plugin trust, infrastructure creation,
   process signals, request draining, readiness endpoints, timeouts, backup
   scheduling, or automatic recovery.
