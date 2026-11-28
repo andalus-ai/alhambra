@@ -636,18 +636,26 @@ final class SqlitePluginInstallJournal implements
 
   @override
   Future<int> pruneArchivedAudit({
+    required PluginInstallAuditArchiveBatch batch,
     required PluginInstallAuditArchiveReceipt receipt,
     required PluginInstallAuditArchiveStore archiveStore,
   }) async {
     _assertOpen();
-    if (receipt.archiveId.trim().isEmpty ||
-        receipt.batchId.trim().isEmpty ||
+    final batchEventIds = batch.records.map((record) => record.eventId).toSet();
+    if (batch.batchId.trim().isEmpty ||
+        batch.records.isEmpty ||
+        batchEventIds.length != batch.records.length ||
+        receipt.archiveId.trim().isEmpty ||
+        receipt.batchId != batch.batchId ||
         receipt.digest.trim().isEmpty ||
-        receipt.recordCount < 1 ||
+        receipt.recordCount != batch.records.length ||
         receipt.eventIds.isEmpty ||
         receipt.eventIds.length != receipt.recordCount ||
-        receipt.eventIds.toSet().length != receipt.eventIds.length) {
-      throw ArgumentError('Archive receipt identity, digest and event IDs must be complete and unique.');
+        receipt.eventIds.toSet().length != receipt.eventIds.length ||
+        !receipt.eventIds.toSet().containsAll(batchEventIds) ||
+        !batchEventIds.containsAll(receipt.eventIds) ||
+        _date(receipt.cutoff) != _date(batch.cutoff)) {
+      throw ArgumentError('Archive receipt must exactly match the approved batch, cutoff, count and unique event IDs.');
     }
     if (!await archiveStore.verify(receipt)) {
       throw StateError('Audit archive verification failed; no local records were pruned.');
