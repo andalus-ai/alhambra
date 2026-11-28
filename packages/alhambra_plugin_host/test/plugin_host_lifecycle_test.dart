@@ -165,9 +165,7 @@ void main() {
       final host = PluginHostLifecycle(
         startupCoordinator: PluginStartupCoordinator(manager: manager),
         shutdownCoordinator: PluginShutdownCoordinator(manager: manager),
-        discoveredPlugins: [
-          _discovered('app.plugin', dependencies: ['missing']),
-        ],
+        discoveredPlugins: [_discovered('app.plugin')],
         compiledPlugins: {'app.plugin': plugin},
         resources: [
           PluginHostResource(id: 'store', dispose: () async {
@@ -178,18 +176,22 @@ void main() {
 
       // The invalid graph is discovered during shutdown preflight. The host
       // retains the store because the plugin remains active.
-      await manager.activate(plugin);
-      final first = await host.shutdown();
+      expect((await host.start()).succeeded, isTrue);
+      final first = await host.shutdown(
+        discoveredPlugins: [
+          _discovered('app.plugin', dependencies: ['missing']),
+        ],
+      );
       expect(first.resourcesDisposed, isFalse);
       expect(host.state, PluginHostState.running);
-      expect(events, isEmpty);
+      expect(events, ['start:app.plugin']);
 
       final retry = await host.shutdown(
         discoveredPlugins: [_discovered('app.plugin')],
       );
       expect(retry.succeeded, isTrue);
       expect(retry.resourcesDisposed, isTrue);
-      expect(events, ['stop:app.plugin', 'close:store']);
+      expect(events, ['start:app.plugin', 'stop:app.plugin', 'close:store']);
     });
 
     test('rejects duplicate resource IDs', () {
