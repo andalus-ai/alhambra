@@ -183,17 +183,24 @@ final class PluginHostLifecycle {
   /// A shutdown preflight error means no plugin shutdown callback was safely
   /// attempted. Resources are retained in that case and this method can be
   /// called again after the host fixes the invalid discovery/dependency input.
-  Future<PluginHostShutdownReport> shutdown() {
+  Future<PluginHostShutdownReport> shutdown({
+    Iterable<DiscoveredPlugin>? discoveredPlugins,
+  }) {
     final completed = _shutdownReport;
     if (completed != null && completed.resourcesDisposed) {
       return Future<PluginHostShutdownReport>.value(completed);
     }
-    return _stopping ??= _shutdown().whenComplete(() {
+    final plugins = discoveredPlugins == null
+        ? this.discoveredPlugins
+        : List<DiscoveredPlugin>.unmodifiable(discoveredPlugins);
+    return _stopping ??= _shutdown(plugins: plugins).whenComplete(() {
       _stopping = null;
     });
   }
 
-  Future<PluginHostShutdownReport> _shutdown() async {
+  Future<PluginHostShutdownReport> _shutdown({
+    required List<DiscoveredPlugin> plugins,
+  }) async {
     final starting = _starting;
     if (starting != null) {
       await starting;
@@ -212,7 +219,7 @@ final class PluginHostLifecycle {
     if (shouldStopPlugins) {
       try {
         pluginReport = await shutdownCoordinator.shutdown(
-          discoveredPlugins: discoveredPlugins,
+          discoveredPlugins: plugins,
         );
       } catch (error, stackTrace) {
         // The coordinator did not return a report, so the host cannot prove
