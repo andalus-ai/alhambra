@@ -28,8 +28,17 @@ void main() {
       verifiedCheckpointDigests: packages.map((p) => p.checkpointDigest).toSet(),
     );
 
-    expect(verify([packages.first, packages.last]).valid, isTrue);
+    expect(verify([packages.first, packages.last]).reason, 'sequence_gap');
     expect(verify([packages.last, packages.first]).reason, 'overlap_or_reorder');
+    expect(
+      PluginRevocationAccessAuditArchiveSetCodec.verify(
+        PluginRevocationAccessAuditArchiveSet(
+          manifestId: 'manifest-a', scopeId: 'other-scope', packages: packages,
+        ),
+        verifiedCheckpointDigests: packages.map((p) => p.checkpointDigest).toSet(),
+      ).reason,
+      'scope_mismatch',
+    );
     expect(verify([packages.first, packages.first]).reason, 'duplicate_package');
     expect(
       PluginRevocationAccessAuditArchiveSetCodec.verify(
@@ -48,6 +57,7 @@ void main() {
     final service = PluginRevocationAccessAuditRetentionService(
       authorizer: authorizer,
       checkpointEvidenceVerifier: _CheckpointEvidence(true),
+      durabilityVerifier: _ArchiveDurability(true),
       clock: () => DateTime.utc(2026, 11, 28),
     );
     final plan = await service.plan(
@@ -65,7 +75,6 @@ void main() {
         archiveSet: PluginRevocationAccessAuditArchiveSet(
           manifestId: 'manifest-a', scopeId: 'scope-a', packages: packages,
         ),
-        immutableStorageConfirmed: true,
       ),
     );
     expect(plan.deletionAuthorized, isFalse);
@@ -81,7 +90,6 @@ void main() {
       archiveSet: PluginRevocationAccessAuditArchiveSet(
         manifestId: 'manifest-a', scopeId: 'scope-a', packages: packages,
       ),
-      immutableStorageConfirmed: true,
     );
     final service = PluginRevocationAccessAuditRetentionService(
       authorizer: _RetentionAuthorizer(false),
@@ -114,6 +122,7 @@ void main() {
     final service = PluginRevocationAccessAuditRetentionService(
       authorizer: _RetentionAuthorizer(true),
       checkpointEvidenceVerifier: _CheckpointEvidence(false),
+      durabilityVerifier: _ArchiveDurability(true),
       clock: () => DateTime.utc(2026, 11, 28),
     );
     final base = PluginRevocationAccessAuditRetentionRequest(
@@ -216,4 +225,12 @@ final class _CheckpointEvidence
   Future<bool> isTrustedCheckpoint({
     required String scopeId, required String checkpointDigest,
   }) async => trusted;
+}
+
+final class _ArchiveDurability
+    implements PluginRevocationAccessAuditArchiveDurabilityVerifier {
+  final bool durable;
+  _ArchiveDurability(this.durable);
+  @override
+  Future<bool> isDurablyRetained({required String manifestId}) async => durable;
 }
